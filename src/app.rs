@@ -13,7 +13,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
-    v_flex, ActiveTheme, Selectable, Theme, ThemeMode,
+    v_flex, ActiveTheme, Selectable, Theme, ThemeMode, TitleBar,
 };
 use smol::Timer;
 use tokio::runtime::Runtime;
@@ -1456,6 +1456,16 @@ impl Render for NavidromeApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .child(
+                TitleBar::new().child(
+                    h_flex().h_full().items_center().child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Navidrome Client"),
+                    ),
+                ),
+            )
             .child(
                 h_flex()
                     .h(px(54.0))

@@ -2,25 +2,29 @@
 
 mod api;
 mod app;
+mod assets;
 mod audio;
 mod config;
 mod models;
 mod msg;
 
 use gpui::*;
-use gpui_component::{Root, Theme, ThemeMode};
+use gpui_component::{Root, Theme, ThemeMode, TitleBar};
 
 use crate::models::ThemePreference;
 
 fn main() {
     env_logger::init();
 
-    Application::new().run(|cx| {
+    Application::new().with_assets(assets::Assets).run(|cx| {
         gpui_component::init(cx);
         let theme_preference = config::load().theme;
 
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
+            titlebar: Some(TitleBar::title_bar_options()),
+            window_decorations: Some(WindowDecorations::Client),
+            window_min_size: Some(size(px(900.0), px(600.0))),
             ..Default::default()
         };
 

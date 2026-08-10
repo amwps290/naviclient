@@ -16,6 +16,7 @@ JavaScript runtime.
   progression
 - Server settings persisted locally as JSON
 - Light theme by default, with light, dark, and system-following appearance options
+- Borderless client-drawn window with native minimize, maximize, resize, and close behavior
 - Cross-platform desktop support: Windows, macOS, and Linux
 
 ## Build and Run
