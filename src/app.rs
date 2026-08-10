@@ -734,7 +734,13 @@ impl NavidromeApp {
 
     fn handle_playback_end(&mut self) {
         let playback = self.audio.state();
-        if playback.ended && !self.state.ended_handled && self.state.now_playing.is_some() {
+        if self.state.ended_handled || self.state.now_playing.is_none() {
+            return;
+        }
+        if let Some(error) = playback.error {
+            self.state.ended_handled = true;
+            self.state.error = Some(error);
+        } else if playback.ended {
             self.state.ended_handled = true;
             self.skip(1);
         }
