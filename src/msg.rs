@@ -1,4 +1,6 @@
-use crate::models::{Album, Artist, Playlist, SearchResults, ServerInfo, Song};
+use crate::models::{
+    Album, Artist, FavoriteKey, Favorites, Playlist, SearchResults, ServerInfo, Song,
+};
 
 #[derive(Debug)]
 pub enum Msg {
@@ -14,6 +16,12 @@ pub enum Msg {
         result: Result<Vec<Song>, String>,
     },
     Playlists(Result<Vec<Playlist>, String>),
+    Favorites(Result<Favorites, String>),
+    FavoriteChanged {
+        key: FavoriteKey,
+        starred: bool,
+        result: Result<(), String>,
+    },
     PlaylistSongs {
         playlist_id: String,
         result: Result<Vec<Song>, String>,

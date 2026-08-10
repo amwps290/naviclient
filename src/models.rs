@@ -1,5 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FavoriteKind {
+    Artist,
+    Album,
+    Song,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FavoriteKey {
+    pub kind: FavoriteKind,
+    pub id: String,
+}
+
+impl FavoriteKey {
+    pub fn new(kind: FavoriteKind, id: impl Into<String>) -> Self {
+        Self {
+            kind,
+            id: id.into(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
@@ -101,6 +123,13 @@ pub struct Playlist {
 
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
+    pub artists: Vec<Artist>,
+    pub albums: Vec<Album>,
+    pub songs: Vec<Song>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Favorites {
     pub artists: Vec<Artist>,
     pub albums: Vec<Album>,
     pub songs: Vec<Song>,

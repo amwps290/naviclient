@@ -22,13 +22,15 @@ use crate::api::{format_duration, Api};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
-    Album, Artist, Config, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
+    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Playlist, SearchResults,
+    ServerInfo, Song, ThemePreference,
 };
 use crate::msg::{error_message, Msg};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum View {
     Home,
+    Favorites,
     Artists,
     Albums,
     Playlists,
@@ -49,6 +51,9 @@ struct AppState {
     current_album: Option<Album>,
     current_songs: Vec<Song>,
     playlists: Vec<Playlist>,
+    favorites: Favorites,
+    favorite_ids: HashSet<FavoriteKey>,
+    pending_favorites: HashSet<FavoriteKey>,
     current_playlist: Option<Playlist>,
     playlist_songs: Vec<Song>,
     search_results: Option<SearchResults>,
@@ -77,6 +82,9 @@ impl Default for AppState {
             current_album: None,
             current_songs: Vec::new(),
             playlists: Vec::new(),
+            favorites: Favorites::default(),
+            favorite_ids: HashSet::new(),
+            pending_favorites: HashSet::new(),
             current_playlist: None,
             playlist_songs: Vec::new(),
             search_results: None,
@@ -257,6 +265,7 @@ impl NavidromeApp {
         self.load_artists();
         self.load_albums();
         self.load_playlists();
+        self.load_favorites();
     }
 
     fn load_artists(&mut self) {
@@ -283,6 +292,14 @@ impl NavidromeApp {
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let _ = tx.send(Msg::Playlists(api.playlists().await.map_err(error_message)));
+        });
+    }
+
+    fn load_favorites(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::Favorites(api.favorites().await.map_err(error_message)));
         });
     }
 
@@ -349,6 +366,30 @@ impl NavidromeApp {
         self.spawn_future(async move {
             let result = api.search(&query, 120, 80, 60).await.map_err(error_message);
             let _ = tx.send(Msg::Search(result));
+        });
+    }
+
+    fn toggle_favorite(&mut self, key: FavoriteKey) {
+        let Some(api) = self.api.clone() else { return };
+        if !self.state.pending_favorites.insert(key.clone()) {
+            return;
+        }
+
+        let starred = !self.state.favorite_ids.contains(&key);
+        if starred {
+            self.state.favorite_ids.insert(key.clone());
+        } else {
+            self.state.favorite_ids.remove(&key);
+        }
+
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.set_favorite(&key, starred).await.map_err(error_message);
+            let _ = tx.send(Msg::FavoriteChanged {
+                key,
+                starred,
+                result,
+            });
         });
     }
 
@@ -586,6 +627,74 @@ impl NavidromeApp {
                         Err(error) => self.state.error = Some(error),
                     }
                 }
+                Msg::Favorites(result) => match result {
+                    Ok(favorites) => {
+                        let mut favorite_ids = HashSet::new();
+                        favorite_ids.extend(
+                            favorites
+                                .artists
+                                .iter()
+                                .map(|artist| FavoriteKey::new(FavoriteKind::Artist, &artist.id)),
+                        );
+                        favorite_ids.extend(
+                            favorites
+                                .albums
+                                .iter()
+                                .map(|album| FavoriteKey::new(FavoriteKind::Album, &album.id)),
+                        );
+                        favorite_ids.extend(
+                            favorites
+                                .songs
+                                .iter()
+                                .map(|song| FavoriteKey::new(FavoriteKind::Song, &song.id)),
+                        );
+                        for key in &self.state.pending_favorites {
+                            if self.state.favorite_ids.contains(key) {
+                                favorite_ids.insert(key.clone());
+                            } else {
+                                favorite_ids.remove(key);
+                            }
+                        }
+                        let covers = favorites
+                            .albums
+                            .iter()
+                            .filter_map(|album| album.cover_art.clone())
+                            .chain(
+                                favorites
+                                    .artists
+                                    .iter()
+                                    .filter_map(|artist| artist.cover_art.clone()),
+                            )
+                            .chain(
+                                favorites
+                                    .songs
+                                    .iter()
+                                    .filter_map(|song| song.cover_art.clone()),
+                            )
+                            .collect();
+                        self.state.favorites = favorites;
+                        self.state.favorite_ids = favorite_ids;
+                        self.preload_covers(covers);
+                    }
+                    Err(error) => self.state.error = Some(error),
+                },
+                Msg::FavoriteChanged {
+                    key,
+                    starred,
+                    result,
+                } => {
+                    self.state.pending_favorites.remove(&key);
+                    if let Err(error) = result {
+                        if starred {
+                            self.state.favorite_ids.remove(&key);
+                        } else {
+                            self.state.favorite_ids.insert(key);
+                        }
+                        self.state.error = Some(error);
+                    } else {
+                        self.load_favorites();
+                    }
+                }
                 Msg::PlaylistSongs {
                     playlist_id,
                     result,
@@ -649,11 +758,45 @@ impl NavidromeApp {
                     View::Artists if this.state.artists.is_empty() => this.load_artists(),
                     View::Albums if this.state.albums.is_empty() => this.load_albums(),
                     View::Playlists if this.state.playlists.is_empty() => this.load_playlists(),
+                    View::Favorites => this.load_favorites(),
                     _ => {}
                 }
                 cx.notify();
             }));
         button.ghost().selected(selected)
+    }
+
+    fn favorite_button(&self, kind: FavoriteKind, id: &str, cx: &Context<Self>) -> Button {
+        let key = FavoriteKey::new(kind, id);
+        let starred = self.state.favorite_ids.contains(&key);
+        let pending = self.state.pending_favorites.contains(&key);
+        let kind_name = match kind {
+            FavoriteKind::Artist => "artist",
+            FavoriteKind::Album => "album",
+            FavoriteKind::Song => "song",
+        };
+
+        Button::new(SharedString::from(format!("favorite-{kind_name}-{id}")))
+            .label(if starred { "♥" } else { "♡" })
+            .tooltip(if starred {
+                "Remove from favorites"
+            } else {
+                "Add to favorites"
+            })
+            .compact()
+            .ghost()
+            .opacity(if pending { 0.6 } else { 1.0 })
+            .rounded_full()
+            .bg(cx.theme().background.opacity(0.85))
+            .text_color(if starred {
+                cx.theme().red
+            } else {
+                cx.theme().muted_foreground
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_favorite(key.clone());
+                cx.notify();
+            }))
     }
 
     fn render_cover(
@@ -788,7 +931,24 @@ impl NavidromeApp {
                 v_flex()
                     .w(px(176.0))
                     .gap_2()
-                    .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
+                    .child(
+                        div()
+                            .relative()
+                            .w(px(176.0))
+                            .h(px(176.0))
+                            .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_2()
+                                    .right_2()
+                                    .child(self.favorite_button(
+                                        FavoriteKind::Album,
+                                        &album.id,
+                                        cx,
+                                    )),
+                            ),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("album-{}", album.id)))
                             .ghost()
@@ -839,7 +999,24 @@ impl NavidromeApp {
                 v_flex()
                     .w(px(152.0))
                     .gap_2()
-                    .child(self.render_cover(artist.cover_art.as_deref(), 152.0, cx))
+                    .child(
+                        div()
+                            .relative()
+                            .w(px(152.0))
+                            .h(px(152.0))
+                            .child(self.render_cover(artist.cover_art.as_deref(), 152.0, cx))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_2()
+                                    .right_2()
+                                    .child(self.favorite_button(
+                                        FavoriteKind::Artist,
+                                        &artist.id,
+                                        cx,
+                                    )),
+                            ),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("artist-{}", artist.id)))
                             .ghost()
@@ -872,8 +1049,55 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    fn render_playing_indicator(
+        &self,
+        song_id: &str,
+        current: bool,
+        animated: bool,
+        cx: &Context<Self>,
+    ) -> gpui::AnyElement {
+        if !current {
+            return div().w(px(16.0)).h(px(16.0)).flex_none().into_any_element();
+        }
+
+        let bar_heights = [7.0_f32, 13.0_f32, 9.0_f32];
+        h_flex()
+            .w(px(16.0))
+            .h(px(16.0))
+            .flex_none()
+            .items_end()
+            .justify_center()
+            .gap(px(2.0))
+            .children(bar_heights.into_iter().enumerate().map(|(index, height)| {
+                let bar = div()
+                    .w(px(3.0))
+                    .h(px(height))
+                    .rounded_full()
+                    .bg(cx.theme().primary);
+
+                if animated {
+                    let phase = index as f32 * 0.23;
+                    bar.with_animation(
+                        SharedString::from(format!("playing-{song_id}-{index}")),
+                        Animation::new(Duration::from_millis(720))
+                            .repeat()
+                            .with_easing(move |delta| {
+                                let shifted = (delta + phase) % 1.0;
+                                1.0 - (shifted * 2.0 - 1.0).abs()
+                            }),
+                        |bar, delta| bar.h(px(4.0 + delta * 10.0)),
+                    )
+                    .into_any_element()
+                } else {
+                    bar.opacity(0.7).into_any_element()
+                }
+            }))
+            .into_any_element()
+    }
+
     fn render_song_list(&self, songs: &[Song], cx: &Context<Self>) -> gpui::AnyElement {
         let queue_source = songs.to_vec();
+        let playback = self.audio.state();
         v_flex()
             .w_full()
             .border_1()
@@ -888,7 +1112,7 @@ impl NavidromeApp {
                     .bg(cx.theme().secondary)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(div().w(px(54.0)))
+                    .child(div().w(px(34.0)))
                     .child(div().w(px(48.0)).child("#"))
                     .child(div().flex_1().child("Title"))
                     .child(div().w(px(220.0)).child("Artist"))
@@ -901,22 +1125,23 @@ impl NavidromeApp {
                     .now_playing
                     .as_ref()
                     .is_some_and(|playing| playing.id == song.id);
-                h_flex()
+                let animated = current && playback.active && !playback.paused;
+                let row = h_flex()
+                    .id(SharedString::from(format!("song-row-{}", song.id)))
                     .min_h(px(44.0))
                     .px_3()
                     .gap_3()
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
-                    .child(
-                        Button::new(SharedString::from(format!("play-{}", song.id)))
-                            .label(if current { "Playing" } else { "Play" })
-                            .compact()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.play_song_list(&queue, index);
-                                cx.notify();
-                            })),
-                    )
+                    .cursor_pointer();
+                let row = if current {
+                    row.bg(cx.theme().primary.opacity(0.1))
+                } else {
+                    row
+                };
+
+                row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
                     .child(
                         div()
                             .w(px(48.0))
@@ -929,12 +1154,25 @@ impl NavidromeApp {
                             ),
                     )
                     .child(
-                        div()
+                        h_flex()
                             .flex_1()
+                            .min_w_0()
+                            .gap_2()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .truncate()
-                            .child(song.title.clone()),
+                            .text_color(if current {
+                                cx.theme().primary
+                            } else {
+                                cx.theme().foreground
+                            })
+                            .child(self.render_playing_indicator(&song.id, current, animated, cx))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(song.title.clone()),
+                            ),
                     )
                     .child(
                         div()
@@ -951,6 +1189,12 @@ impl NavidromeApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(format_duration(song.duration)),
                     )
+                    .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                        if event.standard_click() && event.click_count() == 2 {
+                            this.play_song_list(&queue, index);
+                            cx.notify();
+                        }
+                    }))
             }))
             .into_any_element()
     }
@@ -1113,6 +1357,60 @@ impl NavidromeApp {
                     ),
                 )
                 .into_any_element(),
+            View::Favorites => {
+                let favorites = &self.state.favorites;
+                let total =
+                    favorites.artists.len() + favorites.albums.len() + favorites.songs.len();
+                let mut content = v_flex()
+                    .gap_5()
+                    .child(self.page_header(
+                        "Favorites",
+                        format!("{total} starred items from your Navidrome library"),
+                        cx,
+                    ))
+                    .children(self.error_banner(cx));
+
+                if total == 0 {
+                    content = content.child(
+                        div()
+                            .py_8()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Click a heart on a song, album, or artist to add it here."),
+                    );
+                }
+                if !favorites.artists.is_empty() {
+                    content = content
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Artists"),
+                        )
+                        .child(self.render_artist_grid(&favorites.artists, cx, window));
+                }
+                if !favorites.albums.is_empty() {
+                    content = content
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Albums"),
+                        )
+                        .child(self.render_album_grid(&favorites.albums, cx, window));
+                }
+                if !favorites.songs.is_empty() {
+                    content = content
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Songs"),
+                        )
+                        .child(self.render_song_list(&favorites.songs, cx));
+                }
+
+                content.into_any_element()
+            }
             View::Artists => v_flex()
                 .gap_5()
                 .child(self.page_header(
@@ -1535,6 +1833,7 @@ impl Render for NavidromeApp {
                                     .child("LIBRARY"),
                             )
                             .child(self.nav_button(View::Home, "Home", cx))
+                            .child(self.nav_button(View::Favorites, "Favorites", cx))
                             .child(self.nav_button(View::Artists, "Artists", cx))
                             .child(self.nav_button(View::Albums, "Albums", cx))
                             .child(self.nav_button(View::Playlists, "Playlists", cx))

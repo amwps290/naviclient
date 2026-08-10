@@ -14,7 +14,9 @@ JavaScript runtime.
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, volume, seek, and queue
   progression
+- Double-click song playback with highlighted and animated now-playing rows
 - Server settings persisted locally as JSON
+- Navidrome-synced favorites for artists, albums, and songs
 - Light theme by default, with light, dark, and system-following appearance options
 - Borderless client-drawn window with native minimize, maximize, resize, and close behavior
 - Cross-platform desktop support: Windows, macOS, and Linux

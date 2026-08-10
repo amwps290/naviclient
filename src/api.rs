@@ -6,7 +6,9 @@ use rand::Rng;
 use serde_json::Value;
 use url::Url;
 
-use crate::models::{Album, Artist, Playlist, SearchResults, ServerInfo, Song};
+use crate::models::{
+    Album, Artist, FavoriteKey, FavoriteKind, Favorites, Playlist, SearchResults, ServerInfo, Song,
+};
 
 #[derive(Clone)]
 pub struct Api {
@@ -194,6 +196,23 @@ impl Api {
         Ok(playlists)
     }
 
+    pub async fn favorites(&self) -> Result<Favorites> {
+        let body = self.get_json("getStarred2", &[]).await?;
+        let starred = &body["starred2"];
+        Ok(Favorites {
+            artists: parse_array(starred, "artist")?,
+            albums: parse_array(starred, "album")?,
+            songs: parse_array(starred, "song")?,
+        })
+    }
+
+    pub async fn set_favorite(&self, key: &FavoriteKey, starred: bool) -> Result<()> {
+        let view = if starred { "star" } else { "unstar" };
+        self.get_json(view, &[(favorite_param(key.kind), &key.id)])
+            .await?;
+        Ok(())
+    }
+
     pub async fn playlist_songs(&self, playlist_id: &str) -> Result<Vec<Song>> {
         let body = self.get_json("getPlaylist", &[("id", playlist_id)]).await?;
         let mut songs = Vec::new();
@@ -240,6 +259,14 @@ impl Api {
 
     pub fn cover_url(&self, id: &str, size: u32) -> Result<String> {
         self.url_for("getCoverArt", &[("id", id), ("size", &size.to_string())])
+    }
+}
+
+fn favorite_param(kind: FavoriteKind) -> &'static str {
+    match kind {
+        FavoriteKind::Artist => "artistId",
+        FavoriteKind::Album => "albumId",
+        FavoriteKind::Song => "id",
     }
 }
 
@@ -307,5 +334,12 @@ mod tests {
     fn accepts_urls_without_scheme() {
         let api = Api::new("localhost:4533", "alice", "secret").unwrap();
         assert_eq!(api.base_url(), "http://localhost:4533");
+    }
+
+    #[test]
+    fn uses_subsonic_favorite_parameter_names() {
+        assert_eq!(favorite_param(FavoriteKind::Artist), "artistId");
+        assert_eq!(favorite_param(FavoriteKind::Album), "albumId");
+        assert_eq!(favorite_param(FavoriteKind::Song), "id");
     }
 }
