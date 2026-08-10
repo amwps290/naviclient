@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, img, px, AppContext, Context, Entity, FontWeight, Image as GpuiImage,
-    ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, img, px, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
+    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -705,7 +705,80 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_album_grid(&self, albums: &[Album], cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_scrolling_title(
+        &self,
+        text: SharedString,
+        viewport_width: f32,
+        id: SharedString,
+        window: &mut Window,
+    ) -> gpui::AnyElement {
+        let font_size = rems(0.875).to_pixels(window.rem_size());
+        let text_style = window.text_style().highlight(FontWeight::MEDIUM);
+        let text_width = window
+            .text_system()
+            .shape_line(
+                text.clone(),
+                font_size,
+                &[text_style.to_run(text.len())],
+                None,
+            )
+            .width;
+        let viewport_width = px(viewport_width);
+
+        if text_width <= viewport_width {
+            return div()
+                .w(viewport_width)
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child(text)
+                .into_any_element();
+        }
+
+        let gap = px(32.0);
+        let travel = text_width + gap;
+        let travel_px = f32::from(travel);
+        let duration_seconds = (travel_px / 28.0_f32 + 1.5_f32).max(4.0_f32);
+        let hold_fraction = (1.5_f32 / duration_seconds).clamp(0.0_f32, 0.8_f32);
+        let animation = Animation::new(Duration::from_secs_f32(duration_seconds))
+            .repeat()
+            .with_easing(move |delta| {
+                if delta <= hold_fraction {
+                    0.0
+                } else {
+                    (delta - hold_fraction) / (1.0 - hold_fraction)
+                }
+            });
+        let repeated_text = text.clone();
+
+        div()
+            .w(viewport_width)
+            .min_w_0()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(
+                h_flex()
+                    .flex_none()
+                    .gap(gap)
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(text)
+                    .child(repeated_text)
+                    .with_animation(id, animation, move |this, delta| {
+                        this.ml(px(-travel_px * delta))
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_album_grid(
+        &self,
+        albums: &[Album],
+        cx: &Context<Self>,
+        window: &mut Window,
+    ) -> gpui::AnyElement {
         h_flex()
             .items_start()
             .flex_wrap()
@@ -718,10 +791,15 @@ impl NavidromeApp {
                     .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
                     .child(
                         Button::new(SharedString::from(format!("album-{}", album.id)))
-                            .label(album.name.clone())
                             .ghost()
                             .w_full()
                             .justify_start()
+                            .child(self.render_scrolling_title(
+                                album.name.clone().into(),
+                                144.0,
+                                SharedString::from(format!("album-title-{}", album.id)),
+                                window,
+                            ))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_album(album_for_click.clone());
                                 cx.notify();
@@ -746,7 +824,12 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_artist_grid(&self, artists: &[Artist], cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_artist_grid(
+        &self,
+        artists: &[Artist],
+        cx: &Context<Self>,
+        window: &mut Window,
+    ) -> gpui::AnyElement {
         h_flex()
             .items_start()
             .flex_wrap()
@@ -759,10 +842,15 @@ impl NavidromeApp {
                     .child(self.render_cover(artist.cover_art.as_deref(), 152.0, cx))
                     .child(
                         Button::new(SharedString::from(format!("artist-{}", artist.id)))
-                            .label(artist.name.clone())
                             .ghost()
                             .w_full()
                             .justify_start()
+                            .child(self.render_scrolling_title(
+                                artist.name.clone().into(),
+                                120.0,
+                                SharedString::from(format!("artist-title-{}", artist.id)),
+                                window,
+                            ))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_artist(artist_for_click.clone());
                                 cx.notify();
@@ -985,7 +1073,7 @@ impl NavidromeApp {
         })
     }
 
-    fn render_content(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui::AnyElement {
         if self.state.settings_open {
             return self.render_settings(cx);
         }
@@ -1021,6 +1109,7 @@ impl NavidromeApp {
                             .cloned()
                             .collect::<Vec<_>>(),
                         cx,
+                        window,
                     ),
                 )
                 .into_any_element(),
@@ -1032,7 +1121,7 @@ impl NavidromeApp {
                     cx,
                 ))
                 .children(self.error_banner(cx))
-                .child(self.render_artist_grid(&self.state.artists, cx))
+                .child(self.render_artist_grid(&self.state.artists, cx, window))
                 .into_any_element(),
             View::Albums => v_flex()
                 .gap_5()
@@ -1042,7 +1131,7 @@ impl NavidromeApp {
                     cx,
                 ))
                 .children(self.error_banner(cx))
-                .child(self.render_album_grid(&self.state.albums, cx))
+                .child(self.render_album_grid(&self.state.albums, cx, window))
                 .into_any_element(),
             View::Playlists => v_flex()
                 .gap_5()
@@ -1120,7 +1209,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Artists"),
                             )
-                            .child(self.render_artist_grid(&results.artists, cx));
+                            .child(self.render_artist_grid(&results.artists, cx, window));
                     }
                     if !results.albums.is_empty() {
                         content = content
@@ -1130,7 +1219,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Albums"),
                             )
-                            .child(self.render_album_grid(&results.albums, cx));
+                            .child(self.render_album_grid(&results.albums, cx, window));
                     }
                     if !results.songs.is_empty() {
                         content = content
@@ -1157,7 +1246,7 @@ impl NavidromeApp {
                         cx,
                     ))
                     .children(self.error_banner(cx))
-                    .child(self.render_album_grid(&self.state.artist_albums, cx))
+                    .child(self.render_album_grid(&self.state.artist_albums, cx, window))
                     .into_any_element()
             }
             View::AlbumDetail => {
@@ -1448,7 +1537,7 @@ impl Render for NavidromeApp {
                             .h_full()
                             .overflow_y_scroll()
                             .p_6()
-                            .child(self.render_content(cx)),
+                            .child(self.render_content(window, cx)),
                     ),
             )
             .child(self.render_player(cx))
