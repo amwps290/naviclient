@@ -15,6 +15,7 @@ JavaScript runtime.
 - Audio playback with play/pause, stop, previous/next, volume, seek, and queue
   progression
 - Server settings persisted locally as JSON
+- Light theme by default, with light, dark, and system-following appearance options
 - Cross-platform desktop support: Windows, macOS, and Linux
 
 ## Build and Run

@@ -13,7 +13,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
-    v_flex, ActiveTheme, Selectable,
+    v_flex, ActiveTheme, Selectable, Theme, ThemeMode,
 };
 use smol::Timer;
 use tokio::runtime::Runtime;
@@ -21,7 +21,9 @@ use tokio::runtime::Runtime;
 use crate::api::{format_duration, Api};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
-use crate::models::{Album, Artist, Config, Playlist, SearchResults, ServerInfo, Song};
+use crate::models::{
+    Album, Artist, Config, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
+};
 use crate::msg::{error_message, Msg};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,6 +204,13 @@ impl NavidromeApp {
                 cx.notify();
             },
         ));
+        app._subscriptions
+            .push(cx.observe_window_appearance(window, |this, window, cx| {
+                if this.config.theme == ThemePreference::System {
+                    Theme::sync_system_appearance(Some(window), cx);
+                    cx.notify();
+                }
+            }));
 
         if app.api.is_some() {
             app.refresh_library();
@@ -435,6 +444,7 @@ impl NavidromeApp {
             server_url: self.server_input.read(cx).value().trim().to_string(),
             username: self.username_input.read(cx).value().trim().to_string(),
             password: self.password_input.read(cx).value().to_string(),
+            theme: self.config.theme,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -461,6 +471,24 @@ impl NavidromeApp {
                 self.state.settings_open = true;
             }
         }
+    }
+
+    fn set_theme(
+        &mut self,
+        preference: ThemePreference,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.config.theme = preference;
+        match preference {
+            ThemePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+            ThemePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+            ThemePreference::System => Theme::sync_system_appearance(Some(window), cx),
+        }
+        if let Err(error) = config::save(&self.config) {
+            self.state.status = format!("Theme save failed: {error:#}");
+        }
+        cx.notify();
     }
 
     fn poll_messages(&mut self) {
@@ -848,6 +876,45 @@ impl NavidromeApp {
                 "Connect this client to a Navidrome or Subsonic-compatible server.",
                 cx,
             ))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Appearance"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Choose a light or dark theme, or follow the system setting."),
+                    )
+                    .child(
+                        h_flex().gap_2().children(
+                            [
+                                ThemePreference::Light,
+                                ThemePreference::Dark,
+                                ThemePreference::System,
+                            ]
+                            .into_iter()
+                            .map(|preference| {
+                                Button::new(SharedString::from(format!(
+                                    "theme-{}",
+                                    preference.label().to_lowercase()
+                                )))
+                                .label(preference.label())
+                                .selected(self.config.theme == preference)
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.set_theme(preference, window, cx);
+                                    },
+                                ))
+                            }),
+                        ),
+                    ),
+            )
             .child(
                 v_flex()
                     .gap_2()

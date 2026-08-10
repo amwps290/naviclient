@@ -1,5 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    #[default]
+    Light,
+    Dark,
+    System,
+}
+
+impl ThemePreference {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+            Self::System => "System",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Artist {
@@ -98,6 +117,8 @@ pub struct Config {
     pub server_url: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub theme: ThemePreference,
 }
 
 impl Default for Config {
@@ -106,6 +127,34 @@ impl Default for Config {
             server_url: "http://127.0.0.1:4533".to_string(),
             username: String::new(),
             password: String::new(),
+            theme: ThemePreference::Light,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Config, ThemePreference};
+
+    #[test]
+    fn legacy_config_defaults_to_light_theme() {
+        let config: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config should still deserialize");
+
+        assert_eq!(config.theme, ThemePreference::Light);
+    }
+
+    #[test]
+    fn theme_preference_uses_stable_config_names() {
+        let config = Config {
+            theme: ThemePreference::System,
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+
+        assert!(json.contains(r#""theme":"system""#));
     }
 }
