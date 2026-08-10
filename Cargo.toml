@@ -21,7 +21,6 @@ rodio = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 smol = "2"
-tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 url = "2"
 

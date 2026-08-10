@@ -388,7 +388,13 @@ impl NavidromeApp {
             return;
         };
         match api.stream_url(&song.id) {
-            Ok(url) => self.audio.play(url),
+            Ok(url) => {
+                let duration = song
+                    .duration
+                    .and_then(|seconds| u64::try_from(seconds).ok())
+                    .map(Duration::from_secs);
+                self.audio.play(url, duration);
+            }
             Err(error) => self.state.error = Some(format!("{error:#}")),
         }
     }

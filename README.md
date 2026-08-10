@@ -49,6 +49,7 @@ Config is stored in the platform config directory, e.g.:
 - `src/config.rs` - persisted server settings
 - `src/msg.rs` - background task results delivered to the UI
 
-Playback currently downloads the selected track to a temporary file and decodes
-it with `rodio`. This keeps the UI responsive and supports MP3, FLAC, AAC,
-Vorbis, and other formats supported by `rodio`'s bundled decoders.
+Playback streams audio directly from Navidrome through a buffered HTTP reader.
+Servers with byte-range support can start large FLAC files without a full
+download and can seek by requesting only the required part of the track. MP3,
+FLAC, AAC, Vorbis, and other formats supported by `rodio` remain available.

@@ -3861,7 +3861,6 @@ dependencies = [
  "serde",
  "serde_json",
  "smol",
- "tempfile",
  "tokio",
  "url",
 ]
