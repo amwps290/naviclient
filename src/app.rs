@@ -13,12 +13,13 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
-    v_flex, ActiveTheme, Selectable, Theme, ThemeMode, TitleBar,
+    v_flex, ActiveTheme, Selectable, Sizable, Theme, ThemeMode, TitleBar,
 };
 use smol::Timer;
 use tokio::runtime::Runtime;
 
 use crate::api::{format_duration, Api};
+use crate::assets::PlayerIcon;
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
@@ -1677,37 +1678,62 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(Button::new("previous").label("Prev").compact().on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.skip(-1);
-                                    cx.notify();
-                                }),
-                            ))
+                            .child(
+                                Button::new("previous")
+                                    .icon(PlayerIcon::Previous)
+                                    .tooltip("Previous track")
+                                    .ghost()
+                                    .small()
+                                    .rounded_full()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.skip(-1);
+                                        cx.notify();
+                                    })),
+                            )
                             .child(
                                 Button::new("play-pause")
-                                    .label(if playback.active && !playback.paused {
+                                    .icon(if playback.active && !playback.paused {
+                                        PlayerIcon::Pause
+                                    } else {
+                                        PlayerIcon::Play
+                                    })
+                                    .tooltip(if playback.active && !playback.paused {
                                         "Pause"
                                     } else {
                                         "Play"
                                     })
                                     .primary()
+                                    .large()
+                                    .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_playback();
                                         cx.notify();
                                     })),
                             )
-                            .child(Button::new("next").label("Next").compact().on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.skip(1);
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(Button::new("stop").label("Stop").compact().on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.stop_playback();
-                                    cx.notify();
-                                }),
-                            )),
+                            .child(
+                                Button::new("next")
+                                    .icon(PlayerIcon::Next)
+                                    .tooltip("Next track")
+                                    .ghost()
+                                    .small()
+                                    .rounded_full()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.skip(1);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("stop")
+                                    .icon(PlayerIcon::Stop)
+                                    .tooltip("Stop")
+                                    .ghost()
+                                    .small()
+                                    .rounded_full()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.stop_playback();
+                                        cx.notify();
+                                    })),
+                            ),
                     )
                     .child(
                         h_flex()
