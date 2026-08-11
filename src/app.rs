@@ -1070,9 +1070,10 @@ impl NavidromeApp {
         let label_size = size * 0.42;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - 10.0;
-        let tonearm_size = size * 0.64;
-        let tonearm_left = size * 1.06 - tonearm_size * 0.5;
-        let tonearm_top = size * 0.08 - tonearm_size * 0.5;
+        let tonearm_size = size * 0.72;
+        let tonearm_left = size * 0.94 - tonearm_size * 0.5;
+        let tonearm_top = size * -0.02 - tonearm_size * 0.5;
+        let tonearm_engaged_turns = 28.0 / 360.0;
         let highlight = Icon::new(AppIcon::VinylHighlight)
             .absolute()
             .top_0()
@@ -1149,21 +1150,21 @@ impl NavidromeApp {
             .child(
                 Icon::new(AppIcon::Tonearm)
                     .absolute()
-                    .left(px(tonearm_left - 5.0))
-                    .top(px(tonearm_top - 5.0))
-                    .with_size(px(tonearm_size + 10.0))
-                    .text_color(hsla(0.12, 0.68, 0.7, 1.0))
+                    .left(px(tonearm_left - 4.0))
+                    .top(px(tonearm_top - 4.0))
+                    .with_size(px(tonearm_size + 8.0))
+                    .text_color(hsla(0.12, 0.64, 0.58, 1.0))
                     .with_animation(
                         SharedString::from(format!(
                             "tonearm-outline-{}-{tonearm_engaged}",
                             cover_id.unwrap_or("default")
                         )),
-                        Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
+                        Animation::new(Duration::from_millis(500)).with_easing(ease_out_quint()),
                         move |icon, delta| {
                             let rotation = if tonearm_engaged {
-                                delta / 15.0
+                                delta * tonearm_engaged_turns
                             } else {
-                                (1.0 - delta) / 15.0
+                                (1.0 - delta) * tonearm_engaged_turns
                             };
                             icon.transform(Transformation::rotate(percentage(rotation)))
                         },
@@ -1175,18 +1176,18 @@ impl NavidromeApp {
                     .left(px(tonearm_left))
                     .top(px(tonearm_top))
                     .with_size(px(tonearm_size))
-                    .text_color(hsla(0.1, 0.2, 0.22, 1.0))
+                    .text_color(hsla(0.1, 0.08, 0.88, 1.0))
                     .with_animation(
                         SharedString::from(format!(
                             "tonearm-body-{}-{tonearm_engaged}",
                             cover_id.unwrap_or("default")
                         )),
-                        Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
+                        Animation::new(Duration::from_millis(500)).with_easing(ease_out_quint()),
                         move |icon, delta| {
                             let rotation = if tonearm_engaged {
-                                delta / 15.0
+                                delta * tonearm_engaged_turns
                             } else {
-                                (1.0 - delta) / 15.0
+                                (1.0 - delta) * tonearm_engaged_turns
                             };
                             icon.transform(Transformation::rotate(percentage(rotation)))
                         },
