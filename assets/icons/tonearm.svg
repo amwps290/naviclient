@@ -1,14 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="83" cy="83" r="23" fill="#17130d" opacity="0.36"/>
-  <circle cx="80" cy="80" r="20" fill="#d5b66f" stroke="#62491f" stroke-width="5"/>
-  <circle cx="80" cy="80" r="13" fill="#9b7635" stroke="#f0d690" stroke-width="2"/>
-  <circle cx="80" cy="80" r="6" fill="#4c391b"/>
-  <path d="M80 98V143" stroke="#30230f" stroke-width="12"/>
-  <path d="M80 98V143" stroke="#cfa654" stroke-width="8"/>
-  <path d="M78 99V141" stroke="#f1d58b" stroke-width="2" opacity="0.9"/>
-  <path d="M80 141V150" stroke="#342611" stroke-width="11"/>
-  <path d="M80 141V150" stroke="#d8b66c" stroke-width="7"/>
-  <path d="M72 149H88" stroke="#30230f" stroke-width="12"/>
-  <path d="M72 149H88" stroke="#d2aa58" stroke-width="8"/>
-  <path d="M74 153L70 158" stroke="#f3dc9c" stroke-width="3"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="100" cy="100" r="20" fill="currentColor" stroke="none"/>
+  <path d="M100 118V167" stroke-width="11"/>
+  <path d="M100 167L116 185" stroke-width="13"/>
+  <path d="M111 184L122 194" stroke-width="15"/>
+  <path d="M122 194L126 198" stroke-width="4"/>
 </svg>

@@ -1,6 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::TAU;
-use std::io::Cursor;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,8 +100,6 @@ struct AppState {
     lyrics_error: Option<String>,
     covers: HashMap<String, Arc<GpuiImage>>,
     cover_palettes: HashMap<String, (Hsla, Hsla)>,
-    cover_rotation_frames: HashMap<String, Vec<Arc<GpuiImage>>>,
-    requested_cover_frames: HashSet<String>,
     requested_covers: HashSet<String>,
     status: String,
     error: Option<String>,
@@ -141,8 +137,6 @@ impl Default for AppState {
             lyrics_error: None,
             covers: HashMap::new(),
             cover_palettes: HashMap::new(),
-            cover_rotation_frames: HashMap::new(),
-            requested_cover_frames: HashSet::new(),
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
             error: None,
@@ -459,27 +453,6 @@ impl NavidromeApp {
         });
     }
 
-    fn ensure_cover_rotation_frames(&mut self, cover_id: Option<&str>) {
-        let Some(id) = cover_id else { return };
-        if self.state.cover_rotation_frames.contains_key(id)
-            || self.state.requested_cover_frames.contains(id)
-        {
-            return;
-        }
-        let Some(image) = self.state.covers.get(id) else {
-            return;
-        };
-
-        let bytes = image.bytes.clone();
-        let id = id.to_string();
-        self.state.requested_cover_frames.insert(id.clone());
-        let tx = self.tx.clone();
-        self.spawn_future(async move {
-            let result = build_cover_rotation_frames(&bytes);
-            let _ = tx.send(Msg::CoverRotationFrames { id, result });
-        });
-    }
-
     fn preload_covers(&mut self, ids: Vec<String>) {
         for id in ids {
             self.ensure_cover(Some(&id));
@@ -524,12 +497,8 @@ impl NavidromeApp {
         };
         self.state.queue_index = Some(index);
         self.state.now_playing = Some(song.clone());
-        self.state
-            .cover_rotation_frames
-            .retain(|cover_id, _| song.cover_art.as_deref() == Some(cover_id.as_str()));
         self.state.ended_handled = false;
         self.ensure_cover(song.cover_art.as_deref());
-        self.ensure_cover_rotation_frames(song.cover_art.as_deref());
         self.load_lyrics(&song);
         let Some(api) = self.api.clone() else {
             self.state.error = Some("Configure a server before playing".to_string());
@@ -887,42 +856,10 @@ impl NavidromeApp {
                         }
                         if let Ok(format) = image::guess_format(&bytes) {
                             if let Some(format) = gpui_image_format(format) {
-                                self.state.covers.insert(
-                                    id.clone(),
-                                    Arc::new(GpuiImage::from_bytes(format, bytes)),
-                                );
-                                let is_current_cover = self
-                                    .state
-                                    .now_playing
-                                    .as_ref()
-                                    .and_then(|song| song.cover_art.as_deref())
-                                    == Some(id.as_str());
-                                if is_current_cover {
-                                    self.ensure_cover_rotation_frames(Some(&id));
-                                }
+                                self.state
+                                    .covers
+                                    .insert(id, Arc::new(GpuiImage::from_bytes(format, bytes)));
                             }
-                        }
-                    }
-                }
-                Msg::CoverRotationFrames { id, result } => {
-                    self.state.requested_cover_frames.remove(&id);
-                    let is_current_cover = self
-                        .state
-                        .now_playing
-                        .as_ref()
-                        .and_then(|song| song.cover_art.as_deref())
-                        == Some(id.as_str());
-                    if is_current_cover {
-                        if let Ok(frames) = result {
-                            self.state.cover_rotation_frames.insert(
-                                id,
-                                frames
-                                    .into_iter()
-                                    .map(|bytes| {
-                                        Arc::new(GpuiImage::from_bytes(GpuiImageFormat::Png, bytes))
-                                    })
-                                    .collect(),
-                            );
                         }
                     }
                 }
@@ -1127,19 +1064,13 @@ impl NavidromeApp {
         _cx: &Context<Self>,
     ) -> gpui::AnyElement {
         let cover = cover_id
-            .and_then(|id| self.state.cover_rotation_frames.get(id))
-            .filter(|frames| !frames.is_empty())
-            .map(|frames| {
-                let index =
-                    ((rotation_phase * frames.len() as f32).floor() as usize) % frames.len();
-                frames[index].clone()
-            })
-            .or_else(|| cover_id.and_then(|id| self.state.covers.get(id)).cloned())
+            .and_then(|id| self.state.covers.get(id))
+            .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         let label_size = size * 0.42;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - 10.0;
-        let tonearm_size = size * 0.5;
+        let tonearm_size = size * 0.68;
         let tonearm_left = size - tonearm_size * 0.5;
         let tonearm_top = size * 0.08 - tonearm_size * 0.5;
         let highlight = Icon::new(AppIcon::VinylHighlight)
@@ -1218,12 +1149,36 @@ impl NavidromeApp {
             .child(
                 Icon::new(AppIcon::Tonearm)
                     .absolute()
+                    .left(px(tonearm_left - 5.0))
+                    .top(px(tonearm_top - 5.0))
+                    .with_size(px(tonearm_size + 10.0))
+                    .text_color(hsla(0.12, 0.68, 0.7, 1.0))
+                    .with_animation(
+                        SharedString::from(format!(
+                            "tonearm-outline-{}-{tonearm_engaged}",
+                            cover_id.unwrap_or("default")
+                        )),
+                        Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
+                        move |icon, delta| {
+                            let rotation = if tonearm_engaged {
+                                delta * 0.125
+                            } else {
+                                (1.0 - delta) * 0.125
+                            };
+                            icon.transform(Transformation::rotate(percentage(rotation)))
+                        },
+                    ),
+            )
+            .child(
+                Icon::new(AppIcon::Tonearm)
+                    .absolute()
                     .left(px(tonearm_left))
                     .top(px(tonearm_top))
                     .with_size(px(tonearm_size))
+                    .text_color(hsla(0.1, 0.2, 0.22, 1.0))
                     .with_animation(
                         SharedString::from(format!(
-                            "tonearm-{}-{tonearm_engaged}",
+                            "tonearm-body-{}-{tonearm_engaged}",
                             cover_id.unwrap_or("default")
                         )),
                         Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
@@ -2958,80 +2913,6 @@ impl Render for NavidromeApp {
     }
 }
 
-fn rotate_rgba(source: &image::RgbaImage, angle: f32) -> image::RgbaImage {
-    let (width, height) = source.dimensions();
-    let mut output = image::RgbaImage::new(width, height);
-    let center_x = (width.saturating_sub(1)) as f32 * 0.5;
-    let center_y = (height.saturating_sub(1)) as f32 * 0.5;
-    let (sin, cos) = angle.sin_cos();
-
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - center_x;
-            let dy = y as f32 - center_y;
-            let source_x = cos * dx + sin * dy + center_x;
-            let source_y = -sin * dx + cos * dy + center_y;
-            if source_x < 0.0
-                || source_y < 0.0
-                || source_x > (width - 1) as f32
-                || source_y > (height - 1) as f32
-            {
-                continue;
-            }
-
-            let x0 = source_x.floor() as u32;
-            let y0 = source_y.floor() as u32;
-            let x1 = (x0 + 1).min(width - 1);
-            let y1 = (y0 + 1).min(height - 1);
-            let tx = source_x - x0 as f32;
-            let ty = source_y - y0 as f32;
-            let p00 = source.get_pixel(x0, y0).0;
-            let p10 = source.get_pixel(x1, y0).0;
-            let p01 = source.get_pixel(x0, y1).0;
-            let p11 = source.get_pixel(x1, y1).0;
-            let mut pixel = [0_u8; 4];
-            for channel in 0..4 {
-                let top = p00[channel] as f32 * (1.0 - tx) + p10[channel] as f32 * tx;
-                let bottom = p01[channel] as f32 * (1.0 - tx) + p11[channel] as f32 * tx;
-                pixel[channel] = (top * (1.0 - ty) + bottom * ty).round() as u8;
-            }
-            output.put_pixel(x, y, image::Rgba(pixel));
-        }
-    }
-    output
-}
-
-fn build_cover_rotation_frames(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    const FRAME_COUNT: usize = 180;
-    const FRAME_SIZE: u32 = 180;
-
-    let decoded = image::load_from_memory(bytes).map_err(error_message)?;
-    let side = decoded.width().min(decoded.height());
-    let square = decoded.crop_imm(
-        (decoded.width() - side) / 2,
-        (decoded.height() - side) / 2,
-        side,
-        side,
-    );
-    let source = square
-        .resize_exact(
-            FRAME_SIZE,
-            FRAME_SIZE,
-            image::imageops::FilterType::Lanczos3,
-        )
-        .to_rgba8();
-    let mut frames = Vec::with_capacity(FRAME_COUNT);
-    for index in 0..FRAME_COUNT {
-        let rotated = rotate_rgba(&source, index as f32 / FRAME_COUNT as f32 * TAU);
-        let mut output = Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(rotated)
-            .write_to(&mut output, image::ImageFormat::Png)
-            .map_err(error_message)?;
-        frames.push(output.into_inner());
-    }
-    Ok(frames)
-}
-
 fn relative_luminance(color: Hsla) -> f32 {
     fn linearize(channel: f32) -> f32 {
         if channel <= 0.04045 {
@@ -3189,28 +3070,9 @@ mod tests {
     use gpui::hsla;
 
     use super::{
-        accent_foreground, build_cover_rotation_frames, contrast_ratio, extract_cover_palette,
-        readable_accent, rotate_rgba, vinyl_rotation_phase,
+        accent_foreground, contrast_ratio, extract_cover_palette, readable_accent,
+        vinyl_rotation_phase,
     };
-
-    #[test]
-    fn builds_a_complete_cover_rotation_cycle() {
-        let frames = build_cover_rotation_frames(include_bytes!("../assets/default-cover.png"))
-            .expect("rotation frames should build");
-        assert_eq!(frames.len(), 180);
-        assert!(frames
-            .iter()
-            .all(|frame| image::guess_format(frame).ok() == Some(image::ImageFormat::Png)));
-    }
-
-    #[test]
-    fn rotates_cover_pixels_around_the_center() {
-        let mut source = image::RgbaImage::new(3, 3);
-        source.put_pixel(2, 1, image::Rgba([255, 80, 20, 255]));
-
-        let rotated = rotate_rgba(&source, std::f32::consts::FRAC_PI_2);
-        assert_eq!(rotated.get_pixel(1, 2).0, [255, 80, 20, 255]);
-    }
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {

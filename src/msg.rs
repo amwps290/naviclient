@@ -35,10 +35,6 @@ pub enum Msg {
         id: String,
         result: Result<Vec<u8>, String>,
     },
-    CoverRotationFrames {
-        id: String,
-        result: Result<Vec<Vec<u8>>, String>,
-    },
 }
 
 pub fn error_message(error: impl std::fmt::Display) -> String {
