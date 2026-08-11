@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, ease_out_quint, img, px, rems, Animation, AnimationExt, AppContext, Context, Entity,
-    FontWeight, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
-    IntoElement, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window,
+    div, ease_out_quint, img, point, px, rems, Animation, AnimationExt, AppContext, Context,
+    Entity, FontWeight, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -162,6 +162,7 @@ pub struct NavidromeApp {
     password_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
     lyrics_scroll_handle: ScrollHandle,
+    lyrics_scroll_target: Option<Pixels>,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
@@ -221,6 +222,7 @@ impl NavidromeApp {
             password_input,
             playback_slider: playback_slider.clone(),
             lyrics_scroll_handle: ScrollHandle::new(),
+            lyrics_scroll_target: None,
             active_lyric_index: None,
             _subscriptions: Vec::new(),
         };
@@ -266,7 +268,7 @@ impl NavidromeApp {
         }
 
         cx.spawn(async move |this, cx| loop {
-            Timer::after(Duration::from_millis(120)).await;
+            Timer::after(Duration::from_millis(40)).await;
             if this
                 .update(cx, |this, cx| {
                     this.poll_messages();
@@ -575,12 +577,14 @@ impl NavidromeApp {
         self.state.view = View::NowPlaying;
         self.state.lyrics_expanded = lyrics_expanded;
         self.active_lyric_index = None;
+        self.lyrics_scroll_target = None;
     }
 
     fn leave_now_playing(&mut self) {
         self.state.view = self.state.view_before_now_playing;
         self.state.lyrics_expanded = false;
         self.active_lyric_index = None;
+        self.lyrics_scroll_target = None;
     }
 
     fn save_settings(&mut self, cx: &Context<Self>) {
@@ -888,19 +892,42 @@ impl NavidromeApp {
     }
 
     fn update_active_lyric(&mut self) {
-        if self.state.view != View::NowPlaying {
+        if self.state.view != View::NowPlaying || !self.state.lyrics_expanded {
+            self.lyrics_scroll_target = None;
             return;
         }
+
         let active = self
             .state
             .lyrics
             .as_ref()
             .filter(|lyrics| lyrics.is_synced())
             .and_then(|lyrics| lyrics.active_line_index(self.audio.state().position));
+
         if active != self.active_lyric_index {
             self.active_lyric_index = active;
             if let Some(index) = active {
-                self.lyrics_scroll_handle.scroll_to_item(index + 1);
+                let item_index = index + 1;
+                if let Some(item_bounds) = self.lyrics_scroll_handle.bounds_for_item(item_index) {
+                    let viewport_bounds = self.lyrics_scroll_handle.bounds();
+                    self.lyrics_scroll_target =
+                        Some(viewport_bounds.center().y - item_bounds.center().y);
+                } else {
+                    self.lyrics_scroll_handle.scroll_to_item(item_index);
+                }
+            }
+        }
+
+        if let Some(target) = self.lyrics_scroll_target {
+            let current = self.lyrics_scroll_handle.offset();
+            let distance = f32::from(target - current.y);
+            if distance.abs() <= 0.75 {
+                self.lyrics_scroll_handle
+                    .set_offset(point(current.x, target));
+                self.lyrics_scroll_target = None;
+            } else {
+                self.lyrics_scroll_handle
+                    .set_offset(point(current.x, current.y + px(distance * 0.24)));
             }
         }
     }
@@ -1718,35 +1745,74 @@ impl NavidromeApp {
                 .id("lyrics-scroll")
                 .flex_1()
                 .min_h_0()
+                .px_6()
                 .overflow_y_scroll()
                 .track_scroll(&self.lyrics_scroll_handle)
-                .child(div().h(px(160.0)).flex_none())
-                .children(lyrics.lines.iter().enumerate().map(|(index, line)| {
+                .child(div().h(px(240.0)).flex_none())
+                .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
                     let current = synced && active_line == Some(index);
-                    let past = synced && active_line.is_some_and(|active| index < active);
-                    let text = if line.text.is_empty() {
+                    let distance = active_line
+                        .map(|active| active.abs_diff(index))
+                        .unwrap_or(usize::MAX);
+                    let text = if lyric_line.text.is_empty() {
                         " ".to_string()
                     } else {
-                        line.text.clone()
+                        lyric_line.text.clone()
                     };
+                    let start_ms = lyric_line.start_ms;
                     let line = div()
-                        .min_h(px(40.0))
-                        .py_2()
-                        .text_lg()
-                        .line_height(rems(1.7))
+                        .id(SharedString::from(format!(
+                            "lyric-line-{}-{index}",
+                            song.id
+                        )))
+                        .w_full()
+                        .max_w(px(760.0))
+                        .min_h(px(56.0))
+                        .mx_auto()
+                        .px_4()
+                        .py_3()
+                        .rounded_lg()
+                        .text_center()
+                        .line_height(rems(1.5))
+                        .when_some(start_ms, |this, start_ms| {
+                            this.cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.audio.seek(Duration::from_millis(start_ms));
+                                    cx.notify();
+                                }))
+                        })
                         .child(text);
+
                     if current {
-                        line.font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().info)
-                    } else if past {
-                        line.text_color(cx.theme().foreground.opacity(0.5))
+                        line.text_xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().foreground)
+                            .bg(cx.theme().info.opacity(0.12))
+                            .with_animation(
+                                SharedString::from(format!("active-lyric-{}-{index}", song.id)),
+                                Animation::new(Duration::from_millis(220))
+                                    .with_easing(ease_out_quint()),
+                                |this, delta| this.opacity(0.72 + delta * 0.28),
+                            )
+                            .into_any_element()
                     } else if synced {
-                        line.text_color(cx.theme().muted_foreground)
+                        let opacity = match distance {
+                            1 => 0.72,
+                            2 => 0.56,
+                            3 => 0.44,
+                            _ => 0.32,
+                        };
+                        line.text_lg()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(cx.theme().foreground.opacity(opacity))
+                            .into_any_element()
                     } else {
-                        line.text_color(cx.theme().foreground)
+                        line.text_lg()
+                            .text_color(cx.theme().foreground.opacity(0.72))
+                            .into_any_element()
                     }
                 }))
-                .child(div().h(px(220.0)).flex_none())
+                .child(div().h(px(280.0)).flex_none())
                 .into_any_element()
         } else {
             div()
@@ -1782,6 +1848,7 @@ impl NavidromeApp {
                                 .rounded_full()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.state.lyrics_expanded = false;
+                                    this.lyrics_scroll_target = None;
                                     cx.notify();
                                 })),
                         ),
@@ -1837,6 +1904,8 @@ impl NavidromeApp {
                     .child(self.render_cover(song.cover_art.as_deref(), cover_size, cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.lyrics_expanded = true;
+                        this.active_lyric_index = None;
+                        this.lyrics_scroll_target = None;
                         cx.notify();
                     })),
             )
