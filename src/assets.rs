@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 18] = [
+const ICON_FILES: [&str; 20] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -23,6 +23,8 @@ const ICON_FILES: [&str; 18] = [
     "repeat-one.svg",
     "lyrics.svg",
     "chevron-right.svg",
+    "arrow-left.svg",
+    "chevron-down.svg",
 ];
 
 pub struct Assets;
@@ -40,6 +42,8 @@ pub enum AppIcon {
     RepeatOne,
     Lyrics,
     ChevronRight,
+    ArrowLeft,
+    ChevronDown,
 }
 
 #[derive(Clone, Copy)]
@@ -64,6 +68,8 @@ impl IconNamed for AppIcon {
             Self::RepeatOne => "icons/repeat-one.svg",
             Self::Lyrics => "icons/lyrics.svg",
             Self::ChevronRight => "icons/chevron-right.svg",
+            Self::ArrowLeft => "icons/arrow-left.svg",
+            Self::ChevronDown => "icons/chevron-down.svg",
         }
         .into()
     }
@@ -110,6 +116,8 @@ impl AssetSource for Assets {
             "icons/repeat-one.svg" => Some(include_bytes!("../assets/icons/repeat-one.svg")),
             "icons/lyrics.svg" => Some(include_bytes!("../assets/icons/lyrics.svg")),
             "icons/chevron-right.svg" => Some(include_bytes!("../assets/icons/chevron-right.svg")),
+            "icons/arrow-left.svg" => Some(include_bytes!("../assets/icons/arrow-left.svg")),
+            "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
             _ => None,
         };
 

@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, img, px, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
-    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window,
+    div, ease_out_quint, img, px, rems, Animation, AnimationExt, AppContext, Context, Entity,
+    FontWeight, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
+    IntoElement, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -102,6 +102,8 @@ struct AppState {
     status: String,
     error: Option<String>,
     settings_open: bool,
+    view_before_now_playing: View,
+    lyrics_expanded: bool,
     playback_mode: PlaybackMode,
     ended_handled: bool,
 }
@@ -137,6 +139,8 @@ impl Default for AppState {
             status: "Not connected".to_string(),
             error: None,
             settings_open: false,
+            view_before_now_playing: View::Home,
+            lyrics_expanded: false,
             playback_mode: PlaybackMode::default(),
             ended_handled: false,
         }
@@ -561,6 +565,22 @@ impl NavidromeApp {
         } else if let Some(index) = self.state.queue_index {
             self.play_queue_index(index);
         }
+    }
+
+    fn open_now_playing(&mut self, lyrics_expanded: bool) {
+        if self.state.view != View::NowPlaying {
+            self.state.view_before_now_playing = self.state.view;
+        }
+        self.state.settings_open = false;
+        self.state.view = View::NowPlaying;
+        self.state.lyrics_expanded = lyrics_expanded;
+        self.active_lyric_index = None;
+    }
+
+    fn leave_now_playing(&mut self) {
+        self.state.view = self.state.view_before_now_playing;
+        self.state.lyrics_expanded = false;
+        self.active_lyric_index = None;
     }
 
     fn save_settings(&mut self, cx: &Context<Self>) {
@@ -1639,17 +1659,33 @@ impl NavidromeApp {
     fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui::AnyElement {
         let Some(song) = &self.state.now_playing else {
             return v_flex()
-                .gap_5()
-                .child(self.page_header("Now Playing", "Choose a song to start playback.", cx))
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("No track playing"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Choose a song from your library."),
+                )
                 .into_any_element();
         };
 
         let viewport_width = f32::from(window.viewport_size().width);
-        let cover_size = if viewport_width < 1_100.0 {
-            280.0
+        let viewport_height = f32::from(window.viewport_size().height);
+        let max_cover_size = if viewport_width < 1_100.0 {
+            300.0
         } else {
-            360.0
+            380.0
         };
+        let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
         let playback = self.audio.state();
         let active_line = self
             .state
@@ -1659,14 +1695,19 @@ impl NavidromeApp {
         let lyrics = self.state.lyrics.as_ref();
         let lyrics_body = if self.state.lyrics_loading {
             div()
-                .py_8()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
                 .text_color(cx.theme().muted_foreground)
                 .child("Loading lyrics...")
                 .into_any_element()
         } else if let Some(error) = &self.state.lyrics_error {
             v_flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
                 .gap_2()
-                .py_8()
                 .text_color(cx.theme().muted_foreground)
                 .child("Lyrics are unavailable for this track.")
                 .child(div().text_xs().child(error.clone()))
@@ -1679,7 +1720,7 @@ impl NavidromeApp {
                 .min_h_0()
                 .overflow_y_scroll()
                 .track_scroll(&self.lyrics_scroll_handle)
-                .child(div().h(px(144.0)).flex_none())
+                .child(div().h(px(160.0)).flex_none())
                 .children(lyrics.lines.iter().enumerate().map(|(index, line)| {
                     let current = synced && active_line == Some(index);
                     let past = synced && active_line.is_some_and(|active| index < active);
@@ -1696,82 +1737,138 @@ impl NavidromeApp {
                         .child(text);
                     if current {
                         line.font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().primary)
+                            .text_color(cx.theme().info)
                     } else if past {
-                        line.text_color(cx.theme().foreground.opacity(0.58))
+                        line.text_color(cx.theme().foreground.opacity(0.5))
                     } else if synced {
                         line.text_color(cx.theme().muted_foreground)
                     } else {
                         line.text_color(cx.theme().foreground)
                     }
                 }))
-                .child(div().h(px(180.0)).flex_none())
+                .child(div().h(px(220.0)).flex_none())
                 .into_any_element()
         } else {
             div()
-                .py_8()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
                 .text_color(cx.theme().muted_foreground)
                 .child("No lyrics are available for this track.")
                 .into_any_element()
         };
 
-        v_flex()
-            .gap_5()
-            .child(self.page_header(
-                "Now Playing",
-                format!("{} - {}", song.title, song.artist),
-                cx,
-            ))
-            .children(self.error_banner(cx))
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .gap_8()
-                    .child(
-                        v_flex()
-                            .w(px(cover_size))
-                            .flex_none()
-                            .gap_3()
-                            .child(self.render_cover(song.cover_art.as_deref(), cover_size, cx))
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(song.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(song.artist.clone()),
-                            )
-                            .when(!song.album.is_empty(), |this| {
-                                this.child(
+        let animation = Animation::new(Duration::from_millis(320)).with_easing(ease_out_quint());
+        if self.state.lyrics_expanded {
+            return v_flex()
+                .size_full()
+                .min_h_0()
+                .relative()
+                .px_8()
+                .pb_4()
+                .child(
+                    h_flex()
+                        .h(px(52.0))
+                        .flex_none()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Button::new("collapse-lyrics")
+                                .icon(AppIcon::ChevronDown)
+                                .tooltip("Collapse lyrics")
+                                .ghost()
+                                .with_size(px(32.0))
+                                .rounded_full()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.state.lyrics_expanded = false;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .max_w(px(860.0))
+                        .w_full()
+                        .mx_auto()
+                        .child(
+                            v_flex()
+                                .items_center()
+                                .gap_1()
+                                .pb_3()
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(song.title.clone()),
+                                )
+                                .child(
                                     div()
                                         .text_sm()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(song.album.clone()),
-                                )
-                            }),
+                                        .child(song.artist.clone()),
+                                ),
+                        )
+                        .child(lyrics_body),
+                )
+                .with_animation(
+                    SharedString::from(format!("lyrics-expand-{}", song.id)),
+                    animation,
+                    |this, delta| this.top((1.0 - delta) * px(48.0)).opacity(delta),
+                )
+                .into_any_element();
+        }
+
+        v_flex()
+            .size_full()
+            .relative()
+            .items_center()
+            .justify_center()
+            .gap_4()
+            .child(
+                div()
+                    .id("expand-lyrics-cover")
+                    .flex_none()
+                    .cursor_pointer()
+                    .rounded_lg()
+                    .hover(|style| style.opacity(0.92))
+                    .child(self.render_cover(song.cover_art.as_deref(), cover_size, cx))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.lyrics_expanded = true;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(song.title.clone()),
                     )
                     .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(540.0))
-                            .pl_8()
-                            .border_l_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div()
-                                    .pb_3()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Lyrics"),
-                            )
-                            .child(lyrics_body),
-                    ),
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(song.artist.clone()),
+                    )
+                    .when(!song.album.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(song.album.clone()),
+                        )
+                    }),
+            )
+            .with_animation(
+                SharedString::from(format!("cover-mode-{}", song.id)),
+                animation,
+                |this, delta| this.top((delta - 1.0) * px(32.0)).opacity(delta),
             )
             .into_any_element()
     }
@@ -2209,18 +2306,14 @@ impl NavidromeApp {
                                         .rounded_full()
                                         .selected(lyrics_open)
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.state.settings_open = false;
-                                            this.state.view = View::NowPlaying;
-                                            this.active_lyric_index = None;
+                                            this.open_now_playing(true);
                                             cx.notify();
                                         })),
                                 ),
                         ),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.state.settings_open = false;
-                    this.state.view = View::NowPlaying;
-                    this.active_lyric_index = None;
+                    this.open_now_playing(false);
                     cx.notify();
                 }))
                 .into_any_element()
@@ -2456,6 +2549,65 @@ impl Render for NavidromeApp {
                         .p_6()
                         .child(self.render_settings(cx)),
                 )
+                .into_any_element();
+        }
+
+        if self.state.view == View::NowPlaying {
+            return v_flex()
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .child(
+                    TitleBar::new().child(
+                        h_flex()
+                            .h_full()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .pr_2()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("leave-now-playing")
+                                            .icon(AppIcon::ArrowLeft)
+                                            .tooltip("Back to library")
+                                            .ghost()
+                                            .small()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.leave_now_playing();
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child("Now Playing"),
+                                    ),
+                            )
+                            .child(
+                                Button::new("now-playing-settings")
+                                    .icon(AppIcon::Settings)
+                                    .tooltip("Settings")
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.state.settings_open = true;
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(self.render_now_playing(window, cx)),
+                )
+                .child(self.render_player(cx))
                 .into_any_element();
         }
 
