@@ -1139,6 +1139,9 @@ impl NavidromeApp {
         let label_size = size * 0.42;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - 10.0;
+        let tonearm_size = size * 0.5;
+        let tonearm_left = size - tonearm_size * 0.5;
+        let tonearm_top = size * 0.08 - tonearm_size * 0.5;
         let highlight = Icon::new(AppIcon::VinylHighlight)
             .absolute()
             .top_0()
@@ -1213,26 +1216,26 @@ impl NavidromeApp {
                     ),
             )
             .child(
-                Icon::new(if tonearm_engaged {
-                    AppIcon::Tonearm
-                } else {
-                    AppIcon::TonearmRest
-                })
-                .absolute()
-                .left_0()
-                .with_size(px(size))
-                .with_animation(
-                    SharedString::from(format!(
-                        "tonearm-{}-{tonearm_engaged}",
-                        cover_id.unwrap_or("default")
-                    )),
-                    Animation::new(Duration::from_millis(280)).with_easing(ease_out_quint()),
-                    move |icon, delta| {
-                        let travel = if tonearm_engaged { -5.0 } else { 5.0 };
-                        icon.top((1.0 - delta) * px(travel))
-                            .opacity(0.55 + delta * 0.45)
-                    },
-                ),
+                Icon::new(AppIcon::Tonearm)
+                    .absolute()
+                    .left(px(tonearm_left))
+                    .top(px(tonearm_top))
+                    .with_size(px(tonearm_size))
+                    .with_animation(
+                        SharedString::from(format!(
+                            "tonearm-{}-{tonearm_engaged}",
+                            cover_id.unwrap_or("default")
+                        )),
+                        Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
+                        move |icon, delta| {
+                            let rotation = if tonearm_engaged {
+                                delta * 0.125
+                            } else {
+                                (1.0 - delta) * 0.125
+                            };
+                            icon.transform(Transformation::rotate(percentage(rotation)))
+                        },
+                    ),
             )
             .into_any_element()
     }
@@ -2999,7 +3002,7 @@ fn rotate_rgba(source: &image::RgbaImage, angle: f32) -> image::RgbaImage {
 }
 
 fn build_cover_rotation_frames(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    const FRAME_COUNT: usize = 96;
+    const FRAME_COUNT: usize = 180;
     const FRAME_SIZE: u32 = 180;
 
     let decoded = image::load_from_memory(bytes).map_err(error_message)?;
@@ -3087,7 +3090,7 @@ fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
 }
 
 fn vinyl_rotation_phase(position: Duration) -> f32 {
-    (position.as_secs_f32() / 8.0).fract()
+    (position.as_secs_f32() / 18.0).fract()
 }
 
 fn rgb_to_hsla(red: f32, green: f32, blue: f32) -> Hsla {
@@ -3194,7 +3197,7 @@ mod tests {
     fn builds_a_complete_cover_rotation_cycle() {
         let frames = build_cover_rotation_frames(include_bytes!("../assets/default-cover.png"))
             .expect("rotation frames should build");
-        assert_eq!(frames.len(), 96);
+        assert_eq!(frames.len(), 180);
         assert!(frames
             .iter()
             .all(|frame| image::guess_format(frame).ok() == Some(image::ImageFormat::Png)));
@@ -3228,9 +3231,9 @@ mod tests {
 
     #[test]
     fn vinyl_rotation_tracks_playback_position() {
-        assert!((vinyl_rotation_phase(Duration::from_secs(2)) - 0.25).abs() < f32::EPSILON);
-        assert!((vinyl_rotation_phase(Duration::from_secs(10)) - 0.25).abs() < f32::EPSILON);
-        assert!((vinyl_rotation_phase(Duration::from_secs(6)) - 0.75).abs() < f32::EPSILON);
+        assert!((vinyl_rotation_phase(Duration::from_millis(4_500)) - 0.25).abs() < f32::EPSILON);
+        assert!((vinyl_rotation_phase(Duration::from_millis(22_500)) - 0.25).abs() < f32::EPSILON);
+        assert!((vinyl_rotation_phase(Duration::from_millis(13_500)) - 0.75).abs() < f32::EPSILON);
     }
 
     #[test]
