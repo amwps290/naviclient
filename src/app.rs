@@ -14,14 +14,16 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
-    v_flex, ActiveTheme, Selectable, Sizable, Theme, ThemeMode, TitleBar,
+    v_flex, ActiveTheme, Icon, Selectable, Sizable, Theme, ThemeMode, TitleBar,
 };
+use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
 use tokio::runtime::Runtime;
 
 use crate::api::{format_duration, Api};
-use crate::assets::PlayerIcon;
+use crate::assets::{AppIcon, PlayerIcon};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
@@ -42,6 +44,33 @@ enum View {
     AlbumDetail,
     PlaylistDetail,
     NowPlaying,
+    Queue,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum PlaybackMode {
+    #[default]
+    RepeatAll,
+    RepeatOne,
+    Shuffle,
+}
+
+impl PlaybackMode {
+    fn next(self) -> Self {
+        match self {
+            Self::RepeatAll => Self::RepeatOne,
+            Self::RepeatOne => Self::Shuffle,
+            Self::Shuffle => Self::RepeatAll,
+        }
+    }
+
+    fn tooltip(self) -> &'static str {
+        match self {
+            Self::RepeatAll => "Repeat all",
+            Self::RepeatOne => "Repeat current track",
+            Self::Shuffle => "Shuffle queue",
+        }
+    }
 }
 
 struct AppState {
@@ -73,7 +102,7 @@ struct AppState {
     status: String,
     error: Option<String>,
     settings_open: bool,
-    volume: f32,
+    playback_mode: PlaybackMode,
     ended_handled: bool,
 }
 
@@ -108,7 +137,7 @@ impl Default for AppState {
             status: "Not connected".to_string(),
             error: None,
             settings_open: false,
-            volume: 0.8,
+            playback_mode: PlaybackMode::default(),
             ended_handled: false,
         }
     }
@@ -121,13 +150,13 @@ pub struct NavidromeApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     audio: AudioHandle,
+    default_cover: Arc<GpuiImage>,
     state: AppState,
     search_input: Entity<InputState>,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
-    volume_slider: Entity<SliderState>,
     lyrics_scroll_handle: ScrollHandle,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
@@ -140,6 +169,10 @@ impl NavidromeApp {
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let audio = AudioHandle::start().expect("failed to start audio worker");
+        let default_cover = Arc::new(GpuiImage::from_bytes(
+            GpuiImageFormat::Png,
+            include_bytes!("../assets/default-cover.png").to_vec(),
+        ));
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Search songs, albums, and artists")
@@ -161,13 +194,6 @@ impl NavidromeApp {
                 .default_value(config.password.clone())
                 .masked(true)
         });
-        let volume_slider = cx.new(|_| {
-            SliderState::new()
-                .min(0.0)
-                .max(100.0)
-                .step(1.0)
-                .default_value(80.0)
-        });
         let playback_slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -183,18 +209,18 @@ impl NavidromeApp {
             tx,
             rx,
             audio,
+            default_cover,
             state: AppState::default(),
             search_input: search_input.clone(),
             server_input,
             username_input,
             password_input,
             playback_slider: playback_slider.clone(),
-            volume_slider: volume_slider.clone(),
             lyrics_scroll_handle: ScrollHandle::new(),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
         };
-        app.audio.set_volume(app.state.volume);
+        app.audio.set_volume(1.0);
         app._subscriptions.push(
             cx.subscribe(&search_input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
@@ -214,17 +240,6 @@ impl NavidromeApp {
                     this.audio
                         .seek(duration.mul_f32((*value / 100.0).clamp(0.0, 1.0)));
                 }
-                cx.notify();
-            },
-        ));
-        app._subscriptions.push(cx.subscribe(
-            &volume_slider,
-            |this, _, event: &SliderEvent, cx| {
-                let SliderEvent::Change(SliderValue::Single(value)) = event else {
-                    return;
-                };
-                this.state.volume = (*value / 100.0).clamp(0.0, 1.0);
-                this.audio.set_volume(this.state.volume);
                 cx.notify();
             },
         ));
@@ -494,7 +509,15 @@ impl NavidromeApp {
         }
     }
 
-    fn skip(&mut self, offset: i32) {
+    fn random_queue_index(&self, excluding: Option<usize>) -> Option<usize> {
+        let mut indices = (0..self.state.queue.len()).collect::<Vec<_>>();
+        if let Some(excluding) = excluding {
+            indices.retain(|index| *index != excluding);
+        }
+        indices.choose(&mut thread_rng()).copied().or(excluding)
+    }
+
+    fn advance_queue(&mut self, forward: bool) {
         let Some(index) = self.state.queue_index else {
             return;
         };
@@ -502,15 +525,29 @@ impl NavidromeApp {
         if len == 0 {
             return;
         }
-        let next = (index as i32 + offset).rem_euclid(len as i32) as usize;
+
+        let next = if forward {
+            match self.state.playback_mode {
+                PlaybackMode::Shuffle => self.random_queue_index(Some(index)).unwrap_or(index),
+                _ => (index + 1) % len,
+            }
+        } else {
+            (index + len - 1) % len
+        };
+
         self.play_queue_index(next);
     }
 
-    fn stop_playback(&mut self) {
-        self.audio.stop();
-        self.state.now_playing = None;
-        self.active_lyric_index = None;
-        self.state.ended_handled = true;
+    fn cycle_playback_mode(&mut self) {
+        self.state.playback_mode = self.state.playback_mode.next();
+    }
+
+    fn skip(&mut self, offset: i32) {
+        if offset > 0 {
+            self.advance_queue(true);
+        } else if offset < 0 {
+            self.advance_queue(false);
+        }
     }
 
     fn toggle_playback(&mut self) {
@@ -538,10 +575,7 @@ impl NavidromeApp {
             self.state.status = format!("Config save failed: {error:#}");
         }
         self.audio.stop();
-        self.state = AppState {
-            volume: self.state.volume,
-            ..AppState::default()
-        };
+        self.state = AppState::default();
         match Api::new(
             &self.config.server_url,
             &self.config.username,
@@ -660,7 +694,12 @@ impl NavidromeApp {
                         match result {
                             Ok(mut songs) => {
                                 songs.sort_by_key(|song| song.track.unwrap_or(i32::MAX));
+                                let covers = songs
+                                    .iter()
+                                    .filter_map(|song| song.cover_art.clone())
+                                    .collect();
                                 self.state.current_songs = songs;
+                                self.preload_covers(covers);
                             }
                             Err(error) => self.state.error = Some(error),
                         }
@@ -750,7 +789,14 @@ impl NavidromeApp {
                         == Some(playlist_id.as_str())
                     {
                         match result {
-                            Ok(songs) => self.state.playlist_songs = songs,
+                            Ok(songs) => {
+                                let covers = songs
+                                    .iter()
+                                    .filter_map(|song| song.cover_art.clone())
+                                    .collect();
+                                self.state.playlist_songs = songs;
+                                self.preload_covers(covers);
+                            }
                             Err(error) => self.state.error = Some(error),
                         }
                     }
@@ -805,7 +851,19 @@ impl NavidromeApp {
             self.state.error = Some(error);
         } else if playback.ended {
             self.state.ended_handled = true;
-            self.skip(1);
+            match self.state.playback_mode {
+                PlaybackMode::RepeatAll => self.advance_queue(true),
+                PlaybackMode::RepeatOne => {
+                    if let Some(index) = self.state.queue_index {
+                        self.play_queue_index(index);
+                    }
+                }
+                PlaybackMode::Shuffle => {
+                    if let Some(index) = self.random_queue_index(self.state.queue_index) {
+                        self.play_queue_index(index);
+                    }
+                }
+            }
         }
     }
 
@@ -865,17 +923,20 @@ impl NavidromeApp {
         };
 
         Button::new(SharedString::from(format!("favorite-{kind_name}-{id}")))
-            .label(if starred { "♥" } else { "♡" })
+            .icon(if starred {
+                AppIcon::HeartFilled
+            } else {
+                AppIcon::Heart
+            })
             .tooltip(if starred {
                 "Remove from favorites"
             } else {
                 "Add to favorites"
             })
-            .compact()
             .ghost()
+            .small()
             .opacity(if pending { 0.6 } else { 1.0 })
             .rounded_full()
-            .bg(cx.theme().background.opacity(0.85))
             .text_color(if starred {
                 cx.theme().red
             } else {
@@ -887,11 +948,29 @@ impl NavidromeApp {
             }))
     }
 
+    fn playback_mode_button(&self, cx: &Context<Self>) -> Button {
+        let button = Button::new("player-playback-mode")
+            .tooltip(self.state.playback_mode.tooltip())
+            .ghost()
+            .with_size(px(30.0))
+            .rounded_full()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.cycle_playback_mode();
+                cx.notify();
+            }));
+
+        match self.state.playback_mode {
+            PlaybackMode::RepeatAll => button.icon(AppIcon::Repeat),
+            PlaybackMode::RepeatOne => button.icon(AppIcon::RepeatOne),
+            PlaybackMode::Shuffle => button.icon(AppIcon::Shuffle),
+        }
+    }
+
     fn render_cover(
         &self,
         cover_id: Option<&str>,
         size: f32,
-        cx: &Context<Self>,
+        _cx: &Context<Self>,
     ) -> gpui::AnyElement {
         if let Some(image) = cover_id.and_then(|id| self.state.covers.get(id)) {
             return img(image.clone())
@@ -900,16 +979,11 @@ impl NavidromeApp {
                 .rounded_lg()
                 .into_any_element();
         }
-        div()
+        img(self.default_cover.clone())
             .w(px(size))
             .h(px(size))
+            .flex_shrink_0()
             .rounded_lg()
-            .bg(cx.theme().secondary)
-            .text_color(cx.theme().muted_foreground)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child("No cover")
             .into_any_element()
     }
 
@@ -1161,7 +1235,7 @@ impl NavidromeApp {
                     .w(px(3.0))
                     .h(px(height))
                     .rounded_full()
-                    .bg(cx.theme().primary);
+                    .bg(cx.theme().info);
 
                 if animated {
                     let phase = index as f32 * 0.23;
@@ -1201,9 +1275,10 @@ impl NavidromeApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(34.0)))
+                    .child(div().w(px(42.0)))
                     .child(div().flex_1().child("Title"))
-                    .child(div().w(px(220.0)).child("Artist"))
-                    .child(div().w(px(72.0)).child("Time")),
+                    .child(div().w(px(180.0)).child("Artist"))
+                    .child(div().w(px(64.0)).text_right().child("Time")),
             )
             .children(songs.iter().enumerate().map(|(index, song)| {
                 let queue = queue_source.clone();
@@ -1213,46 +1288,78 @@ impl NavidromeApp {
                     .as_ref()
                     .is_some_and(|playing| playing.id == song.id);
                 let animated = current && playback.active && !playback.paused;
+                let album = if song.album.trim().is_empty() {
+                    "Unknown album".to_string()
+                } else {
+                    song.album.clone()
+                };
                 let row = h_flex()
                     .id(SharedString::from(format!("song-row-{}", song.id)))
-                    .min_h(px(44.0))
+                    .h(px(60.0))
                     .px_3()
                     .gap_3()
                     .border_t_1()
-                    .border_color(cx.theme().border)
-                    .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                    .border_color(cx.theme().border.opacity(0.6))
+                    .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
                     .cursor_pointer();
                 let row = if current {
-                    row.bg(cx.theme().primary.opacity(0.1))
+                    row.bg(cx.theme().info.opacity(0.1))
                 } else {
                     row
                 };
 
                 row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
                     .child(
+                        div()
+                            .w(px(42.0))
+                            .h(px(42.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border.opacity(0.7))
+                            .bg(cx.theme().background)
+                            .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
+                    )
+                    .child(
                         h_flex()
                             .flex_1()
                             .min_w_0()
                             .gap_2()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
                             .text_color(if current {
-                                cx.theme().primary
+                                cx.theme().info
                             } else {
                                 cx.theme().foreground
                             })
                             .child(self.render_playing_indicator(&song.id, current, animated, cx))
                             .child(
-                                div()
+                                v_flex()
                                     .flex_1()
                                     .min_w_0()
-                                    .truncate()
-                                    .child(song.title.clone()),
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .line_height(rems(1.25))
+                                            .truncate()
+                                            .child(song.title.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .line_height(rems(1.2))
+                                            .truncate()
+                                            .child(album),
+                                    ),
                             ),
                     )
                     .child(
                         div()
-                            .w(px(220.0))
+                            .w(px(180.0))
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .truncate()
@@ -1260,8 +1367,9 @@ impl NavidromeApp {
                     )
                     .child(
                         div()
-                            .w(px(72.0))
+                            .w(px(64.0))
                             .text_sm()
+                            .text_right()
                             .text_color(cx.theme().muted_foreground)
                             .child(format_duration(song.duration)),
                     )
@@ -1275,54 +1383,133 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_settings(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_server_status_card(&self, cx: &Context<Self>) -> gpui::AnyElement {
+        let status_label = if self.state.loading {
+            "Connecting..."
+        } else if self.state.server.is_some() {
+            "Connected"
+        } else {
+            "Not connected"
+        };
+        let status_color = if self.state.error.is_some() {
+            cx.theme().red
+        } else if self.state.server.is_some() {
+            cx.theme().accent
+        } else {
+            cx.theme().muted_foreground
+        };
+        let server_name = self
+            .state
+            .server
+            .as_ref()
+            .map(|server| {
+                format!(
+                    "{} {}",
+                    server.app_name.as_deref().unwrap_or("Navidrome"),
+                    server.version
+                )
+            })
+            .unwrap_or_else(|| "Server entry".to_string());
+        let server_url = if self.config.server_url.trim().is_empty() {
+            "No server URL configured".to_string()
+        } else {
+            self.config.server_url.clone()
+        };
+        let username = if self.config.username.trim().is_empty() {
+            "No username configured".to_string()
+        } else {
+            self.config.username.clone()
+        };
+
         v_flex()
-            .max_w(px(680.0))
-            .gap_5()
-            .child(self.page_header(
-                "Server settings",
-                "Connect this client to a Navidrome or Subsonic-compatible server.",
-                cx,
-            ))
+            .w_full()
+            .gap_4()
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().secondary.opacity(0.35))
             .child(
-                v_flex()
-                    .gap_2()
+                h_flex()
+                    .justify_between()
+                    .items_start()
+                    .gap_4()
                     .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Appearance"),
+                        v_flex()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Primary server"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .child(server_name),
+                            )
+                            .child(div().text_xs().text_color(status_color).child(status_label)),
+                    )
+                    .when(self.api.is_some(), |this| {
+                        this.child(
+                            Button::new("settings-refresh")
+                                .icon(AppIcon::Refresh)
+                                .tooltip("Refresh library")
+                                .loading(self.state.loading)
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.refresh_library();
+                                    cx.notify();
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                h_flex()
+                    .gap_6()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Server URL"),
+                            )
+                            .child(div().text_sm().truncate().child(server_url)),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Choose a light or dark theme, or follow the system setting."),
-                    )
-                    .child(
-                        h_flex().gap_2().children(
-                            [
-                                ThemePreference::Light,
-                                ThemePreference::Dark,
-                                ThemePreference::System,
-                            ]
-                            .into_iter()
-                            .map(|preference| {
-                                Button::new(SharedString::from(format!(
-                                    "theme-{}",
-                                    preference.label().to_lowercase()
-                                )))
-                                .label(preference.label())
-                                .selected(self.config.theme == preference)
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        this.set_theme(preference, window, cx);
-                                    },
-                                ))
-                            }),
-                        ),
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Username"),
+                            )
+                            .child(div().text_sm().truncate().child(username)),
                     ),
             )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.state.status.clone()),
+            )
+            .when_some(self.state.error.as_ref(), |this, error| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().red)
+                        .child(error.clone()),
+                )
+            })
             .child(
                 v_flex()
                     .gap_2()
@@ -1357,25 +1544,81 @@ impl NavidromeApp {
                     .child(Input::new(&self.password_input).w_full()),
             )
             .child(
-                h_flex()
-                    .gap_2()
+                h_flex().justify_end().gap_2().child(
+                    Button::new("save-settings")
+                        .label("Save and connect")
+                        .primary()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.save_settings(cx);
+                            cx.notify();
+                        })),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_settings(&self, cx: &Context<Self>) -> gpui::AnyElement {
+        v_flex()
+            .w_full()
+            .max_w(px(840.0))
+            .gap_6()
+            .child(
+                v_flex()
+                    .gap_3()
                     .child(
-                        Button::new("save-settings")
-                            .label("Save and connect")
-                            .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.save_settings(cx);
-                                this.state.settings_open = false;
-                                cx.notify();
-                            })),
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Servers"),
+                    )
+                    .child(self.render_server_status_card(cx)),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Appearance"),
                     )
                     .child(
-                        Button::new("cancel-settings")
-                            .label("Cancel")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.state.settings_open = false;
-                                cx.notify();
-                            })),
+                        v_flex()
+                            .gap_3()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Theme"),
+                            )
+                            .child(
+                                h_flex().gap_2().children(
+                                    [
+                                        ThemePreference::Light,
+                                        ThemePreference::Dark,
+                                        ThemePreference::System,
+                                    ]
+                                    .into_iter()
+                                    .map(|preference| {
+                                        Button::new(SharedString::from(format!(
+                                            "theme-{}",
+                                            preference.label().to_lowercase()
+                                        )))
+                                        .label(preference.label())
+                                        .selected(self.config.theme == preference)
+                                        .on_click(
+                                            cx.listener(move |this, _, window, cx| {
+                                                this.set_theme(preference, window, cx);
+                                            }),
+                                        )
+                                    }),
+                                ),
+                            ),
                     ),
             )
             .into_any_element()
@@ -1647,50 +1890,94 @@ impl NavidromeApp {
                 .children(self.error_banner(cx))
                 .child(self.render_album_grid(&self.state.albums, cx, window))
                 .into_any_element(),
-            View::Playlists => v_flex()
-                .gap_5()
-                .child(self.page_header(
-                    "Playlists",
-                    format!("{} playlists", self.state.playlists.len()),
-                    cx,
-                ))
-                .children(self.error_banner(cx))
-                .children(self.state.playlists.iter().map(|playlist| {
-                    let playlist_for_click = playlist.clone();
-                    h_flex()
-                        .min_h(px(54.0))
-                        .px_3()
-                        .justify_between()
-                        .border_b_1()
+            View::Playlists => {
+                let playlist_list =
+                    v_flex()
+                        .w_full()
+                        .border_1()
                         .border_color(cx.theme().border)
-                        .child(
-                            v_flex()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(playlist.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!(
-                                            "{} tracks",
-                                            playlist.song_count.unwrap_or_default()
-                                        )),
-                                ),
+                        .rounded_lg()
+                        .overflow_hidden()
+                        .children(self.state.playlists.iter().enumerate().map(
+                            |(index, playlist)| {
+                                let playlist_for_click = playlist.clone();
+                                let track_count = playlist.song_count.unwrap_or_default();
+                                let details = playlist
+                                    .owner
+                                    .as_deref()
+                                    .filter(|owner| !owner.trim().is_empty())
+                                    .map(|owner| format!("{track_count} tracks | {owner}"))
+                                    .unwrap_or_else(|| format!("{track_count} tracks"));
+
+                                h_flex()
+                                    .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
+                                    .h(px(68.0))
+                                    .px_3()
+                                    .gap_3()
+                                    .items_center()
+                                    .cursor_pointer()
+                                    .when(index > 0, |this| {
+                                        this.border_t_1().border_color(cx.theme().border)
+                                    })
+                                    .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                                    .child(self.render_cover(
+                                        playlist.cover_art.as_deref(),
+                                        48.0,
+                                        cx,
+                                    ))
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .truncate()
+                                                    .child(playlist.name.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .truncate()
+                                                    .child(details),
+                                            ),
+                                    )
+                                    .child(
+                                        Icon::new(AppIcon::ChevronRight)
+                                            .small()
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_playlist(playlist_for_click.clone());
+                                        cx.notify();
+                                    }))
+                            },
+                        ));
+
+                v_flex()
+                    .gap_5()
+                    .child(self.page_header(
+                        "Playlists",
+                        format!("{} playlists", self.state.playlists.len()),
+                        cx,
+                    ))
+                    .children(self.error_banner(cx))
+                    .when(self.state.playlists.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .py_8()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No playlists are available."),
                         )
-                        .child(
-                            Button::new(SharedString::from(format!("playlist-{}", playlist.id)))
-                                .label("Open")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.open_playlist(playlist_for_click.clone());
-                                    cx.notify();
-                                })),
-                        )
-                }))
-                .into_any_element(),
+                    })
+                    .when(!self.state.playlists.is_empty(), |this| {
+                        this.child(playlist_list)
+                    })
+                    .into_any_element()
+            }
             View::Search => {
                 let mut content = v_flex()
                     .gap_5()
@@ -1823,52 +2110,111 @@ impl NavidromeApp {
                         cx,
                     ))
                     .child(
-                        Button::new("play-playlist")
-                            .label("Play playlist")
-                            .primary()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let songs = this.state.playlist_songs.clone();
-                                if !songs.is_empty() {
-                                    this.play_song_list(&songs, 0);
-                                }
-                                cx.notify();
-                            })),
+                        h_flex().child(
+                            Button::new("play-playlist")
+                                .icon(PlayerIcon::Play)
+                                .label("Play all")
+                                .small()
+                                .info()
+                                .outline()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    let songs = this.state.playlist_songs.clone();
+                                    if !songs.is_empty() {
+                                        this.play_song_list(&songs, 0);
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
                     )
                     .children(self.error_banner(cx))
                     .child(self.render_song_list(&self.state.playlist_songs, cx))
                     .into_any_element()
             }
             View::NowPlaying => self.render_now_playing(window, cx),
+            View::Queue => v_flex()
+                .gap_5()
+                .child(self.page_header(
+                    "Queue",
+                    format!("{} tracks in the current queue", self.state.queue.len()),
+                    cx,
+                ))
+                .when(self.state.queue.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .py_8()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Start playing an album or playlist to build a queue."),
+                    )
+                })
+                .when(!self.state.queue.is_empty(), |this| {
+                    this.child(self.render_song_list(&self.state.queue, cx))
+                })
+                .into_any_element(),
         }
     }
 
     fn render_player(&self, cx: &Context<Self>) -> gpui::AnyElement {
         let playback = self.audio.state();
+        let duration = playback.duration.unwrap_or_default();
+        let lyrics_open = self.state.view == View::NowPlaying;
+        let queue_open = self.state.view == View::Queue;
         let song_info = if let Some(song) = &self.state.now_playing {
             h_flex()
                 .id("now-playing-info")
-                .w(px(320.0))
+                .w(px(260.0))
+                .flex_shrink_0()
+                .min_w_0()
+                .overflow_hidden()
                 .gap_3()
+                .p_1()
+                .items_center()
                 .cursor_pointer()
+                .rounded(px(12.0))
                 .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
-                .child(self.render_cover(song.cover_art.as_deref(), 52.0, cx))
+                .child(self.render_cover(song.cover_art.as_deref(), 60.0, cx))
                 .child(
                     v_flex()
+                        .flex_1()
                         .min_w_0()
                         .gap_1()
                         .child(
                             div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
+                                .text_base()
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(song.title.clone()),
                         )
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(song.artist.clone()),
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .truncate()
+                                        .child(song.artist.clone()),
+                                )
+                                .child(
+                                    Button::new("player-lyrics-shortcut")
+                                        .icon(AppIcon::Lyrics)
+                                        .tooltip("Lyrics")
+                                        .ghost()
+                                        .with_size(px(26.0))
+                                        .rounded_full()
+                                        .selected(lyrics_open)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.state.settings_open = false;
+                                            this.state.view = View::NowPlaying;
+                                            this.active_lyric_index = None;
+                                            cx.notify();
+                                        })),
+                                ),
                         ),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1879,36 +2225,101 @@ impl NavidromeApp {
                 }))
                 .into_any_element()
         } else {
-            div()
-                .w(px(320.0))
-                .text_color(cx.theme().muted_foreground)
-                .child("No track playing")
+            h_flex()
+                .w(px(260.0))
+                .flex_shrink_0()
+                .min_w_0()
+                .overflow_hidden()
+                .gap_3()
+                .p_1()
+                .items_center()
+                .child(self.render_cover(None, 60.0, cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_base()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .truncate()
+                                .child("No track playing"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child("Choose a song from your library."),
+                        ),
+                )
                 .into_any_element()
         };
-        let duration = playback.duration.unwrap_or_default();
-        h_flex()
-            .h(px(84.0))
-            .px_4()
-            .gap_5()
+
+        let right_controls = h_flex()
+            .w(px(260.0))
+            .h(px(40.0))
+            .min_w_0()
+            .overflow_hidden()
+            .flex_shrink_0()
+            .justify_end()
             .items_center()
+            .gap_2()
+            .pl_4()
+            .border_l_1()
+            .border_color(cx.theme().border.opacity(0.8))
+            .when_some(self.state.now_playing.as_ref(), |this, song| {
+                this.child(
+                    self.favorite_button(FavoriteKind::Song, &song.id, cx)
+                        .with_size(px(30.0)),
+                )
+            })
+            .child(self.playback_mode_button(cx))
+            .child(
+                Button::new("player-queue")
+                    .icon(AppIcon::Queue)
+                    .tooltip("Queue")
+                    .ghost()
+                    .with_size(px(30.0))
+                    .rounded_full()
+                    .selected(queue_open)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_open = false;
+                        this.state.view = View::Queue;
+                        cx.notify();
+                    })),
+            );
+
+        h_flex()
+            .h(px(88.0))
+            .px_4()
+            .py_2()
+            .gap_4()
+            .items_center()
+            .justify_between()
+            .overflow_hidden()
             .border_t_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .border_color(cx.theme().border.opacity(0.8))
+            .bg(cx.theme().secondary.opacity(0.22))
             .child(song_info)
             .child(
                 v_flex()
                     .flex_1()
-                    .gap_2()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .gap_1()
                     .items_center()
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap_3()
+                            .items_center()
                             .child(
                                 Button::new("previous")
                                     .icon(PlayerIcon::Previous)
                                     .tooltip("Previous track")
                                     .ghost()
-                                    .small()
+                                    .with_size(px(28.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.skip(-1);
@@ -1927,8 +2338,8 @@ impl NavidromeApp {
                                     } else {
                                         "Play"
                                     })
-                                    .primary()
-                                    .large()
+                                    .info()
+                                    .with_size(px(40.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_playback();
@@ -1940,22 +2351,10 @@ impl NavidromeApp {
                                     .icon(PlayerIcon::Next)
                                     .tooltip("Next track")
                                     .ghost()
-                                    .small()
+                                    .with_size(px(28.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.skip(1);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("stop")
-                                    .icon(PlayerIcon::Stop)
-                                    .tooltip("Stop")
-                                    .ghost()
-                                    .small()
-                                    .rounded_full()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.stop_playback();
                                         cx.notify();
                                     })),
                             ),
@@ -1963,21 +2362,37 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .w_full()
+                            .min_w_0()
+                            .h(px(24.0))
+                            .max_w(px(760.0))
+                            .items_center()
                             .gap_2()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format_playback(playback.position))
-                            .child(Slider::new(&self.playback_slider).flex_1())
-                            .child(format_playback(duration)),
+                            .child(
+                                div()
+                                    .w(px(40.0))
+                                    .flex_none()
+                                    .text_right()
+                                    .child(format_playback(playback.position)),
+                            )
+                            .child(
+                                Slider::new(&self.playback_slider)
+                                    .flex_1()
+                                    .mx_1()
+                                    .bg(cx.theme().info)
+                                    .text_color(cx.theme().info)
+                                    .rounded_full(),
+                            )
+                            .child(
+                                div()
+                                    .w(px(40.0))
+                                    .flex_none()
+                                    .child(format_playback(duration)),
+                            ),
                     ),
             )
-            .child(
-                h_flex()
-                    .w(px(190.0))
-                    .gap_2()
-                    .child(div().text_xs().child("Volume"))
-                    .child(Slider::new(&self.volume_slider).flex_1()),
-            )
+            .child(right_controls)
             .into_any_element()
     }
 }
@@ -2001,65 +2416,80 @@ impl Render for NavidromeApp {
             }
         });
 
+        if self.state.settings_open {
+            return v_flex()
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .child(
+                    TitleBar::new().child(
+                        h_flex()
+                            .h_full()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .pr_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Settings"),
+                            )
+                            .child(
+                                Button::new("close-settings")
+                                    .icon(AppIcon::Close)
+                                    .tooltip("Close settings")
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.state.settings_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scrollbar()
+                        .p_6()
+                        .child(self.render_settings(cx)),
+                )
+                .into_any_element();
+        }
+
         v_flex()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
                 TitleBar::new().child(
-                    h_flex().h_full().items_center().child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Navidrome Client"),
-                    ),
-                ),
-            )
-            .child(
-                h_flex()
-                    .h(px(54.0))
-                    .px_4()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Navidrome"),
-                            )
-                            .child(
-                                div()
-                                    .max_w(px(620.0))
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .truncate()
-                                    .child(self.state.status.clone()),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Button::new("refresh")
-                                    .label("Refresh")
-                                    .loading(self.state.loading)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.refresh_library();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(Button::new("settings").label("Settings").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.state.settings_open = true;
+                    h_flex()
+                        .h_full()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .pr_2()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Navidrome Client"),
+                        )
+                        .child(
+                            Button::new("title-settings")
+                                .icon(AppIcon::Settings)
+                                .tooltip("Settings")
+                                .ghost()
+                                .small()
+                                .selected(self.state.settings_open)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.state.settings_open = !this.state.settings_open;
                                     cx.notify();
-                                }),
-                            )),
-                    ),
+                                })),
+                        ),
+                ),
             )
             .child(
                 h_flex()
@@ -2101,6 +2531,7 @@ impl Render for NavidromeApp {
                     ),
             )
             .child(self.render_player(cx))
+            .into_any_element()
     }
 }
 

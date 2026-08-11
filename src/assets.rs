@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 9] = [
+const ICON_FILES: [&str; 18] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -13,10 +13,34 @@ const ICON_FILES: [&str; 9] = [
     "media-play.svg",
     "media-pause.svg",
     "media-next.svg",
-    "media-stop.svg",
+    "settings.svg",
+    "refresh.svg",
+    "shuffle.svg",
+    "queue.svg",
+    "heart.svg",
+    "heart-filled.svg",
+    "repeat.svg",
+    "repeat-one.svg",
+    "lyrics.svg",
+    "chevron-right.svg",
 ];
 
 pub struct Assets;
+
+#[derive(Clone, Copy)]
+pub enum AppIcon {
+    Close,
+    Settings,
+    Refresh,
+    Shuffle,
+    Queue,
+    Heart,
+    HeartFilled,
+    Repeat,
+    RepeatOne,
+    Lyrics,
+    ChevronRight,
+}
 
 #[derive(Clone, Copy)]
 pub enum PlayerIcon {
@@ -24,7 +48,25 @@ pub enum PlayerIcon {
     Play,
     Pause,
     Next,
-    Stop,
+}
+
+impl IconNamed for AppIcon {
+    fn path(self) -> SharedString {
+        match self {
+            Self::Close => "icons/window-close.svg",
+            Self::Settings => "icons/settings.svg",
+            Self::Refresh => "icons/refresh.svg",
+            Self::Shuffle => "icons/shuffle.svg",
+            Self::Queue => "icons/queue.svg",
+            Self::Heart => "icons/heart.svg",
+            Self::HeartFilled => "icons/heart-filled.svg",
+            Self::Repeat => "icons/repeat.svg",
+            Self::RepeatOne => "icons/repeat-one.svg",
+            Self::Lyrics => "icons/lyrics.svg",
+            Self::ChevronRight => "icons/chevron-right.svg",
+        }
+        .into()
+    }
 }
 
 impl IconNamed for PlayerIcon {
@@ -34,7 +76,6 @@ impl IconNamed for PlayerIcon {
             Self::Play => "icons/media-play.svg",
             Self::Pause => "icons/media-pause.svg",
             Self::Next => "icons/media-next.svg",
-            Self::Stop => "icons/media-stop.svg",
         }
         .into()
     }
@@ -59,7 +100,16 @@ impl AssetSource for Assets {
             "icons/media-play.svg" => Some(include_bytes!("../assets/icons/media-play.svg")),
             "icons/media-pause.svg" => Some(include_bytes!("../assets/icons/media-pause.svg")),
             "icons/media-next.svg" => Some(include_bytes!("../assets/icons/media-next.svg")),
-            "icons/media-stop.svg" => Some(include_bytes!("../assets/icons/media-stop.svg")),
+            "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
+            "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
+            "icons/shuffle.svg" => Some(include_bytes!("../assets/icons/shuffle.svg")),
+            "icons/queue.svg" => Some(include_bytes!("../assets/icons/queue.svg")),
+            "icons/heart.svg" => Some(include_bytes!("../assets/icons/heart.svg")),
+            "icons/heart-filled.svg" => Some(include_bytes!("../assets/icons/heart-filled.svg")),
+            "icons/repeat.svg" => Some(include_bytes!("../assets/icons/repeat.svg")),
+            "icons/repeat-one.svg" => Some(include_bytes!("../assets/icons/repeat-one.svg")),
+            "icons/lyrics.svg" => Some(include_bytes!("../assets/icons/lyrics.svg")),
+            "icons/chevron-right.svg" => Some(include_bytes!("../assets/icons/chevron-right.svg")),
             _ => None,
         };
 
