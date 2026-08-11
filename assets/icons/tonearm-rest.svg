@@ -2,8 +2,8 @@
   <circle cx="220" cy="35" r="18" fill="#202124" opacity="0.42"/>
   <circle cx="220" cy="35" r="14" fill="#c8c5bc" stroke="#56575a" stroke-width="4"/>
   <circle cx="220" cy="35" r="5" fill="#6c6d70"/>
-  <path d="M212 49C207 66 203 82 201 99C199 110 197 119 194 129" stroke="#252629" stroke-width="10" opacity="0.55"/>
-  <path d="M212 48C207 65 203 82 201 99C199 110 197 119 194 129" stroke="#b9b6ae" stroke-width="6"/>
-  <path d="M188 127L199 132" stroke="#242528" stroke-width="9"/>
-  <path d="M191 132L188 139" stroke="#d3d0c7" stroke-width="3"/>
+  <path d="M230 48C235 65 238 83 239 101C240 110 241 118 243 126" stroke="#252629" stroke-width="10" opacity="0.55"/>
+  <path d="M230 47C235 64 238 82 239 100C240 109 241 117 243 126" stroke="#b9b6ae" stroke-width="6"/>
+  <path d="M238 127L248 124" stroke="#242528" stroke-width="9"/>
+  <path d="M246 126L249 132" stroke="#d3d0c7" stroke-width="3"/>
 </svg>

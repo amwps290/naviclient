@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 21] = [
+const ICON_FILES: [&str; 22] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -26,6 +26,7 @@ const ICON_FILES: [&str; 21] = [
     "arrow-left.svg",
     "vinyl-highlight.svg",
     "tonearm.svg",
+    "tonearm-rest.svg",
 ];
 
 pub struct Assets;
@@ -46,6 +47,7 @@ pub enum AppIcon {
     ArrowLeft,
     VinylHighlight,
     Tonearm,
+    TonearmRest,
 }
 
 #[derive(Clone, Copy)]
@@ -73,6 +75,7 @@ impl IconNamed for AppIcon {
             Self::ArrowLeft => "icons/arrow-left.svg",
             Self::VinylHighlight => "icons/vinyl-highlight.svg",
             Self::Tonearm => "icons/tonearm.svg",
+            Self::TonearmRest => "icons/tonearm-rest.svg",
         }
         .into()
     }
@@ -124,6 +127,7 @@ impl AssetSource for Assets {
                 Some(include_bytes!("../assets/icons/vinyl-highlight.svg"))
             }
             "icons/tonearm.svg" => Some(include_bytes!("../assets/icons/tonearm.svg")),
+            "icons/tonearm-rest.svg" => Some(include_bytes!("../assets/icons/tonearm-rest.svg")),
             _ => None,
         };
 

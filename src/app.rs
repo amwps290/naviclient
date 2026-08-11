@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::TAU;
+use std::io::Cursor;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +14,7 @@ use gpui::{
     Subscription, Transformation, Window,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants},
+    button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement,
@@ -100,6 +102,8 @@ struct AppState {
     lyrics_error: Option<String>,
     covers: HashMap<String, Arc<GpuiImage>>,
     cover_palettes: HashMap<String, (Hsla, Hsla)>,
+    cover_rotation_frames: HashMap<String, Vec<Arc<GpuiImage>>>,
+    requested_cover_frames: HashSet<String>,
     requested_covers: HashSet<String>,
     status: String,
     error: Option<String>,
@@ -137,6 +141,8 @@ impl Default for AppState {
             lyrics_error: None,
             covers: HashMap::new(),
             cover_palettes: HashMap::new(),
+            cover_rotation_frames: HashMap::new(),
+            requested_cover_frames: HashSet::new(),
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
             error: None,
@@ -453,6 +459,27 @@ impl NavidromeApp {
         });
     }
 
+    fn ensure_cover_rotation_frames(&mut self, cover_id: Option<&str>) {
+        let Some(id) = cover_id else { return };
+        if self.state.cover_rotation_frames.contains_key(id)
+            || self.state.requested_cover_frames.contains(id)
+        {
+            return;
+        }
+        let Some(image) = self.state.covers.get(id) else {
+            return;
+        };
+
+        let bytes = image.bytes.clone();
+        let id = id.to_string();
+        self.state.requested_cover_frames.insert(id.clone());
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = build_cover_rotation_frames(&bytes);
+            let _ = tx.send(Msg::CoverRotationFrames { id, result });
+        });
+    }
+
     fn preload_covers(&mut self, ids: Vec<String>) {
         for id in ids {
             self.ensure_cover(Some(&id));
@@ -497,8 +524,12 @@ impl NavidromeApp {
         };
         self.state.queue_index = Some(index);
         self.state.now_playing = Some(song.clone());
+        self.state
+            .cover_rotation_frames
+            .retain(|cover_id, _| song.cover_art.as_deref() == Some(cover_id.as_str()));
         self.state.ended_handled = false;
         self.ensure_cover(song.cover_art.as_deref());
+        self.ensure_cover_rotation_frames(song.cover_art.as_deref());
         self.load_lyrics(&song);
         let Some(api) = self.api.clone() else {
             self.state.error = Some("Configure a server before playing".to_string());
@@ -856,10 +887,42 @@ impl NavidromeApp {
                         }
                         if let Ok(format) = image::guess_format(&bytes) {
                             if let Some(format) = gpui_image_format(format) {
-                                self.state
-                                    .covers
-                                    .insert(id, Arc::new(GpuiImage::from_bytes(format, bytes)));
+                                self.state.covers.insert(
+                                    id.clone(),
+                                    Arc::new(GpuiImage::from_bytes(format, bytes)),
+                                );
+                                let is_current_cover = self
+                                    .state
+                                    .now_playing
+                                    .as_ref()
+                                    .and_then(|song| song.cover_art.as_deref())
+                                    == Some(id.as_str());
+                                if is_current_cover {
+                                    self.ensure_cover_rotation_frames(Some(&id));
+                                }
                             }
+                        }
+                    }
+                }
+                Msg::CoverRotationFrames { id, result } => {
+                    self.state.requested_cover_frames.remove(&id);
+                    let is_current_cover = self
+                        .state
+                        .now_playing
+                        .as_ref()
+                        .and_then(|song| song.cover_art.as_deref())
+                        == Some(id.as_str());
+                    if is_current_cover {
+                        if let Ok(frames) = result {
+                            self.state.cover_rotation_frames.insert(
+                                id,
+                                frames
+                                    .into_iter()
+                                    .map(|bytes| {
+                                        Arc::new(GpuiImage::from_bytes(GpuiImageFormat::Png, bytes))
+                                    })
+                                    .collect(),
+                            );
                         }
                     }
                 }
@@ -1015,6 +1078,25 @@ impl NavidromeApp {
         }
     }
 
+    fn now_playing_palette(&self, cx: &Context<Self>) -> (Hsla, Hsla) {
+        self.state
+            .now_playing
+            .as_ref()
+            .and_then(|song| song.cover_art.as_deref())
+            .and_then(|cover_id| self.state.cover_palettes.get(cover_id).copied())
+            .unwrap_or((cx.theme().info, cx.theme().chart_2))
+    }
+
+    fn now_playing_accent(&self, cx: &Context<Self>) -> Hsla {
+        let (_, accent) = self.now_playing_palette(cx);
+        let accent = if accent.s < 0.16 {
+            cx.theme().info
+        } else {
+            accent
+        };
+        readable_accent(accent, cx.theme().background)
+    }
+
     fn render_cover(
         &self,
         cover_id: Option<&str>,
@@ -1041,11 +1123,18 @@ impl NavidromeApp {
         cover_id: Option<&str>,
         size: f32,
         rotation_phase: f32,
-        cx: &Context<Self>,
+        tonearm_engaged: bool,
+        _cx: &Context<Self>,
     ) -> gpui::AnyElement {
         let cover = cover_id
-            .and_then(|id| self.state.covers.get(id))
-            .cloned()
+            .and_then(|id| self.state.cover_rotation_frames.get(id))
+            .filter(|frames| !frames.is_empty())
+            .map(|frames| {
+                let index =
+                    ((rotation_phase * frames.len() as f32).floor() as usize) % frames.len();
+                frames[index].clone()
+            })
+            .or_else(|| cover_id.and_then(|id| self.state.covers.get(id)).cloned())
             .unwrap_or_else(|| self.default_cover.clone());
         let label_size = size * 0.42;
         let label_offset = (size - label_size) * 0.5;
@@ -1064,7 +1153,11 @@ impl NavidromeApp {
             .h(px(size))
             .flex_none()
             .rounded_full()
-            .bg(hsla(0.0, 0.0, 0.07, 1.0))
+            .bg(linear_gradient(
+                138.0,
+                linear_color_stop(hsla(0.0, 0.0, 0.12, 1.0), 0.0),
+                linear_color_stop(hsla(0.0, 0.0, 0.035, 1.0), 1.0),
+            ))
             .shadow_md()
             .child(
                 div()
@@ -1120,12 +1213,26 @@ impl NavidromeApp {
                     ),
             )
             .child(
-                Icon::new(AppIcon::Tonearm)
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .with_size(px(size))
-                    .text_color(cx.theme().foreground.opacity(0.5)),
+                Icon::new(if tonearm_engaged {
+                    AppIcon::Tonearm
+                } else {
+                    AppIcon::TonearmRest
+                })
+                .absolute()
+                .left_0()
+                .with_size(px(size))
+                .with_animation(
+                    SharedString::from(format!(
+                        "tonearm-{}-{tonearm_engaged}",
+                        cover_id.unwrap_or("default")
+                    )),
+                    Animation::new(Duration::from_millis(280)).with_easing(ease_out_quint()),
+                    move |icon, delta| {
+                        let travel = if tonearm_engaged { -5.0 } else { 5.0 };
+                        icon.top((1.0 - delta) * px(travel))
+                            .opacity(0.55 + delta * 0.45)
+                    },
+                ),
             )
             .into_any_element()
     }
@@ -1810,6 +1917,7 @@ impl NavidromeApp {
         };
         let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
         let playback = self.audio.state();
+        let accent = self.now_playing_accent(cx);
         let active_line = self
             .state
             .lyrics
@@ -1863,13 +1971,15 @@ impl NavidromeApp {
                         )))
                         .w_full()
                         .max_w(px(760.0))
-                        .min_h(px(56.0))
+                        .min_h(px(64.0))
                         .mx_auto()
                         .px_4()
-                        .py_3()
-                        .rounded_lg()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .text_center()
-                        .line_height(rems(1.5))
+                        .line_height(rems(1.45))
                         .when_some(start_ms, |this, start_ms| {
                             this.cursor_pointer()
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1880,23 +1990,22 @@ impl NavidromeApp {
                         .child(text);
 
                     if current {
-                        line.text_xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().foreground)
-                            .bg(cx.theme().info.opacity(0.12))
+                        line.text_2xl()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(accent)
                             .with_animation(
                                 SharedString::from(format!("active-lyric-{}-{index}", song.id)),
                                 Animation::new(Duration::from_millis(220))
                                     .with_easing(ease_out_quint()),
-                                |this, delta| this.opacity(0.72 + delta * 0.28),
+                                |this, delta| this.opacity(0.64 + delta * 0.36),
                             )
                             .into_any_element()
                     } else if synced {
                         let opacity = match distance {
-                            1 => 0.72,
-                            2 => 0.56,
-                            3 => 0.44,
-                            _ => 0.32,
+                            1 => 0.68,
+                            2 => 0.52,
+                            3 => 0.4,
+                            _ => 0.28,
                         };
                         line.text_lg()
                             .font_weight(FontWeight::MEDIUM)
@@ -1939,6 +2048,7 @@ impl NavidromeApp {
                         song.cover_art.as_deref(),
                         cover_size,
                         rotation_phase,
+                        playback.active && !playback.paused,
                         cx,
                     ))
                     .child(
@@ -1974,22 +2084,22 @@ impl NavidromeApp {
                     .h_full()
                     .pl_6()
                     .border_l_1()
-                    .border_color(cx.theme().border.opacity(0.55))
+                    .border_color(cx.theme().border.opacity(0.38))
                     .child(
                         v_flex()
                             .items_center()
                             .gap_1()
-                            .pb_3()
+                            .pb_1()
                             .child(
                                 div()
-                                    .text_lg()
+                                    .text_base()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Lyrics"),
                             )
                             .child(
                                 div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground.opacity(0.82))
                                     .child(format!("{} - {}", song.title, song.artist)),
                             ),
                     )
@@ -2377,6 +2487,15 @@ impl NavidromeApp {
 
     fn render_player(&self, cx: &Context<Self>) -> gpui::AnyElement {
         let playback = self.audio.state();
+        let accent = self.now_playing_accent(cx);
+        let accent_foreground = accent_foreground(accent);
+        let play_button_style = ButtonCustomVariant::new(cx)
+            .color(accent)
+            .foreground(accent_foreground)
+            .border(accent)
+            .hover(adjust_lightness(accent, 0.05))
+            .active(adjust_lightness(accent, -0.05))
+            .shadow(true);
         let duration = playback.duration.unwrap_or_default();
         let lyrics_open = self.state.view == View::NowPlaying;
         let queue_open = self.state.view == View::Queue;
@@ -2556,7 +2675,7 @@ impl NavidromeApp {
                                     } else {
                                         "Play"
                                     })
-                                    .info()
+                                    .custom(play_button_style)
                                     .with_size(px(40.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -2598,8 +2717,8 @@ impl NavidromeApp {
                                 Slider::new(&self.playback_slider)
                                     .flex_1()
                                     .mx_1()
-                                    .bg(cx.theme().info)
-                                    .text_color(cx.theme().info)
+                                    .bg(accent)
+                                    .text_color(accent)
                                     .rounded_full(),
                             )
                             .child(
@@ -2678,20 +2797,22 @@ impl Render for NavidromeApp {
         }
 
         if self.state.view == View::NowPlaying {
-            let (cover_base, cover_accent) = self
-                .state
-                .now_playing
-                .as_ref()
-                .and_then(|song| song.cover_art.as_deref())
-                .and_then(|cover_id| self.state.cover_palettes.get(cover_id).copied())
-                .unwrap_or((cx.theme().info, cx.theme().chart_2));
-            let background_start = cx.theme().background.blend(cover_base.opacity(0.2));
-            let background_end = cx.theme().background.blend(cover_accent.opacity(0.16));
-            let background_animation = Animation::new(Duration::from_secs(18)).repeat();
+            let (cover_base, cover_accent) = self.now_playing_palette(cx);
+            let light_background = cx.theme().background.l >= 0.5;
+            let base_strength = if light_background { 0.3 } else { 0.22 };
+            let accent_strength = if light_background { 0.24 } else { 0.18 };
+            let background_start = cx
+                .theme()
+                .background
+                .blend(cover_base.opacity(base_strength));
+            let background_end = cx
+                .theme()
+                .background
+                .blend(cover_accent.opacity(accent_strength));
+            let background_animation = Animation::new(Duration::from_secs(22)).repeat();
 
             return v_flex()
                 .size_full()
-                .bg(cx.theme().background)
                 .text_color(cx.theme().foreground)
                 .child(
                     TitleBar::new().child(
@@ -2741,20 +2862,20 @@ impl Render for NavidromeApp {
                         .flex_1()
                         .min_h_0()
                         .overflow_hidden()
-                        .child(self.render_now_playing(window, cx))
-                        .with_animation(
-                            "now-playing-background",
-                            background_animation,
-                            move |this, delta| {
-                                this.bg(linear_gradient(
-                                    120.0 + delta * 360.0,
-                                    linear_color_stop(background_start, 0.0),
-                                    linear_color_stop(background_end, 1.0),
-                                ))
-                            },
-                        ),
+                        .child(self.render_now_playing(window, cx)),
                 )
                 .child(self.render_player(cx))
+                .with_animation(
+                    "now-playing-background",
+                    background_animation,
+                    move |this, delta| {
+                        this.bg(linear_gradient(
+                            120.0 + delta * 360.0,
+                            linear_color_stop(background_start, 0.0),
+                            linear_color_stop(background_end, 1.0),
+                        ))
+                    },
+                )
                 .into_any_element();
         }
 
@@ -2832,6 +2953,137 @@ impl Render for NavidromeApp {
             .child(self.render_player(cx))
             .into_any_element()
     }
+}
+
+fn rotate_rgba(source: &image::RgbaImage, angle: f32) -> image::RgbaImage {
+    let (width, height) = source.dimensions();
+    let mut output = image::RgbaImage::new(width, height);
+    let center_x = (width.saturating_sub(1)) as f32 * 0.5;
+    let center_y = (height.saturating_sub(1)) as f32 * 0.5;
+    let (sin, cos) = angle.sin_cos();
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - center_x;
+            let dy = y as f32 - center_y;
+            let source_x = cos * dx + sin * dy + center_x;
+            let source_y = -sin * dx + cos * dy + center_y;
+            if source_x < 0.0
+                || source_y < 0.0
+                || source_x > (width - 1) as f32
+                || source_y > (height - 1) as f32
+            {
+                continue;
+            }
+
+            let x0 = source_x.floor() as u32;
+            let y0 = source_y.floor() as u32;
+            let x1 = (x0 + 1).min(width - 1);
+            let y1 = (y0 + 1).min(height - 1);
+            let tx = source_x - x0 as f32;
+            let ty = source_y - y0 as f32;
+            let p00 = source.get_pixel(x0, y0).0;
+            let p10 = source.get_pixel(x1, y0).0;
+            let p01 = source.get_pixel(x0, y1).0;
+            let p11 = source.get_pixel(x1, y1).0;
+            let mut pixel = [0_u8; 4];
+            for channel in 0..4 {
+                let top = p00[channel] as f32 * (1.0 - tx) + p10[channel] as f32 * tx;
+                let bottom = p01[channel] as f32 * (1.0 - tx) + p11[channel] as f32 * tx;
+                pixel[channel] = (top * (1.0 - ty) + bottom * ty).round() as u8;
+            }
+            output.put_pixel(x, y, image::Rgba(pixel));
+        }
+    }
+    output
+}
+
+fn build_cover_rotation_frames(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    const FRAME_COUNT: usize = 96;
+    const FRAME_SIZE: u32 = 180;
+
+    let decoded = image::load_from_memory(bytes).map_err(error_message)?;
+    let side = decoded.width().min(decoded.height());
+    let square = decoded.crop_imm(
+        (decoded.width() - side) / 2,
+        (decoded.height() - side) / 2,
+        side,
+        side,
+    );
+    let source = square
+        .resize_exact(
+            FRAME_SIZE,
+            FRAME_SIZE,
+            image::imageops::FilterType::Lanczos3,
+        )
+        .to_rgba8();
+    let mut frames = Vec::with_capacity(FRAME_COUNT);
+    for index in 0..FRAME_COUNT {
+        let rotated = rotate_rgba(&source, index as f32 / FRAME_COUNT as f32 * TAU);
+        let mut output = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(rotated)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .map_err(error_message)?;
+        frames.push(output.into_inner());
+    }
+    Ok(frames)
+}
+
+fn relative_luminance(color: Hsla) -> f32 {
+    fn linearize(channel: f32) -> f32 {
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    let rgb = color.to_rgb();
+    0.2126 * linearize(rgb.r) + 0.7152 * linearize(rgb.g) + 0.0722 * linearize(rgb.b)
+}
+
+fn contrast_ratio(a: Hsla, b: Hsla) -> f32 {
+    let brighter = relative_luminance(a).max(relative_luminance(b));
+    let darker = relative_luminance(a).min(relative_luminance(b));
+    (brighter + 0.05) / (darker + 0.05)
+}
+
+fn readable_accent(mut accent: Hsla, background: Hsla) -> Hsla {
+    accent.s = accent.s.clamp(0.38, 0.78);
+    accent.a = 1.0;
+    let lighten = relative_luminance(background) < 0.35;
+    accent.l = if lighten {
+        accent.l.clamp(0.56, 0.74)
+    } else {
+        accent.l.clamp(0.26, 0.46)
+    };
+
+    for _ in 0..12 {
+        if contrast_ratio(accent, background) >= 4.5 {
+            break;
+        }
+        accent.l = if lighten {
+            (accent.l + 0.035).min(0.88)
+        } else {
+            (accent.l - 0.035).max(0.12)
+        };
+    }
+    accent
+}
+
+fn accent_foreground(accent: Hsla) -> Hsla {
+    let black = hsla(0.0, 0.0, 0.06, 1.0);
+    let white = hsla(0.0, 0.0, 0.98, 1.0);
+    if contrast_ratio(black, accent) >= contrast_ratio(white, accent) {
+        black
+    } else {
+        white
+    }
+}
+
+fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
+    color.l = (color.l + amount).clamp(0.0, 1.0);
+    color
 }
 
 fn vinyl_rotation_phase(position: Duration) -> f32 {
@@ -2931,7 +3183,48 @@ fn gpui_image_format(format: image::ImageFormat) -> Option<GpuiImageFormat> {
 mod tests {
     use std::time::Duration;
 
-    use super::{extract_cover_palette, vinyl_rotation_phase};
+    use gpui::hsla;
+
+    use super::{
+        accent_foreground, build_cover_rotation_frames, contrast_ratio, extract_cover_palette,
+        readable_accent, rotate_rgba, vinyl_rotation_phase,
+    };
+
+    #[test]
+    fn builds_a_complete_cover_rotation_cycle() {
+        let frames = build_cover_rotation_frames(include_bytes!("../assets/default-cover.png"))
+            .expect("rotation frames should build");
+        assert_eq!(frames.len(), 96);
+        assert!(frames
+            .iter()
+            .all(|frame| image::guess_format(frame).ok() == Some(image::ImageFormat::Png)));
+    }
+
+    #[test]
+    fn rotates_cover_pixels_around_the_center() {
+        let mut source = image::RgbaImage::new(3, 3);
+        source.put_pixel(2, 1, image::Rgba([255, 80, 20, 255]));
+
+        let rotated = rotate_rgba(&source, std::f32::consts::FRAC_PI_2);
+        assert_eq!(rotated.get_pixel(1, 2).0, [255, 80, 20, 255]);
+    }
+
+    #[test]
+    fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
+        let source = hsla(0.15, 0.9, 0.62, 1.0);
+        let light = hsla(0.0, 0.0, 0.96, 1.0);
+        let dark = hsla(0.0, 0.0, 0.08, 1.0);
+
+        assert!(contrast_ratio(readable_accent(source, light), light) >= 4.5);
+        assert!(contrast_ratio(readable_accent(source, dark), dark) >= 4.5);
+    }
+
+    #[test]
+    fn accent_button_foreground_prefers_the_stronger_contrast() {
+        let accent = hsla(0.12, 0.7, 0.72, 1.0);
+        let foreground = accent_foreground(accent);
+        assert!(contrast_ratio(foreground, accent) >= 4.5);
+    }
 
     #[test]
     fn vinyl_rotation_tracks_playback_position() {
