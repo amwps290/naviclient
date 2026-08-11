@@ -15,6 +15,36 @@ fn config_path() -> PathBuf {
     }
 }
 
+pub fn default_audio_cache_dir() -> PathBuf {
+    if let Some(project_dirs) =
+        directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
+    {
+        project_dirs.cache_dir().join("audio")
+    } else {
+        PathBuf::from("navidrome-cache").join("audio")
+    }
+}
+
+pub fn audio_cache_dir(config: &Config) -> PathBuf {
+    config
+        .cache_dir
+        .clone()
+        .unwrap_or_else(default_audio_cache_dir)
+}
+
+pub fn log_path() -> PathBuf {
+    if let Some(project_dirs) =
+        directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
+    {
+        project_dirs
+            .data_local_dir()
+            .join("logs")
+            .join("navidrome-client.log")
+    } else {
+        PathBuf::from("navidrome-client.log")
+    }
+}
+
 pub fn load() -> Config {
     let path = config_path();
     fs::read_to_string(&path)

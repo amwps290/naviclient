@@ -282,8 +282,14 @@ impl Api {
         Ok(response.bytes().await?.to_vec())
     }
 
-    pub fn stream_url(&self, id: &str) -> Result<String> {
-        self.url_for("stream", &[("id", id), ("estimateContentLength", "true")])
+    pub fn stream_url(&self, id: &str, max_bit_rate: Option<u32>) -> Result<String> {
+        let max_bit_rate = max_bit_rate.map(|value| value.to_string());
+        let mut params = vec![("id", id), ("estimateContentLength", "true")];
+        if let Some(max_bit_rate) = max_bit_rate.as_deref() {
+            params.push(("maxBitRate", max_bit_rate));
+            params.push(("format", "mp3"));
+        }
+        self.url_for("stream", &params)
     }
 
     pub fn cover_url(&self, id: &str, size: u32) -> Result<String> {
@@ -445,6 +451,19 @@ mod tests {
         assert_eq!(params["f"], "json");
         assert_eq!(params["t"].len(), 32);
         assert_eq!(params["s"].len(), 16);
+    }
+
+    #[test]
+    fn stream_url_includes_optional_max_bit_rate() {
+        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let url = api.stream_url("song-1", Some(320)).unwrap();
+        let parsed = Url::parse(&url).unwrap();
+        let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+
+        assert_eq!(params["id"], "song-1");
+        assert_eq!(params["maxBitRate"], "320");
+        assert_eq!(params["format"], "mp3");
+        assert_eq!(params["estimateContentLength"], "true");
     }
 
     #[test]

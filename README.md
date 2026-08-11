@@ -45,6 +45,16 @@ Config is stored in the platform config directory, e.g.:
 - macOS: `~/Library/Application Support/rs/navidrome/navidrome-client/config.json`
 - Linux: `~/.config/navidrome-client/config.json`
 
+Played audio is cached separately in the configured audio cache directory.
+The folder can be changed from Settings, completed tracks are reused without
+another download, partial original tracks resume through HTTP range requests
+when supported, and the oldest cache files are removed at startup when the
+cache exceeds 4 GiB.
+
+Diagnostic logs are written to the platform local data directory under
+`logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
+5 MiB. Stream URLs are logged without authentication query parameters.
+
 ## Architecture
 
 - `src/api.rs` - Subsonic API client, authentication, and JSON models parsing
@@ -54,7 +64,12 @@ Config is stored in the platform config directory, e.g.:
 - `src/config.rs` - persisted server settings
 - `src/msg.rs` - background task results delivered to the UI
 
-Playback streams audio directly from Navidrome through a buffered HTTP reader.
-Servers with byte-range support can start large FLAC files without a full
-download and can seek by requesting only the required part of the track. MP3,
-FLAC, AAC, Vorbis, and other formats supported by `rodio` remain available.
+Playback uses a read-through disk cache and a buffered HTTP reader. Servers
+with byte-range support can start large files without a full download, resume
+partial cache files, and seek by requesting only the required part of the
+track. Settings provides Original, 128, 192, 256, and 320 kbps quality levels;
+transcoded levels request an MP3 stream from Navidrome, and each quality profile
+has an isolated cache. The decoded audio queue absorbs longer network
+interruptions, while completed
+tracks play directly from local storage. MP3, FLAC, AAC, Vorbis, and other
+formats supported by `rodio` remain available.

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -37,6 +39,57 @@ impl ThemePreference {
             Self::Light => "Light",
             Self::Dark => "Dark",
             Self::System => "System",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscodingQuality {
+    #[default]
+    Original,
+    Kbps128,
+    Kbps192,
+    Kbps256,
+    Kbps320,
+}
+
+impl TranscodingQuality {
+    pub const ALL: [Self; 5] = [
+        Self::Original,
+        Self::Kbps128,
+        Self::Kbps192,
+        Self::Kbps256,
+        Self::Kbps320,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Original => "Original",
+            Self::Kbps128 => "128 kbps",
+            Self::Kbps192 => "192 kbps",
+            Self::Kbps256 => "256 kbps",
+            Self::Kbps320 => "320 kbps",
+        }
+    }
+
+    pub fn max_bit_rate(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::Kbps128 => Some(128),
+            Self::Kbps192 => Some(192),
+            Self::Kbps256 => Some(256),
+            Self::Kbps320 => Some(320),
+        }
+    }
+
+    pub fn cache_profile(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Kbps128 => "mp3-128",
+            Self::Kbps192 => "mp3-192",
+            Self::Kbps256 => "mp3-256",
+            Self::Kbps320 => "mp3-320",
         }
     }
 }
@@ -177,6 +230,10 @@ pub struct Config {
     pub password: String,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub cache_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub transcoding_quality: TranscodingQuality,
 }
 
 impl Default for Config {
@@ -186,13 +243,17 @@ impl Default for Config {
             username: String::new(),
             password: String::new(),
             theme: ThemePreference::Light,
+            cache_dir: None,
+            transcoding_quality: TranscodingQuality::Original,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, ThemePreference};
+    use std::path::PathBuf;
+
+    use super::{Config, ThemePreference, TranscodingQuality};
 
     #[test]
     fn legacy_config_defaults_to_light_theme() {
@@ -202,6 +263,30 @@ mod tests {
         .expect("legacy config should still deserialize");
 
         assert_eq!(config.theme, ThemePreference::Light);
+        assert_eq!(config.cache_dir, None);
+        assert_eq!(config.transcoding_quality, TranscodingQuality::Original);
+    }
+
+    #[test]
+    fn transcoding_quality_uses_supported_subsonic_rates() {
+        assert_eq!(TranscodingQuality::Original.max_bit_rate(), None);
+        assert_eq!(TranscodingQuality::Kbps192.max_bit_rate(), Some(192));
+        assert_eq!(TranscodingQuality::Kbps320.max_bit_rate(), Some(320));
+    }
+
+    #[test]
+    fn playback_settings_round_trip_through_json() {
+        let config = Config {
+            cache_dir: Some(PathBuf::from("D:/Music Cache")),
+            transcoding_quality: TranscodingQuality::Kbps192,
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: Config = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.cache_dir, config.cache_dir);
+        assert_eq!(restored.transcoding_quality, TranscodingQuality::Kbps192);
     }
 
     #[test]

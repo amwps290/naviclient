@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,10 +8,10 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
+    relative, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Transformation, Window,
+    ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
 };
 use gpui_component::{
     button::{Button, ButtonCustomVariant, ButtonVariants},
@@ -17,7 +19,7 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
-    v_flex, ActiveTheme, Icon, Selectable, Sizable, Theme, ThemeMode, TitleBar,
+    v_flex, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode, TitleBar,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -29,7 +31,7 @@ use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
     Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, Playlist, SearchResults,
-    ServerInfo, Song, ThemePreference,
+    ServerInfo, Song, ThemePreference, TranscodingQuality,
 };
 use crate::msg::{error_message, Msg};
 
@@ -174,7 +176,8 @@ impl NavidromeApp {
         let api = Api::new(&config.server_url, &config.username, &config.password).ok();
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
-        let audio = AudioHandle::start().expect("failed to start audio worker");
+        let audio_cache_dir = config::audio_cache_dir(&config);
+        let audio = AudioHandle::start(audio_cache_dir).expect("failed to start audio worker");
         let default_cover = Arc::new(GpuiImage::from_bytes(
             GpuiImageFormat::Png,
             include_bytes!("../assets/default-cover.png").to_vec(),
@@ -495,6 +498,13 @@ impl NavidromeApp {
         let Some(song) = self.state.queue.get(index).cloned() else {
             return;
         };
+        log::info!(
+            "queue playback selected; index={index} song_id={} title={:?} suffix={:?} declared_bytes={:?}",
+            song.id,
+            song.title,
+            song.suffix,
+            song.size
+        );
         self.state.queue_index = Some(index);
         self.state.now_playing = Some(song.clone());
         self.state.ended_handled = false;
@@ -504,13 +514,26 @@ impl NavidromeApp {
             self.state.error = Some("Configure a server before playing".to_string());
             return;
         };
-        match api.stream_url(&song.id) {
+        let quality = self.config.transcoding_quality;
+        let max_bit_rate = quality.max_bit_rate();
+        log::info!(
+            "stream profile selected; song_id={} quality={} max_bit_rate_kbps={max_bit_rate:?}",
+            song.id,
+            quality.label()
+        );
+        match api.stream_url(&song.id, max_bit_rate) {
             Ok(url) => {
                 let duration = song
                     .duration
                     .and_then(|seconds| u64::try_from(seconds).ok())
                     .map(Duration::from_secs);
-                self.audio.play(url, duration);
+                let cache_key = format!(
+                    "{}:{}:profile={}",
+                    api.base_url(),
+                    song.id,
+                    quality.cache_profile()
+                );
+                self.audio.play(url, cache_key, duration);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
         }
@@ -592,6 +615,8 @@ impl NavidromeApp {
             username: self.username_input.read(cx).value().trim().to_string(),
             password: self.password_input.read(cx).value().to_string(),
             theme: self.config.theme,
+            cache_dir: self.config.cache_dir.clone(),
+            transcoding_quality: self.config.transcoding_quality,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -615,6 +640,64 @@ impl NavidromeApp {
                 self.state.settings_open = true;
             }
         }
+    }
+
+    fn apply_cache_directory(&mut self, cache_dir: Option<PathBuf>) {
+        let effective_dir = cache_dir
+            .clone()
+            .unwrap_or_else(config::default_audio_cache_dir);
+        if let Err(error) = fs::create_dir_all(&effective_dir) {
+            self.state.error = Some(format!(
+                "Unable to use cache directory {}: {error}",
+                effective_dir.display()
+            ));
+            return;
+        }
+
+        self.config.cache_dir = cache_dir;
+        if let Err(error) = config::save(&self.config) {
+            self.state.error = Some(format!("Cache directory save failed: {error:#}"));
+            return;
+        }
+        self.audio.set_cache_directory(effective_dir.clone());
+        self.state.error = None;
+        self.state.status = format!("Audio cache: {}", effective_dir.display());
+    }
+
+    fn choose_cache_directory(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Select audio cache folder".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let selected = receiver
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .and_then(|paths| paths.into_iter().next());
+            if let Some(path) = selected {
+                this.update(cx, |this, cx| {
+                    this.apply_cache_directory(Some(path));
+                    cx.notify();
+                })?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+    }
+
+    fn set_transcoding_quality(&mut self, quality: TranscodingQuality, cx: &mut Context<Self>) {
+        self.config.transcoding_quality = quality;
+        if let Err(error) = config::save(&self.config) {
+            self.state.error = Some(format!("Playback quality save failed: {error:#}"));
+        } else {
+            self.state.error = None;
+            log::info!("transcoding quality changed; quality={}", quality.label());
+        }
+        cx.notify();
     }
 
     fn set_theme(
@@ -873,6 +956,7 @@ impl NavidromeApp {
             return;
         }
         if let Some(error) = playback.error {
+            log::error!("playback error reported to UI: {error}");
             self.state.ended_handled = true;
             self.state.error = Some(error);
         } else if playback.ended {
@@ -1767,6 +1851,7 @@ impl NavidromeApp {
     }
 
     fn render_settings(&self, cx: &Context<Self>) -> gpui::AnyElement {
+        let cache_dir = config::audio_cache_dir(&self.config);
         v_flex()
             .w_full()
             .max_w(px(840.0))
@@ -1781,6 +1866,88 @@ impl NavidromeApp {
                             .child("Servers"),
                     )
                     .child(self.render_server_status_card(cx)),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Playback"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_4()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("Audio cache folder"),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .w_full()
+                                            .min_w_0()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_sm()
+                                                    .child(cache_dir.display().to_string()),
+                                            )
+                                            .child(
+                                                Button::new("choose-cache-directory")
+                                                    .label("Choose folder")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.choose_cache_directory(cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("reset-cache-directory")
+                                                    .label("Use default")
+                                                    .disabled(self.config.cache_dir.is_none())
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.apply_cache_directory(None);
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("Streaming quality"),
+                                    )
+                                    .child(h_flex().gap_2().flex_wrap().children(
+                                        TranscodingQuality::ALL.into_iter().map(|quality| {
+                                            Button::new(SharedString::from(format!(
+                                                "quality-{}",
+                                                quality.cache_profile()
+                                            )))
+                                            .label(quality.label())
+                                            .selected(self.config.transcoding_quality == quality)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.set_transcoding_quality(quality, cx);
+                                            }))
+                                        }),
+                                    )),
+                            ),
+                    ),
             )
             .child(
                 v_flex()
@@ -2456,6 +2623,11 @@ impl NavidromeApp {
             .active(adjust_lightness(accent, -0.05))
             .shadow(true);
         let duration = playback.duration.unwrap_or_default();
+        let buffered_percent = if duration.is_zero() {
+            0.0
+        } else {
+            (playback.buffered.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
+        };
         let lyrics_open = self.state.view == View::NowPlaying;
         let queue_open = self.state.view == View::Queue;
         let song_info = if let Some(song) = &self.state.now_playing {
@@ -2673,12 +2845,28 @@ impl NavidromeApp {
                                     .child(format_playback(playback.position)),
                             )
                             .child(
-                                Slider::new(&self.playback_slider)
+                                div()
+                                    .relative()
                                     .flex_1()
                                     .mx_1()
-                                    .bg(accent)
-                                    .text_color(accent)
-                                    .rounded_full(),
+                                    .h_6()
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .left_0()
+                                            .top(px(9.0))
+                                            .h_1p5()
+                                            .w(relative(buffered_percent / 100.0))
+                                            .rounded_full()
+                                            .bg(accent.opacity(0.24)),
+                                    )
+                                    .child(
+                                        Slider::new(&self.playback_slider)
+                                            .w_full()
+                                            .bg(accent)
+                                            .text_color(accent)
+                                            .rounded_full(),
+                                    ),
                             )
                             .child(
                                 div()

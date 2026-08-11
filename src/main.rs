@@ -8,13 +8,77 @@ mod config;
 mod models;
 mod msg;
 
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+
+use anyhow::Context as _;
 use gpui::*;
 use gpui_component::{Root, Theme, ThemeMode, TitleBar};
 
 use crate::models::ThemePreference;
 
+const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+
+struct LogWriter {
+    file: File,
+    mirror_to_stderr: bool,
+}
+
+impl Write for LogWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.file.write_all(buffer)?;
+        if self.mirror_to_stderr {
+            let _ = io::stderr().write_all(buffer);
+        }
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()?;
+        if self.mirror_to_stderr {
+            let _ = io::stderr().flush();
+        }
+        Ok(())
+    }
+}
+
+fn init_logging() -> anyhow::Result<std::path::PathBuf> {
+    let path = config::log_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("failed to create log directory")?;
+    }
+    if path
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() >= MAX_LOG_BYTES)
+    {
+        let old_path = path.with_extension("log.old");
+        let _ = fs::remove_file(&old_path);
+        fs::rename(&path, old_path).context("failed to rotate log file")?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .context("failed to open log file")?;
+    let writer = LogWriter {
+        file,
+        mirror_to_stderr: cfg!(debug_assertions),
+    };
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,navidrome_client=debug"),
+    )
+    .format_timestamp_millis()
+    .target(env_logger::Target::Pipe(Box::new(writer)))
+    .try_init()
+    .context("failed to initialize logger")?;
+    Ok(path)
+}
+
 fn main() {
-    env_logger::init();
+    match init_logging() {
+        Ok(path) => log::info!("application starting; log_file={}", path.display()),
+        Err(error) => eprintln!("failed to initialize file logging: {error:#}"),
+    }
 
     Application::new().with_assets(assets::Assets).run(|cx| {
         gpui_component::init(cx);
