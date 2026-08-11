@@ -7,7 +7,8 @@ use serde_json::Value;
 use url::Url;
 
 use crate::models::{
-    Album, Artist, FavoriteKey, FavoriteKind, Favorites, Playlist, SearchResults, ServerInfo, Song,
+    Album, Artist, FavoriteKey, FavoriteKind, Favorites, LyricLine, Lyrics, Playlist,
+    SearchResults, ServerInfo, Song,
 };
 
 #[derive(Clone)]
@@ -206,6 +207,34 @@ impl Api {
         })
     }
 
+    pub async fn lyrics(&self, song: &Song) -> Result<Lyrics> {
+        let structured = self
+            .get_json("getLyricsBySongId", &[("id", &song.id)])
+            .await;
+
+        if let Ok(body) = &structured {
+            if let Some(lyrics) = parse_structured_lyrics(body) {
+                return Ok(lyrics);
+            }
+        }
+
+        match self
+            .get_json(
+                "getLyrics",
+                &[("artist", &song.artist), ("title", &song.title)],
+            )
+            .await
+        {
+            Ok(body) => Ok(parse_plain_lyrics(&body).unwrap_or_default()),
+            Err(_) if structured.is_ok() => Ok(Lyrics::default()),
+            Err(fallback_error) => Err(structured
+                .expect_err("successful structured lyrics handled above")
+                .context(format!(
+                    "legacy lyrics request also failed: {fallback_error:#}"
+                ))),
+        }
+    }
+
     pub async fn set_favorite(&self, key: &FavoriteKey, starred: bool) -> Result<()> {
         let view = if starred { "star" } else { "unstar" };
         self.get_json(view, &[(favorite_param(key.kind), &key.id)])
@@ -286,6 +315,93 @@ where
     Ok(out)
 }
 
+fn parse_structured_lyrics(body: &Value) -> Option<Lyrics> {
+    let variants = body
+        .get("lyricsList")?
+        .get("structuredLyrics")?
+        .as_array()?;
+    let selected = variants
+        .iter()
+        .filter(|lyrics| {
+            lyrics
+                .get("line")
+                .and_then(Value::as_array)
+                .is_some_and(|lines| !lines.is_empty())
+        })
+        .max_by_key(|lyrics| {
+            let synced = lyrics
+                .get("synced")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let line_count = lyrics
+                .get("line")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            (synced, line_count)
+        })?;
+    let offset = selected
+        .get("offset")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let lines = selected
+        .get("line")?
+        .as_array()?
+        .iter()
+        .map(|line| {
+            let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
+                let adjusted = i128::from(start) + i128::from(offset);
+                adjusted.clamp(0, i128::from(u64::MAX)) as u64
+            });
+            LyricLine {
+                start_ms,
+                text: line
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            }
+        })
+        .collect();
+
+    Some(Lyrics {
+        display_artist: selected
+            .get("displayArtist")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        display_title: selected
+            .get("displayTitle")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        lines,
+    })
+}
+
+fn parse_plain_lyrics(body: &Value) -> Option<Lyrics> {
+    let lyrics = body.get("lyrics")?;
+    let value = lyrics.get("value").and_then(Value::as_str)?.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(Lyrics {
+        display_artist: lyrics
+            .get("artist")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        display_title: lyrics
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        lines: value
+            .lines()
+            .map(|line| LyricLine {
+                start_ms: None,
+                text: line.to_string(),
+            })
+            .collect(),
+    })
+}
+
 pub fn format_duration(seconds: Option<i32>) -> String {
     let seconds = seconds.unwrap_or(0).max(0) as u64;
     let hours = seconds / 3600;
@@ -305,6 +421,7 @@ pub fn format_duration(seconds: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use super::*;
 
@@ -341,5 +458,49 @@ mod tests {
         assert_eq!(favorite_param(FavoriteKind::Artist), "artistId");
         assert_eq!(favorite_param(FavoriteKind::Album), "albumId");
         assert_eq!(favorite_param(FavoriteKind::Song), "id");
+    }
+
+    #[test]
+    fn parses_synced_structured_lyrics_with_offset() {
+        let body = serde_json::json!({
+            "lyricsList": {
+                "structuredLyrics": [{
+                    "synced": true,
+                    "offset": -100,
+                    "line": [
+                        {"start": 1000, "value": "First line"},
+                        {"start": 2500, "value": "Second line"}
+                    ]
+                }]
+            }
+        });
+
+        let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
+        assert!(lyrics.is_synced());
+        assert_eq!(lyrics.lines[0].start_ms, Some(900));
+        assert_eq!(
+            lyrics.active_line_index(Duration::from_millis(2_000)),
+            Some(0)
+        );
+        assert_eq!(
+            lyrics.active_line_index(Duration::from_millis(3_000)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn parses_plain_lyrics_lines() {
+        let body = serde_json::json!({
+            "lyrics": {
+                "artist": "Artist",
+                "title": "Song",
+                "value": "First line\nSecond line"
+            }
+        });
+
+        let lyrics = parse_plain_lyrics(&body).expect("plain lyrics should parse");
+        assert!(!lyrics.is_synced());
+        assert_eq!(lyrics.lines.len(), 2);
+        assert_eq!(lyrics.lines[1].text, "Second line");
     }
 }

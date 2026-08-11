@@ -3,10 +3,12 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, img, px, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -23,7 +25,7 @@ use crate::assets::PlayerIcon;
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
-    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Playlist, SearchResults,
+    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, Playlist, SearchResults,
     ServerInfo, Song, ThemePreference,
 };
 use crate::msg::{error_message, Msg};
@@ -39,6 +41,7 @@ enum View {
     ArtistDetail,
     AlbumDetail,
     PlaylistDetail,
+    NowPlaying,
 }
 
 struct AppState {
@@ -61,6 +64,10 @@ struct AppState {
     queue: Vec<Song>,
     queue_index: Option<usize>,
     now_playing: Option<Song>,
+    lyrics: Option<Lyrics>,
+    lyrics_song_id: Option<String>,
+    lyrics_loading: bool,
+    lyrics_error: Option<String>,
     covers: HashMap<String, Arc<GpuiImage>>,
     requested_covers: HashSet<String>,
     status: String,
@@ -92,6 +99,10 @@ impl Default for AppState {
             queue: Vec::new(),
             queue_index: None,
             now_playing: None,
+            lyrics: None,
+            lyrics_song_id: None,
+            lyrics_loading: false,
+            lyrics_error: None,
             covers: HashMap::new(),
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
@@ -117,6 +128,8 @@ pub struct NavidromeApp {
     password_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
     volume_slider: Entity<SliderState>,
+    lyrics_scroll_handle: ScrollHandle,
+    active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -177,6 +190,8 @@ impl NavidromeApp {
             password_input,
             playback_slider: playback_slider.clone(),
             volume_slider: volume_slider.clone(),
+            lyrics_scroll_handle: ScrollHandle::new(),
+            active_lyric_index: None,
             _subscriptions: Vec::new(),
         };
         app.audio.set_volume(app.state.volume);
@@ -237,6 +252,7 @@ impl NavidromeApp {
                 .update(cx, |this, cx| {
                     this.poll_messages();
                     this.handle_playback_end();
+                    this.update_active_lyric();
                     cx.notify();
                 })
                 .is_err()
@@ -426,6 +442,33 @@ impl NavidromeApp {
         self.play_queue_index(index);
     }
 
+    fn load_lyrics(&mut self, song: &Song) {
+        self.active_lyric_index = None;
+        if self.state.lyrics_song_id.as_deref() == Some(song.id.as_str())
+            && (self.state.lyrics.is_some() || self.state.lyrics_loading)
+        {
+            return;
+        }
+
+        self.state.lyrics_song_id = Some(song.id.clone());
+        self.state.lyrics = None;
+        self.state.lyrics_error = None;
+        let Some(api) = self.api.clone() else {
+            self.state.lyrics_loading = false;
+            self.state.lyrics_error = Some("Configure a server to load lyrics".to_string());
+            return;
+        };
+
+        self.state.lyrics_loading = true;
+        let song = song.clone();
+        let song_id = song.id.clone();
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.lyrics(&song).await.map_err(error_message);
+            let _ = tx.send(Msg::Lyrics { song_id, result });
+        });
+    }
+
     fn play_queue_index(&mut self, index: usize) {
         let Some(song) = self.state.queue.get(index).cloned() else {
             return;
@@ -434,6 +477,7 @@ impl NavidromeApp {
         self.state.now_playing = Some(song.clone());
         self.state.ended_handled = false;
         self.ensure_cover(song.cover_art.as_deref());
+        self.load_lyrics(&song);
         let Some(api) = self.api.clone() else {
             self.state.error = Some("Configure a server before playing".to_string());
             return;
@@ -465,6 +509,7 @@ impl NavidromeApp {
     fn stop_playback(&mut self) {
         self.audio.stop();
         self.state.now_playing = None;
+        self.active_lyric_index = None;
         self.state.ended_handled = true;
     }
 
@@ -717,6 +762,24 @@ impl NavidromeApp {
                         Err(error) => self.state.error = Some(error),
                     }
                 }
+                Msg::Lyrics { song_id, result } => {
+                    if self.state.now_playing.as_ref().map(|song| song.id.as_str())
+                        == Some(song_id.as_str())
+                    {
+                        self.state.lyrics_loading = false;
+                        self.active_lyric_index = None;
+                        match result {
+                            Ok(lyrics) => {
+                                self.state.lyrics = Some(lyrics);
+                                self.state.lyrics_error = None;
+                            }
+                            Err(error) => {
+                                self.state.lyrics = None;
+                                self.state.lyrics_error = Some(error);
+                            }
+                        }
+                    }
+                }
                 Msg::Cover { id, result } => {
                     if let Ok(bytes) = result {
                         if let Ok(format) = image::guess_format(&bytes) {
@@ -743,6 +806,24 @@ impl NavidromeApp {
         } else if playback.ended {
             self.state.ended_handled = true;
             self.skip(1);
+        }
+    }
+
+    fn update_active_lyric(&mut self) {
+        if self.state.view != View::NowPlaying {
+            return;
+        }
+        let active = self
+            .state
+            .lyrics
+            .as_ref()
+            .filter(|lyrics| lyrics.is_synced())
+            .and_then(|lyrics| lyrics.active_line_index(self.audio.state().position));
+        if active != self.active_lyric_index {
+            self.active_lyric_index = active;
+            if let Some(index) = active {
+                self.lyrics_scroll_handle.scroll_to_item(index + 1);
+            }
         }
     }
 
@@ -1120,7 +1201,6 @@ impl NavidromeApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(34.0)))
-                    .child(div().w(px(48.0)).child("#"))
                     .child(div().flex_1().child("Title"))
                     .child(div().w(px(220.0)).child("Artist"))
                     .child(div().w(px(72.0)).child("Time")),
@@ -1149,17 +1229,6 @@ impl NavidromeApp {
                 };
 
                 row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
-                    .child(
-                        div()
-                            .w(px(48.0))
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                song.track
-                                    .map(|track| track.to_string())
-                                    .unwrap_or_else(|| "-".to_string()),
-                            ),
-                    )
                     .child(
                         h_flex()
                             .flex_1()
@@ -1322,6 +1391,146 @@ impl NavidromeApp {
                 .child(message.clone())
                 .into_any_element()
         })
+    }
+
+    fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui::AnyElement {
+        let Some(song) = &self.state.now_playing else {
+            return v_flex()
+                .gap_5()
+                .child(self.page_header("Now Playing", "Choose a song to start playback.", cx))
+                .into_any_element();
+        };
+
+        let viewport_width = f32::from(window.viewport_size().width);
+        let cover_size = if viewport_width < 1_100.0 {
+            280.0
+        } else {
+            360.0
+        };
+        let playback = self.audio.state();
+        let active_line = self
+            .state
+            .lyrics
+            .as_ref()
+            .and_then(|lyrics| lyrics.active_line_index(playback.position));
+        let lyrics = self.state.lyrics.as_ref();
+        let lyrics_body = if self.state.lyrics_loading {
+            div()
+                .py_8()
+                .text_color(cx.theme().muted_foreground)
+                .child("Loading lyrics...")
+                .into_any_element()
+        } else if let Some(error) = &self.state.lyrics_error {
+            v_flex()
+                .gap_2()
+                .py_8()
+                .text_color(cx.theme().muted_foreground)
+                .child("Lyrics are unavailable for this track.")
+                .child(div().text_xs().child(error.clone()))
+                .into_any_element()
+        } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
+            let synced = lyrics.is_synced();
+            v_flex()
+                .id("lyrics-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .track_scroll(&self.lyrics_scroll_handle)
+                .child(div().h(px(144.0)).flex_none())
+                .children(lyrics.lines.iter().enumerate().map(|(index, line)| {
+                    let current = synced && active_line == Some(index);
+                    let past = synced && active_line.is_some_and(|active| index < active);
+                    let text = if line.text.is_empty() {
+                        " ".to_string()
+                    } else {
+                        line.text.clone()
+                    };
+                    let line = div()
+                        .min_h(px(40.0))
+                        .py_2()
+                        .text_lg()
+                        .line_height(rems(1.7))
+                        .child(text);
+                    if current {
+                        line.font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().primary)
+                    } else if past {
+                        line.text_color(cx.theme().foreground.opacity(0.58))
+                    } else if synced {
+                        line.text_color(cx.theme().muted_foreground)
+                    } else {
+                        line.text_color(cx.theme().foreground)
+                    }
+                }))
+                .child(div().h(px(180.0)).flex_none())
+                .into_any_element()
+        } else {
+            div()
+                .py_8()
+                .text_color(cx.theme().muted_foreground)
+                .child("No lyrics are available for this track.")
+                .into_any_element()
+        };
+
+        v_flex()
+            .gap_5()
+            .child(self.page_header(
+                "Now Playing",
+                format!("{} - {}", song.title, song.artist),
+                cx,
+            ))
+            .children(self.error_banner(cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_start()
+                    .gap_8()
+                    .child(
+                        v_flex()
+                            .w(px(cover_size))
+                            .flex_none()
+                            .gap_3()
+                            .child(self.render_cover(song.cover_art.as_deref(), cover_size, cx))
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(song.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(song.artist.clone()),
+                            )
+                            .when(!song.album.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(song.album.clone()),
+                                )
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(540.0))
+                            .pl_8()
+                            .border_l_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .pb_3()
+                                    .text_lg()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Lyrics"),
+                            )
+                            .child(lyrics_body),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui::AnyElement {
@@ -1629,6 +1838,7 @@ impl NavidromeApp {
                     .child(self.render_song_list(&self.state.playlist_songs, cx))
                     .into_any_element()
             }
+            View::NowPlaying => self.render_now_playing(window, cx),
         }
     }
 
@@ -1636,8 +1846,11 @@ impl NavidromeApp {
         let playback = self.audio.state();
         let song_info = if let Some(song) = &self.state.now_playing {
             h_flex()
+                .id("now-playing-info")
                 .w(px(320.0))
                 .gap_3()
+                .cursor_pointer()
+                .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
                 .child(self.render_cover(song.cover_art.as_deref(), 52.0, cx))
                 .child(
                     v_flex()
@@ -1658,6 +1871,12 @@ impl NavidromeApp {
                                 .child(song.artist.clone()),
                         ),
                 )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.state.settings_open = false;
+                    this.state.view = View::NowPlaying;
+                    this.active_lyric_index = None;
+                    cx.notify();
+                }))
                 .into_any_element()
         } else {
             div()

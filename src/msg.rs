@@ -1,5 +1,5 @@
 use crate::models::{
-    Album, Artist, FavoriteKey, Favorites, Playlist, SearchResults, ServerInfo, Song,
+    Album, Artist, FavoriteKey, Favorites, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 
 #[derive(Debug)]
@@ -27,6 +27,10 @@ pub enum Msg {
         result: Result<Vec<Song>, String>,
     },
     Search(Result<SearchResults, String>),
+    Lyrics {
+        song_id: String,
+        result: Result<Lyrics, String>,
+    },
     Cover {
         id: String,
         result: Result<Vec<u8>, String>,

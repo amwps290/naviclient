@@ -135,6 +135,35 @@ pub struct Favorites {
     pub songs: Vec<Song>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Lyrics {
+    pub display_artist: Option<String>,
+    pub display_title: Option<String>,
+    pub lines: Vec<LyricLine>,
+}
+
+impl Lyrics {
+    pub fn is_synced(&self) -> bool {
+        self.lines.iter().any(|line| line.start_ms.is_some())
+    }
+
+    pub fn active_line_index(&self, position: std::time::Duration) -> Option<usize> {
+        let position_ms = u64::try_from(position.as_millis()).unwrap_or(u64::MAX);
+        self.lines
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, line)| line.start_ms.is_some_and(|start| start <= position_ms))
+            .map(|(index, _)| index)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LyricLine {
+    pub start_ms: Option<u64>,
+    pub text: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct ServerInfo {
     pub version: String,

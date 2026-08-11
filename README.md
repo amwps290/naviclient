@@ -15,6 +15,7 @@ JavaScript runtime.
 - Audio playback with play/pause, stop, previous/next, volume, seek, and queue
   progression
 - Double-click song playback with highlighted and animated now-playing rows
+- Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
 - Server settings persisted locally as JSON
 - Navidrome-synced favorites for artists, albums, and songs
 - Light theme by default, with light, dark, and system-following appearance options
