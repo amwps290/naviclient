@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, ease_out_quint, img, point, px, rems, Animation, AnimationExt, AppContext, Context,
-    Entity, FontWeight, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window,
+    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, point, px, rems, Animation,
+    AnimationExt, AppContext, Context, Entity, FontWeight, Hsla, Image as GpuiImage,
+    ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -98,6 +98,7 @@ struct AppState {
     lyrics_loading: bool,
     lyrics_error: Option<String>,
     covers: HashMap<String, Arc<GpuiImage>>,
+    cover_palettes: HashMap<String, (Hsla, Hsla)>,
     requested_covers: HashSet<String>,
     status: String,
     error: Option<String>,
@@ -135,6 +136,7 @@ impl Default for AppState {
             lyrics_loading: false,
             lyrics_error: None,
             covers: HashMap::new(),
+            cover_palettes: HashMap::new(),
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
             error: None,
@@ -852,6 +854,9 @@ impl NavidromeApp {
                 }
                 Msg::Cover { id, result } => {
                     if let Ok(bytes) = result {
+                        if let Some(palette) = extract_cover_palette(&bytes) {
+                            self.state.cover_palettes.insert(id.clone(), palette);
+                        }
                         if let Ok(format) = image::guess_format(&bytes) {
                             if let Some(format) = gpui_image_format(format) {
                                 self.state
@@ -2622,6 +2627,17 @@ impl Render for NavidromeApp {
         }
 
         if self.state.view == View::NowPlaying {
+            let (cover_base, cover_accent) = self
+                .state
+                .now_playing
+                .as_ref()
+                .and_then(|song| song.cover_art.as_deref())
+                .and_then(|cover_id| self.state.cover_palettes.get(cover_id).copied())
+                .unwrap_or((cx.theme().info, cx.theme().chart_2));
+            let background_start = cx.theme().background.blend(cover_base.opacity(0.2));
+            let background_end = cx.theme().background.blend(cover_accent.opacity(0.16));
+            let background_animation = Animation::new(Duration::from_secs(18)).repeat();
+
             return v_flex()
                 .size_full()
                 .bg(cx.theme().background)
@@ -2674,7 +2690,18 @@ impl Render for NavidromeApp {
                         .flex_1()
                         .min_h_0()
                         .overflow_hidden()
-                        .child(self.render_now_playing(window, cx)),
+                        .child(self.render_now_playing(window, cx))
+                        .with_animation(
+                            "now-playing-background",
+                            background_animation,
+                            move |this, delta| {
+                                this.bg(linear_gradient(
+                                    120.0 + delta * 360.0,
+                                    linear_color_stop(background_start, 0.0),
+                                    linear_color_stop(background_end, 1.0),
+                                ))
+                            },
+                        ),
                 )
                 .child(self.render_player(cx))
                 .into_any_element();
@@ -2756,6 +2783,83 @@ impl Render for NavidromeApp {
     }
 }
 
+fn rgb_to_hsla(red: f32, green: f32, blue: f32) -> Hsla {
+    let max = red.max(green).max(blue);
+    let min = red.min(green).min(blue);
+    let lightness = (max + min) * 0.5;
+    let delta = max - min;
+
+    if delta <= f32::EPSILON {
+        return hsla(0.0, 0.0, lightness, 1.0);
+    }
+
+    let saturation = delta / (1.0 - (2.0 * lightness - 1.0).abs()).max(f32::EPSILON);
+    let hue = if max == red {
+        ((green - blue) / delta).rem_euclid(6.0)
+    } else if max == green {
+        (blue - red) / delta + 2.0
+    } else {
+        (red - green) / delta + 4.0
+    } / 6.0;
+
+    hsla(hue, saturation, lightness, 1.0)
+}
+
+fn extract_cover_palette(bytes: &[u8]) -> Option<(Hsla, Hsla)> {
+    let image = image::load_from_memory(bytes)
+        .ok()?
+        .thumbnail(32, 32)
+        .to_rgb8();
+    let mut average = [0.0_f32; 3];
+    let mut vivid = [0.0_f32; 3];
+    let mut count = 0.0_f32;
+    let mut vivid_weight = 0.0_f32;
+
+    for pixel in image.pixels() {
+        let red = f32::from(pixel[0]) / 255.0;
+        let green = f32::from(pixel[1]) / 255.0;
+        let blue = f32::from(pixel[2]) / 255.0;
+        average[0] += red;
+        average[1] += green;
+        average[2] += blue;
+        count += 1.0;
+
+        let color = rgb_to_hsla(red, green, blue);
+        if color.s > 0.25 && color.l > 0.12 && color.l < 0.88 {
+            let weight = color.s * (1.0 - (color.l - 0.5).abs());
+            vivid[0] += red * weight;
+            vivid[1] += green * weight;
+            vivid[2] += blue * weight;
+            vivid_weight += weight;
+        }
+    }
+
+    if count == 0.0 {
+        return None;
+    }
+
+    let mut base = rgb_to_hsla(average[0] / count, average[1] / count, average[2] / count);
+    let mut accent = if vivid_weight > 0.0 {
+        rgb_to_hsla(
+            vivid[0] / vivid_weight,
+            vivid[1] / vivid_weight,
+            vivid[2] / vivid_weight,
+        )
+    } else {
+        base
+    };
+
+    base.s = base.s.clamp(0.2, 0.72);
+    base.l = base.l.clamp(0.35, 0.62);
+    accent.s = (accent.s * 1.12).clamp(0.32, 0.86);
+    accent.l = accent.l.clamp(0.38, 0.6);
+    if (base.h - accent.h).abs() < 0.035 {
+        accent.h = (accent.h + 0.08) % 1.0;
+    }
+
+    Some((base, accent))
+}
+
 fn gpui_image_format(format: image::ImageFormat) -> Option<GpuiImageFormat> {
     match format {
         image::ImageFormat::Png => Some(GpuiImageFormat::Png),
@@ -2765,5 +2869,16 @@ fn gpui_image_format(format: image::ImageFormat) -> Option<GpuiImageFormat> {
         image::ImageFormat::Bmp => Some(GpuiImageFormat::Bmp),
         image::ImageFormat::Tiff => Some(GpuiImageFormat::Tiff),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_cover_palette;
+
+    #[test]
+    fn extracts_palette_from_default_cover() {
+        let palette = extract_cover_palette(include_bytes!("../assets/default-cover.png"));
+        assert!(palette.is_some());
     }
 }
