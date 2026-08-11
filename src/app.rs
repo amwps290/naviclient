@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, point, px, rems, Animation,
-    AnimationExt, AppContext, Context, Entity, FontWeight, Hsla, Image as GpuiImage,
-    ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
+    rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
+    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Transformation, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -1039,6 +1040,110 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    fn render_vinyl_record(
+        &self,
+        cover_id: Option<&str>,
+        size: f32,
+        spinning: bool,
+        cx: &Context<Self>,
+    ) -> gpui::AnyElement {
+        let cover = cover_id
+            .and_then(|id| self.state.covers.get(id))
+            .cloned()
+            .unwrap_or_else(|| self.default_cover.clone());
+        let label_size = size * 0.48;
+        let label_offset = (size - label_size) * 0.5;
+        let inner_cover_size = label_size - 10.0;
+        let highlight = Icon::new(AppIcon::VinylHighlight)
+            .absolute()
+            .top_0()
+            .left_0()
+            .with_size(px(size))
+            .text_color(hsla(0.0, 0.0, 1.0, 0.18));
+        let highlight = if spinning {
+            highlight
+                .with_animation(
+                    SharedString::from(format!("vinyl-spin-{}", cover_id.unwrap_or("default"))),
+                    Animation::new(Duration::from_secs(8)).repeat(),
+                    |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+                )
+                .into_any_element()
+        } else {
+            highlight.into_any_element()
+        };
+
+        div()
+            .relative()
+            .w(px(size))
+            .h(px(size))
+            .flex_none()
+            .rounded_full()
+            .bg(hsla(0.0, 0.0, 0.07, 1.0))
+            .shadow_lg()
+            .child(
+                div()
+                    .absolute()
+                    .top(px(size * 0.07))
+                    .left(px(size * 0.07))
+                    .size(px(size * 0.86))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.08)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(size * 0.14))
+                    .left(px(size * 0.14))
+                    .size(px(size * 0.72))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.06)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(size * 0.21))
+                    .left(px(size * 0.21))
+                    .size(px(size * 0.58))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.05)),
+            )
+            .child(highlight)
+            .child(
+                div()
+                    .absolute()
+                    .top(px(label_offset))
+                    .left(px(label_offset))
+                    .size(px(label_size))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(0.7))
+                    .bg(cx.theme().background)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(img(cover).size(px(inner_cover_size)).rounded_full())
+                    .child(
+                        div()
+                            .absolute()
+                            .size(px(9.0))
+                            .rounded_full()
+                            .bg(hsla(0.0, 0.0, 0.08, 1.0)),
+                    ),
+            )
+            .child(
+                Icon::new(AppIcon::Tonearm)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .with_size(px(size))
+                    .text_color(cx.theme().foreground.opacity(0.68)),
+            )
+            .into_any_element()
+    }
+
     fn page_header(
         &self,
         title: impl Into<SharedString>,
@@ -1906,7 +2011,12 @@ impl NavidromeApp {
                     .cursor_pointer()
                     .rounded_lg()
                     .hover(|style| style.opacity(0.92))
-                    .child(self.render_cover(song.cover_art.as_deref(), cover_size, cx))
+                    .child(self.render_vinyl_record(
+                        song.cover_art.as_deref(),
+                        cover_size,
+                        playback.active && !playback.paused,
+                        cx,
+                    ))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.lyrics_expanded = true;
                         this.active_lyric_index = None;
