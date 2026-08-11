@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="100" cy="100" r="20" fill="currentColor" stroke="none"/>
-  <path d="M100 118V167" stroke-width="11"/>
-  <path d="M100 167L116 185" stroke-width="13"/>
-  <path d="M111 184L122 194" stroke-width="15"/>
-  <path d="M122 194L126 198" stroke-width="4"/>
+  <path d="M100 119V170" stroke-width="11"/>
+  <path d="M100 170H82" stroke-width="13"/>
+  <path d="M82 166V175" stroke-width="15"/>
+  <path d="M79 174L76 179" stroke-width="4"/>
 </svg>

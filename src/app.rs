@@ -1070,8 +1070,8 @@ impl NavidromeApp {
         let label_size = size * 0.42;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - 10.0;
-        let tonearm_size = size * 0.68;
-        let tonearm_left = size - tonearm_size * 0.5;
+        let tonearm_size = size * 0.64;
+        let tonearm_left = size * 1.06 - tonearm_size * 0.5;
         let tonearm_top = size * 0.08 - tonearm_size * 0.5;
         let highlight = Icon::new(AppIcon::VinylHighlight)
             .absolute()
@@ -1161,9 +1161,9 @@ impl NavidromeApp {
                         Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
                         move |icon, delta| {
                             let rotation = if tonearm_engaged {
-                                delta * 0.125
+                                delta / 15.0
                             } else {
-                                (1.0 - delta) * 0.125
+                                (1.0 - delta) / 15.0
                             };
                             icon.transform(Transformation::rotate(percentage(rotation)))
                         },
@@ -1184,9 +1184,9 @@ impl NavidromeApp {
                         Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
                         move |icon, delta| {
                             let rotation = if tonearm_engaged {
-                                delta * 0.125
+                                delta / 15.0
                             } else {
-                                (1.0 - delta) * 0.125
+                                (1.0 - delta) / 15.0
                             };
                             icon.transform(Transformation::rotate(percentage(rotation)))
                         },
