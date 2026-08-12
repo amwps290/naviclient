@@ -55,6 +55,12 @@ Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
 5 MiB. Stream URLs are logged without authentication query parameters.
 
+## Development Roadmap
+
+The detailed, checkbox-based implementation roadmap is maintained in
+[`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md). Update it with the completion
+commit whenever a milestone is finished.
+
 ## Architecture
 
 - `src/api.rs` - Subsonic API client, authentication, and JSON models parsing

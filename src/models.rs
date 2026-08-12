@@ -236,6 +236,8 @@ pub struct Config {
     pub cache_dir: Option<PathBuf>,
     #[serde(default)]
     pub transcoding_quality: TranscodingQuality,
+    #[serde(default = "default_volume")]
+    pub volume: f32,
 }
 
 impl Default for Config {
@@ -247,8 +249,13 @@ impl Default for Config {
             theme: ThemePreference::Light,
             cache_dir: None,
             transcoding_quality: TranscodingQuality::Original,
+            volume: default_volume(),
         }
     }
+}
+
+fn default_volume() -> f32 {
+    0.7
 }
 
 #[cfg(test)]
@@ -267,6 +274,7 @@ mod tests {
         assert_eq!(config.theme, ThemePreference::Light);
         assert_eq!(config.cache_dir, None);
         assert_eq!(config.transcoding_quality, TranscodingQuality::Original);
+        assert!((config.volume - 0.7).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -281,6 +289,7 @@ mod tests {
         let config = Config {
             cache_dir: Some(PathBuf::from("D:/Music Cache")),
             transcoding_quality: TranscodingQuality::Kbps192,
+            volume: 0.42,
             ..Config::default()
         };
 
@@ -289,6 +298,7 @@ mod tests {
 
         assert_eq!(restored.cache_dir, config.cache_dir);
         assert_eq!(restored.transcoding_quality, TranscodingQuality::Kbps192);
+        assert!((restored.volume - 0.42).abs() < f32::EPSILON);
     }
 
     #[test]

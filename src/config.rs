@@ -47,10 +47,16 @@ pub fn log_path() -> PathBuf {
 
 pub fn load() -> Config {
     let path = config_path();
-    fs::read_to_string(&path)
+    let mut config: Config = fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    config.volume = if config.volume.is_finite() {
+        config.volume.clamp(0.0, 1.0)
+    } else {
+        Config::default().volume
+    };
+    config
 }
 
 pub fn save(config: &Config) -> Result<()> {

@@ -10,7 +10,7 @@ use gpui::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
     relative, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString,
+    ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, ScrollWheelEvent, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
 };
 use gpui_component::{
@@ -168,6 +168,12 @@ pub struct NavidromeApp {
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
+    volume_slider: Entity<SliderState>,
+    muted: bool,
+    volume_before_mute: f32,
+    volume_save_generation: u64,
+    volume_panel_open: bool,
+    volume_panel_generation: u64,
     lyrics_scroll_handle: ScrollHandle,
     lyrics_scroll_target: Option<Pixels>,
     active_lyric_index: Option<usize>,
@@ -214,6 +220,14 @@ impl NavidromeApp {
                 .step(0.1)
                 .default_value(0.0)
         });
+        let volume_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(100.0)
+                .step(1.0)
+                .default_value(config.volume * 100.0)
+        });
+        let initial_volume = config.volume;
 
         let mut app = Self {
             runtime,
@@ -229,12 +243,22 @@ impl NavidromeApp {
             username_input,
             password_input,
             playback_slider: playback_slider.clone(),
+            volume_slider: volume_slider.clone(),
+            muted: false,
+            volume_before_mute: if initial_volume > 0.001 {
+                initial_volume
+            } else {
+                0.7
+            },
+            volume_save_generation: 0,
+            volume_panel_open: false,
+            volume_panel_generation: 0,
             lyrics_scroll_handle: ScrollHandle::new(),
             lyrics_scroll_target: None,
             active_lyric_index: None,
             _subscriptions: Vec::new(),
         };
-        app.audio.set_volume(1.0);
+        app.audio.set_volume(initial_volume);
         app._subscriptions.push(
             cx.subscribe(&search_input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
@@ -255,6 +279,15 @@ impl NavidromeApp {
                         .seek(duration.mul_f32((*value / 100.0).clamp(0.0, 1.0)));
                 }
                 cx.notify();
+            },
+        ));
+        app._subscriptions.push(cx.subscribe(
+            &volume_slider,
+            |this, _, event: &SliderEvent, cx| {
+                let SliderEvent::Change(SliderValue::Single(value)) = event else {
+                    return;
+                };
+                this.set_volume(*value / 100.0, cx);
             },
         ));
         app._subscriptions
@@ -599,6 +632,85 @@ impl NavidromeApp {
         }
     }
 
+    fn set_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        let volume = normalize_volume(volume);
+        self.muted = false;
+        self.config.volume = volume;
+        if volume > 0.001 {
+            self.volume_before_mute = volume;
+        }
+        self.audio.set_volume(volume);
+        self.schedule_volume_save(cx);
+        cx.notify();
+    }
+
+    fn adjust_volume(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let volume = normalize_volume(self.config.volume + delta);
+        self.volume_slider.update(cx, |slider, cx| {
+            slider.set_value(volume * 100.0, window, cx);
+        });
+        self.set_volume(volume, cx);
+    }
+
+    fn toggle_mute(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.muted || self.config.volume <= 0.001 {
+            let volume = restored_volume(self.volume_before_mute);
+            self.muted = false;
+            self.config.volume = volume;
+            self.audio.set_volume(volume);
+            self.volume_slider.update(cx, |slider, cx| {
+                slider.set_value(volume * 100.0, window, cx);
+            });
+            self.schedule_volume_save(cx);
+        } else {
+            self.volume_before_mute = self.config.volume;
+            self.muted = true;
+            self.audio.set_volume(0.0);
+        }
+        cx.notify();
+    }
+
+    fn schedule_volume_save(&mut self, cx: &mut Context<Self>) {
+        self.volume_save_generation = self.volume_save_generation.wrapping_add(1);
+        let generation = self.volume_save_generation;
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(500)).await;
+            this.update(cx, |this, cx| {
+                if this.volume_save_generation != generation {
+                    return;
+                }
+                if let Err(error) = config::save(&this.config) {
+                    this.state.error = Some(format!("Volume save failed: {error:#}"));
+                }
+                cx.notify();
+            })?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+    }
+
+    fn show_volume_panel(&mut self, cx: &mut Context<Self>) {
+        self.volume_panel_generation = self.volume_panel_generation.wrapping_add(1);
+        self.volume_panel_open = true;
+        cx.notify();
+    }
+
+    fn schedule_volume_panel_close(&mut self, cx: &mut Context<Self>) {
+        self.volume_panel_generation = self.volume_panel_generation.wrapping_add(1);
+        let generation = self.volume_panel_generation;
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(220)).await;
+            this.update(cx, |this, cx| {
+                if this.volume_panel_generation == generation {
+                    this.volume_panel_open = false;
+                    cx.notify();
+                }
+            })?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+    }
+
     fn open_now_playing(&mut self) {
         if self.state.view != View::NowPlaying {
             self.state.view_before_now_playing = self.state.view;
@@ -623,6 +735,7 @@ impl NavidromeApp {
             theme: self.config.theme,
             cache_dir: self.config.cache_dir.clone(),
             transcoding_quality: self.config.transcoding_quality,
+            volume: self.config.volume,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -2739,6 +2852,18 @@ impl NavidromeApp {
         };
         let lyrics_open = self.state.view == View::NowPlaying;
         let queue_open = self.state.view == View::Queue;
+        let output_volume = effective_volume(self.config.volume, self.muted);
+        let volume_icon = if self.muted || output_volume <= 0.001 {
+            AppIcon::VolumeMuted
+        } else if output_volume < 0.5 {
+            AppIcon::VolumeLow
+        } else {
+            AppIcon::VolumeHigh
+        };
+        let volume_value = match self.volume_slider.read(cx).value() {
+            SliderValue::Single(value) => value,
+            SliderValue::Range(_, value) => value,
+        };
         let technical_info = self
             .state
             .now_playing
@@ -2841,10 +2966,9 @@ impl NavidromeApp {
         };
 
         let right_controls = h_flex()
-            .w(px(220.0))
+            .w(px(260.0))
             .h(px(40.0))
             .min_w_0()
-            .overflow_hidden()
             .flex_shrink_0()
             .justify_end()
             .items_center()
@@ -2894,6 +3018,97 @@ impl NavidromeApp {
                         this.state.view = View::Queue;
                         cx.notify();
                     })),
+            )
+            .child(
+                div()
+                    .h(px(24.0))
+                    .border_l_1()
+                    .border_color(cx.theme().border.opacity(0.6)),
+            )
+            .child(
+                div()
+                    .id("player-volume-control")
+                    .relative()
+                    .flex_none()
+                    .on_hover(cx.listener(|this, hovering, _, cx| {
+                        if *hovering {
+                            this.show_volume_panel(cx);
+                        } else {
+                            this.schedule_volume_panel_close(cx);
+                        }
+                    }))
+                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                        let delta_y = f32::from(event.delta.pixel_delta(px(16.0)).y);
+                        if delta_y.abs() < f32::EPSILON {
+                            return;
+                        }
+                        let delta = if delta_y > 0.0 { 0.05 } else { -0.05 };
+                        this.adjust_volume(delta, window, cx);
+                        cx.stop_propagation();
+                    }))
+                    .when(self.volume_panel_open, |this| {
+                        this.child(
+                            v_flex()
+                                .id("player-volume-panel")
+                                .absolute()
+                                .bottom(px(36.0))
+                                .left(px(-13.0))
+                                .w(px(54.0))
+                                .p_2()
+                                .items_center()
+                                .gap_1()
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().popover)
+                                .text_color(cx.theme().popover_foreground)
+                                .shadow_md()
+                                .on_hover(cx.listener(|this, hovering, _, cx| {
+                                    if *hovering {
+                                        this.show_volume_panel(cx);
+                                    } else {
+                                        this.schedule_volume_panel_close(cx);
+                                    }
+                                }))
+                                .child(
+                                    div()
+                                        .h(px(18.0))
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(if self.muted {
+                                            cx.theme().muted_foreground
+                                        } else {
+                                            cx.theme().popover_foreground
+                                        })
+                                        .child(format!("{}%", volume_value.round() as u32)),
+                                )
+                                .child(
+                                    div()
+                                        .h(px(120.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            Slider::new(&self.volume_slider)
+                                                .vertical()
+                                                .h(px(120.0))
+                                                .bg(accent)
+                                                .text_color(accent)
+                                                .rounded_full(),
+                                        ),
+                                ),
+                        )
+                    })
+                    .child(
+                        Button::new("player-volume-mute")
+                            .icon(volume_icon)
+                            .ghost()
+                            .with_size(px(28.0))
+                            .rounded_full()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_mute(window, cx);
+                            })),
+                    ),
             );
 
         h_flex()
@@ -2903,7 +3118,6 @@ impl NavidromeApp {
             .gap_4()
             .items_center()
             .justify_between()
-            .overflow_hidden()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.8))
             .bg(cx.theme().secondary.opacity(0.22))
@@ -3259,6 +3473,31 @@ impl Render for NavidromeApp {
     }
 }
 
+fn normalize_volume(volume: f32) -> f32 {
+    if volume.is_finite() {
+        volume.clamp(0.0, 1.0)
+    } else {
+        0.7
+    }
+}
+
+fn effective_volume(volume: f32, muted: bool) -> f32 {
+    if muted {
+        0.0
+    } else {
+        normalize_volume(volume)
+    }
+}
+
+fn restored_volume(volume_before_mute: f32) -> f32 {
+    let volume = normalize_volume(volume_before_mute);
+    if volume > 0.001 {
+        volume
+    } else {
+        0.7
+    }
+}
+
 fn technical_info_chip(
     id: &'static str,
     label: String,
@@ -3551,8 +3790,9 @@ mod tests {
     use gpui::hsla;
 
     use super::{
-        accent_foreground, contrast_ratio, extract_cover_palette, format_file_size,
-        playback_technical_info, readable_accent, vinyl_rotation_phase,
+        accent_foreground, contrast_ratio, effective_volume, extract_cover_palette,
+        format_file_size, normalize_volume, playback_technical_info, readable_accent,
+        restored_volume, vinyl_rotation_phase,
     };
     use crate::models::{Song, TranscodingQuality};
 
@@ -3625,5 +3865,26 @@ mod tests {
         assert_eq!(format_file_size(800), "800 B");
         assert_eq!(format_file_size(1_536), "1.5 KB");
         assert_eq!(format_file_size(3 * 1024 * 1024), "3.0 MB");
+    }
+
+    #[test]
+    fn normalizes_volume_to_a_safe_output_range() {
+        assert!((normalize_volume(0.42) - 0.42).abs() < f32::EPSILON);
+        assert_eq!(normalize_volume(-0.5), 0.0);
+        assert_eq!(normalize_volume(1.5), 1.0);
+        assert!((normalize_volume(f32::NAN) - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn muting_only_changes_effective_output_volume() {
+        assert!((effective_volume(0.64, false) - 0.64).abs() < f32::EPSILON);
+        assert_eq!(effective_volume(0.64, true), 0.0);
+    }
+
+    #[test]
+    fn restores_a_safe_nonzero_volume_after_muting() {
+        assert!((restored_volume(0.42) - 0.42).abs() < f32::EPSILON);
+        assert!((restored_volume(0.0) - 0.7).abs() < f32::EPSILON);
+        assert!((restored_volume(f32::NAN) - 0.7).abs() < f32::EPSILON);
     }
 }
