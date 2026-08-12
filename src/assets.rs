@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 21] = [
+const ICON_FILES: [&str; 24] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -26,6 +26,9 @@ const ICON_FILES: [&str; 21] = [
     "arrow-left.svg",
     "vinyl-highlight.svg",
     "tonearm.svg",
+    "tonearm-shade.svg",
+    "tonearm-highlight.svg",
+    "tonearm-stylus.svg",
 ];
 
 pub struct Assets;
@@ -46,6 +49,9 @@ pub enum AppIcon {
     ArrowLeft,
     VinylHighlight,
     Tonearm,
+    TonearmShade,
+    TonearmHighlight,
+    TonearmStylus,
 }
 
 #[derive(Clone, Copy)]
@@ -73,6 +79,9 @@ impl IconNamed for AppIcon {
             Self::ArrowLeft => "icons/arrow-left.svg",
             Self::VinylHighlight => "icons/vinyl-highlight.svg",
             Self::Tonearm => "icons/tonearm.svg",
+            Self::TonearmShade => "icons/tonearm-shade.svg",
+            Self::TonearmHighlight => "icons/tonearm-highlight.svg",
+            Self::TonearmStylus => "icons/tonearm-stylus.svg",
         }
         .into()
     }
@@ -124,6 +133,13 @@ impl AssetSource for Assets {
                 Some(include_bytes!("../assets/icons/vinyl-highlight.svg"))
             }
             "icons/tonearm.svg" => Some(include_bytes!("../assets/icons/tonearm.svg")),
+            "icons/tonearm-shade.svg" => Some(include_bytes!("../assets/icons/tonearm-shade.svg")),
+            "icons/tonearm-highlight.svg" => {
+                Some(include_bytes!("../assets/icons/tonearm-highlight.svg"))
+            }
+            "icons/tonearm-stylus.svg" => {
+                Some(include_bytes!("../assets/icons/tonearm-stylus.svg"))
+            }
             _ => None,
         };
 

@@ -14,11 +14,13 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
 };
 use gpui_component::{
+    box_shadow,
     button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
+    tooltip::Tooltip,
     v_flex, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode, TitleBar,
 };
 use rand::{seq::SliceRandom, thread_rng};
@@ -96,6 +98,7 @@ struct AppState {
     queue: Vec<Song>,
     queue_index: Option<usize>,
     now_playing: Option<Song>,
+    now_playing_quality: Option<TranscodingQuality>,
     lyrics: Option<Lyrics>,
     lyrics_song_id: Option<String>,
     lyrics_loading: bool,
@@ -133,6 +136,7 @@ impl Default for AppState {
             queue: Vec::new(),
             queue_index: None,
             now_playing: None,
+            now_playing_quality: None,
             lyrics: None,
             lyrics_song_id: None,
             lyrics_loading: false,
@@ -507,6 +511,7 @@ impl NavidromeApp {
         );
         self.state.queue_index = Some(index);
         self.state.now_playing = Some(song.clone());
+        self.state.now_playing_quality = None;
         self.state.ended_handled = false;
         self.ensure_cover(song.cover_art.as_deref());
         self.load_lyrics(&song);
@@ -533,6 +538,7 @@ impl NavidromeApp {
                     song.id,
                     quality.cache_profile()
                 );
+                self.state.now_playing_quality = Some(quality);
                 self.audio.play(url, cache_key, duration);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
@@ -1155,9 +1161,108 @@ impl NavidromeApp {
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - 10.0;
         let tonearm_size = size * 0.72;
-        let tonearm_left = size * 0.94 - tonearm_size * 0.5;
-        let tonearm_top = size * -0.02 - tonearm_size * 0.5;
+        let tonearm_pivot_x = size * 0.94;
+        let tonearm_pivot_y = size * -0.02;
+        let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
+        let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
+        let tonearm_base_size = size * 0.14;
         let tonearm_engaged_turns = 28.0 / 360.0;
+        let metal_tint = self.now_playing_accent(_cx);
+        let metal_body = hsla(0.1, 0.06, 0.8, 1.0).blend(metal_tint.opacity(0.1));
+        let cover_key = cover_id.unwrap_or("default");
+        let tonearm_layer =
+            |icon: AppIcon, layer: &'static str, offset_x: f32, offset_y: f32, color: Hsla| {
+                Icon::new(icon)
+                    .absolute()
+                    .left(px(tonearm_left + offset_x))
+                    .top(px(tonearm_top + offset_y))
+                    .with_size(px(tonearm_size))
+                    .text_color(color)
+                    .with_animation(
+                        SharedString::from(format!(
+                            "tonearm-{layer}-{cover_key}-{tonearm_engaged}"
+                        )),
+                        Animation::new(Duration::from_millis(650)).with_easing(ease_out_quint()),
+                        move |icon, delta| {
+                            let rotation = if tonearm_engaged {
+                                delta * tonearm_engaged_turns
+                            } else {
+                                (1.0 - delta) * tonearm_engaged_turns
+                            };
+                            let lift = if tonearm_engaged {
+                                -3.5 * (1.0 - delta)
+                            } else {
+                                -3.5 * delta
+                            };
+                            icon.transform(
+                                Transformation::rotate(percentage(rotation))
+                                    .with_translation(point(px(0.0), px(lift))),
+                            )
+                        },
+                    )
+            };
+        let tonearm_base = div()
+            .absolute()
+            .left(px(tonearm_pivot_x - tonearm_base_size * 0.5))
+            .top(px(tonearm_pivot_y - tonearm_base_size * 0.5))
+            .size(px(tonearm_base_size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .border_1()
+            .border_color(hsla(0.1, 0.08, 0.42, 0.66))
+            .bg(linear_gradient(
+                132.0,
+                linear_color_stop(hsla(0.1, 0.08, 0.94, 1.0), 0.0),
+                linear_color_stop(
+                    hsla(0.1, 0.05, 0.44, 1.0).blend(metal_tint.opacity(0.08)),
+                    1.0,
+                ),
+            ))
+            .shadow(vec![
+                box_shadow(
+                    px(0.0),
+                    px(5.0),
+                    px(12.0),
+                    px(-2.0),
+                    hsla(0.0, 0.0, 0.0, 0.34),
+                ),
+                box_shadow(
+                    px(-2.0),
+                    px(-2.0),
+                    px(7.0),
+                    px(-2.0),
+                    hsla(0.0, 0.0, 1.0, 0.22),
+                ),
+            ])
+            .child(
+                div()
+                    .size(px(tonearm_base_size * 0.7))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.32))
+                    .bg(linear_gradient(
+                        145.0,
+                        linear_color_stop(hsla(0.1, 0.04, 0.62, 1.0), 0.0),
+                        linear_color_stop(hsla(0.1, 0.04, 0.28, 1.0), 1.0),
+                    ))
+                    .child(
+                        div()
+                            .size(px(tonearm_base_size * 0.34))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(metal_tint.opacity(0.28))
+                            .bg(linear_gradient(
+                                135.0,
+                                linear_color_stop(hsla(0.1, 0.05, 0.9, 1.0), 0.0),
+                                linear_color_stop(hsla(0.1, 0.05, 0.5, 1.0), 1.0),
+                            )),
+                    ),
+            );
         let highlight = Icon::new(AppIcon::VinylHighlight)
             .absolute()
             .top_0()
@@ -1231,52 +1336,56 @@ impl NavidromeApp {
                             .bg(hsla(0.0, 0.0, 0.08, 1.0)),
                     ),
             )
-            .child(
-                Icon::new(AppIcon::Tonearm)
-                    .absolute()
-                    .left(px(tonearm_left - 4.0))
-                    .top(px(tonearm_top - 4.0))
-                    .with_size(px(tonearm_size + 8.0))
-                    .text_color(hsla(0.12, 0.64, 0.58, 1.0))
-                    .with_animation(
-                        SharedString::from(format!(
-                            "tonearm-outline-{}-{tonearm_engaged}",
-                            cover_id.unwrap_or("default")
-                        )),
-                        Animation::new(Duration::from_millis(500)).with_easing(ease_out_quint()),
-                        move |icon, delta| {
-                            let rotation = if tonearm_engaged {
-                                delta * tonearm_engaged_turns
-                            } else {
-                                (1.0 - delta) * tonearm_engaged_turns
-                            };
-                            icon.transform(Transformation::rotate(percentage(rotation)))
-                        },
-                    ),
-            )
-            .child(
-                Icon::new(AppIcon::Tonearm)
-                    .absolute()
-                    .left(px(tonearm_left))
-                    .top(px(tonearm_top))
-                    .with_size(px(tonearm_size))
-                    .text_color(hsla(0.1, 0.08, 0.88, 1.0))
-                    .with_animation(
-                        SharedString::from(format!(
-                            "tonearm-body-{}-{tonearm_engaged}",
-                            cover_id.unwrap_or("default")
-                        )),
-                        Animation::new(Duration::from_millis(500)).with_easing(ease_out_quint()),
-                        move |icon, delta| {
-                            let rotation = if tonearm_engaged {
-                                delta * tonearm_engaged_turns
-                            } else {
-                                (1.0 - delta) * tonearm_engaged_turns
-                            };
-                            icon.transform(Transformation::rotate(percentage(rotation)))
-                        },
-                    ),
-            )
+            .child(tonearm_layer(
+                AppIcon::Tonearm,
+                "shadow-soft",
+                4.5,
+                6.0,
+                hsla(0.0, 0.0, 0.0, 0.13),
+            ))
+            .child(tonearm_layer(
+                AppIcon::Tonearm,
+                "shadow-close",
+                2.2,
+                3.2,
+                hsla(0.0, 0.0, 0.0, 0.28),
+            ))
+            .child(tonearm_layer(
+                AppIcon::Tonearm,
+                "body",
+                0.0,
+                0.0,
+                metal_body,
+            ))
+            .child(tonearm_layer(
+                AppIcon::TonearmShade,
+                "shade",
+                0.0,
+                0.0,
+                hsla(0.1, 0.06, 0.25, 0.52),
+            ))
+            .child(tonearm_layer(
+                AppIcon::TonearmHighlight,
+                "highlight",
+                0.0,
+                0.0,
+                hsla(0.0, 0.0, 1.0, 0.72),
+            ))
+            .child(tonearm_layer(
+                AppIcon::TonearmStylus,
+                "stylus-shadow",
+                1.2,
+                1.8,
+                hsla(0.0, 0.0, 0.0, 0.38),
+            ))
+            .child(tonearm_layer(
+                AppIcon::TonearmStylus,
+                "stylus",
+                0.0,
+                0.0,
+                hsla(0.11, 0.58, 0.58, 1.0),
+            ))
+            .child(tonearm_base)
             .into_any_element()
     }
 
@@ -2630,6 +2739,12 @@ impl NavidromeApp {
         };
         let lyrics_open = self.state.view == View::NowPlaying;
         let queue_open = self.state.view == View::Queue;
+        let technical_info = self
+            .state
+            .now_playing
+            .as_ref()
+            .zip(self.state.now_playing_quality)
+            .map(|(song, quality)| playback_technical_info(song, quality));
         let song_info = if let Some(song) = &self.state.now_playing {
             h_flex()
                 .id("now-playing-info")
@@ -2726,7 +2841,7 @@ impl NavidromeApp {
         };
 
         let right_controls = h_flex()
-            .w(px(260.0))
+            .w(px(220.0))
             .h(px(40.0))
             .min_w_0()
             .overflow_hidden()
@@ -2734,9 +2849,31 @@ impl NavidromeApp {
             .justify_end()
             .items_center()
             .gap_2()
-            .pl_4()
+            .pl_3()
             .border_l_1()
             .border_color(cx.theme().border.opacity(0.8))
+            .when_some(technical_info, |this, info| {
+                let tooltip = info.tooltip.clone();
+                this.child(
+                    h_flex()
+                        .id("player-technical-info")
+                        .min_w_0()
+                        .gap_0p5()
+                        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                        .child(technical_info_chip(
+                            "player-format",
+                            info.format,
+                            accent,
+                            cx,
+                        )),
+                )
+                .child(
+                    div()
+                        .h(px(24.0))
+                        .border_l_1()
+                        .border_color(cx.theme().border.opacity(0.6)),
+                )
+            })
             .when_some(self.state.now_playing.as_ref(), |this, song| {
                 this.child(
                     self.favorite_button(FavoriteKind::Song, &song.id, cx)
@@ -2956,53 +3093,73 @@ impl Render for NavidromeApp {
                 .theme()
                 .background
                 .blend(cover_accent.opacity(accent_strength));
+            let titlebar_strength = if light_background { 0.26 } else { 0.2 };
+            let titlebar_start = cx
+                .theme()
+                .title_bar
+                .blend(cover_base.opacity(titlebar_strength));
+            let titlebar_end = cx
+                .theme()
+                .title_bar
+                .blend(cover_accent.opacity(titlebar_strength * 0.82));
+            let titlebar_border = cx
+                .theme()
+                .title_bar_border
+                .blend(cover_accent.opacity(0.34));
             let background_animation = Animation::new(Duration::from_secs(22)).repeat();
 
             return v_flex()
                 .size_full()
                 .text_color(cx.theme().foreground)
                 .child(
-                    TitleBar::new().child(
-                        h_flex()
-                            .h_full()
-                            .w_full()
-                            .items_center()
-                            .justify_between()
-                            .pr_2()
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("leave-now-playing")
-                                            .icon(AppIcon::ArrowLeft)
-                                            .tooltip("Back to library")
-                                            .ghost()
-                                            .small()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.leave_now_playing();
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child("Now Playing"),
-                                    ),
-                            )
-                            .child(
-                                Button::new("now-playing-settings")
-                                    .icon(AppIcon::Settings)
-                                    .tooltip("Settings")
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.state.settings_open = true;
-                                        cx.notify();
-                                    })),
-                            ),
-                    ),
+                    TitleBar::new()
+                        .bg(linear_gradient(
+                            90.0,
+                            linear_color_stop(titlebar_start, 0.0),
+                            linear_color_stop(titlebar_end, 1.0),
+                        ))
+                        .border_color(titlebar_border)
+                        .child(
+                            h_flex()
+                                .h_full()
+                                .w_full()
+                                .items_center()
+                                .justify_between()
+                                .pr_2()
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("leave-now-playing")
+                                                .icon(AppIcon::ArrowLeft)
+                                                .tooltip("Back to library")
+                                                .ghost()
+                                                .small()
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.leave_now_playing();
+                                                    cx.notify();
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child("Now Playing"),
+                                        ),
+                                )
+                                .child(
+                                    Button::new("now-playing-settings")
+                                        .icon(AppIcon::Settings)
+                                        .tooltip("Settings")
+                                        .ghost()
+                                        .small()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.state.settings_open = true;
+                                            cx.notify();
+                                        })),
+                                ),
+                        ),
                 )
                 .child(
                     div()
@@ -3099,6 +3256,141 @@ impl Render for NavidromeApp {
             )
             .child(self.render_player(cx))
             .into_any_element()
+    }
+}
+
+fn technical_info_chip(
+    id: &'static str,
+    label: String,
+    color: Hsla,
+    cx: &Context<NavidromeApp>,
+) -> gpui::AnyElement {
+    div()
+        .id(id)
+        .h(px(20.0))
+        .max_w(px(64.0))
+        .px_1p5()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(color.opacity(0.12))
+        .bg(color.opacity(0.045))
+        .text_size(px(11.0))
+        .text_color(cx.theme().foreground.opacity(0.74))
+        .truncate()
+        .child(label)
+        .into_any_element()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PlaybackTechnicalInfo {
+    format: String,
+    tooltip: String,
+}
+
+fn playback_technical_info(song: &Song, quality: TranscodingQuality) -> PlaybackTechnicalInfo {
+    let source = source_technical_info(song);
+    if let Some(bit_rate) = quality.max_bit_rate() {
+        let estimated_bytes = song.duration.and_then(|seconds| {
+            let seconds = u64::try_from(seconds).ok()?;
+            Some(
+                seconds
+                    .saturating_mul(u64::from(bit_rate))
+                    .saturating_mul(1_000)
+                    / 8,
+            )
+        });
+        let size = estimated_bytes
+            .map(|bytes| format!("~{}", format_file_size(bytes)))
+            .unwrap_or_else(|| "Unknown size".to_string());
+        let bit_rate = format!("{bit_rate} kbps");
+        let display = format!("MP3 · {bit_rate} · {size}");
+        return PlaybackTechnicalInfo {
+            format: "MP3".to_string(),
+            tooltip: format!("Current stream: {display}\nSource file: {}", source.display),
+        };
+    }
+
+    PlaybackTechnicalInfo {
+        format: source.format,
+        tooltip: format!("Current stream: {}", source.display),
+    }
+}
+
+struct SourceTechnicalInfo {
+    format: String,
+    display: String,
+}
+
+fn source_technical_info(song: &Song) -> SourceTechnicalInfo {
+    let format = song
+        .suffix
+        .as_deref()
+        .filter(|suffix| !suffix.trim().is_empty())
+        .map(|suffix| suffix.trim().to_ascii_uppercase())
+        .or_else(|| {
+            song.content_type
+                .as_deref()
+                .and_then(format_from_content_type)
+        })
+        .unwrap_or_else(|| "AUDIO".to_string());
+    let bit_rate = song
+        .bit_rate
+        .and_then(|bit_rate| u32::try_from(bit_rate).ok())
+        .filter(|bit_rate| *bit_rate > 0)
+        .map(|bit_rate| format!("{bit_rate} kbps"))
+        .or_else(|| estimated_bit_rate(song).map(|bit_rate| format!("~{bit_rate} kbps")))
+        .unwrap_or_else(|| "Unknown rate".to_string());
+    let size = song
+        .size
+        .and_then(|size| u64::try_from(size).ok())
+        .map(format_file_size)
+        .unwrap_or_else(|| "Unknown size".to_string());
+    let display = format!("{format} · {bit_rate} · {size}");
+
+    SourceTechnicalInfo { format, display }
+}
+
+fn format_from_content_type(content_type: &str) -> Option<String> {
+    let subtype = content_type
+        .split(';')
+        .next()?
+        .trim()
+        .rsplit('/')
+        .next()?
+        .trim_start_matches("x-");
+    if subtype.is_empty() {
+        return None;
+    }
+    Some(match subtype.to_ascii_lowercase().as_str() {
+        "mpeg" | "mp3" => "MP3".to_string(),
+        "mp4" | "aac" => "AAC".to_string(),
+        "ogg" | "vorbis" => "OGG".to_string(),
+        other => other.to_ascii_uppercase(),
+    })
+}
+
+fn estimated_bit_rate(song: &Song) -> Option<u64> {
+    let bytes = u64::try_from(song.size?).ok()?;
+    let seconds = u64::try_from(song.duration?).ok()?;
+    (seconds > 0).then(|| bytes.saturating_mul(8) / seconds / 1_000)
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.2} GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.1} KB", bytes / KIB)
+    } else {
+        format!("{} B", bytes as u64)
     }
 }
 
@@ -3259,9 +3551,10 @@ mod tests {
     use gpui::hsla;
 
     use super::{
-        accent_foreground, contrast_ratio, extract_cover_palette, readable_accent,
-        vinyl_rotation_phase,
+        accent_foreground, contrast_ratio, extract_cover_palette, format_file_size,
+        playback_technical_info, readable_accent, vinyl_rotation_phase,
     };
+    use crate::models::{Song, TranscodingQuality};
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
@@ -3291,5 +3584,46 @@ mod tests {
     fn extracts_palette_from_default_cover() {
         let palette = extract_cover_palette(include_bytes!("../assets/default-cover.png"));
         assert!(palette.is_some());
+    }
+
+    #[test]
+    fn displays_original_stream_metadata() {
+        let song = Song {
+            suffix: Some("flac".to_string()),
+            bit_rate: Some(941),
+            size: Some(25_165_824),
+            duration: Some(214),
+            ..Song::default()
+        };
+
+        let info = playback_technical_info(&song, TranscodingQuality::Original);
+
+        assert_eq!(info.format, "FLAC");
+        assert_eq!(info.tooltip, "Current stream: FLAC · 941 kbps · 24.0 MB");
+    }
+
+    #[test]
+    fn displays_transcoded_stream_profile_and_estimated_size() {
+        let song = Song {
+            suffix: Some("flac".to_string()),
+            size: Some(25_165_824),
+            duration: Some(240),
+            ..Song::default()
+        };
+
+        let info = playback_technical_info(&song, TranscodingQuality::Kbps192);
+
+        assert_eq!(info.format, "MP3");
+        assert_eq!(
+            info.tooltip,
+            "Current stream: MP3 · 192 kbps · ~5.5 MB\nSource file: FLAC · ~838 kbps · 24.0 MB"
+        );
+    }
+
+    #[test]
+    fn formats_file_sizes_for_compact_player_display() {
+        assert_eq!(format_file_size(800), "800 B");
+        assert_eq!(format_file_size(1_536), "1.5 KB");
+        assert_eq!(format_file_size(3 * 1024 * 1024), "3.0 MB");
     }
 }

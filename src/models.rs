@@ -152,6 +152,8 @@ pub struct Song {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
+    pub bit_rate: Option<i32>,
+    #[serde(default)]
     pub size: Option<i64>,
     #[serde(default)]
     pub path: Option<String>,

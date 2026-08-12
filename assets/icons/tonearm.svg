@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="110" cy="110" r="18" fill="currentColor" stroke="none"/>
-  <path d="M110 128C112 151 119 176 132 195" stroke-width="8"/>
-  <path d="M132 195L146 204" stroke-width="11"/>
-  <path d="M144 202L152 207" stroke-width="5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
+  <path d="M99 108C105 103 115 103 121 108L120 124C116 129 106 130 101 125L99 108Z"/>
+  <path d="M101 120C100 143 103 162 113 180C120 191 130 199 142 205L149 196C139 190 132 183 126 172C118 157 117 141 119 121C114 117 106 117 101 120Z"/>
+  <path d="M139 195L158 200C161 201 162 203 160 206L156 212C155 214 152 214 150 212L137 205L139 195Z"/>
 </svg>
