@@ -10,8 +10,8 @@ use gpui::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
     relative, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
+    MouseButton, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, ScrollWheelEvent,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
 };
 use gpui_component::{
     box_shadow,
@@ -173,6 +173,7 @@ pub struct NavidromeApp {
     volume_before_mute: f32,
     volume_save_generation: u64,
     volume_panel_open: bool,
+    volume_panel_dragging: bool,
     volume_panel_generation: u64,
     lyrics_scroll_handle: ScrollHandle,
     lyrics_scroll_target: Option<Pixels>,
@@ -252,6 +253,7 @@ impl NavidromeApp {
             },
             volume_save_generation: 0,
             volume_panel_open: false,
+            volume_panel_dragging: false,
             volume_panel_generation: 0,
             lyrics_scroll_handle: ScrollHandle::new(),
             lyrics_scroll_target: None,
@@ -701,7 +703,7 @@ impl NavidromeApp {
         cx.spawn(async move |this, cx| {
             Timer::after(Duration::from_millis(220)).await;
             this.update(cx, |this, cx| {
-                if this.volume_panel_generation == generation {
+                if this.volume_panel_generation == generation && !this.volume_panel_dragging {
                     this.volume_panel_open = false;
                     cx.notify();
                 }
@@ -709,6 +711,20 @@ impl NavidromeApp {
             Ok::<_, anyhow::Error>(())
         })
         .detach();
+    }
+
+    fn begin_volume_panel_drag(&mut self, cx: &mut Context<Self>) {
+        self.volume_panel_dragging = true;
+        self.show_volume_panel(cx);
+    }
+
+    fn end_volume_panel_drag(&mut self, keep_open: bool, cx: &mut Context<Self>) {
+        self.volume_panel_dragging = false;
+        if keep_open {
+            self.show_volume_panel(cx);
+        } else {
+            self.schedule_volume_panel_close(cx);
+        }
     }
 
     fn open_now_playing(&mut self) {
@@ -3051,7 +3067,7 @@ impl NavidromeApp {
                             v_flex()
                                 .id("player-volume-panel")
                                 .absolute()
-                                .bottom(px(36.0))
+                                .bottom(px(64.0))
                                 .left(px(-13.0))
                                 .w(px(54.0))
                                 .p_2()
@@ -3063,6 +3079,18 @@ impl NavidromeApp {
                                 .bg(cx.theme().popover)
                                 .text_color(cx.theme().popover_foreground)
                                 .shadow_md()
+                                .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
+                                    this.begin_volume_panel_drag(cx);
+                                }))
+                                .capture_any_mouse_up(cx.listener(|this, _, _, cx| {
+                                    this.end_volume_panel_drag(true, cx);
+                                }))
+                                .on_mouse_up_out(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| {
+                                        this.end_volume_panel_drag(false, cx);
+                                    }),
+                                )
                                 .on_hover(cx.listener(|this, hovering, _, cx| {
                                     if *hovering {
                                         this.show_volume_panel(cx);

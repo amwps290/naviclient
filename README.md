@@ -12,8 +12,10 @@ JavaScript runtime.
 - Album cover art loaded from the Navidrome API
 - Native system font discovery and multilingual text rendering through GPUI
 - Responsive album and artist grids with virtualized-ready component foundations
-- Audio playback with play/pause, stop, previous/next, volume, seek, and queue
+- Audio playback with play/pause, stop, previous/next, seek, and queue
   progression
+- Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
+  vertical slider shown above the player on hover
 - Double-click song playback with highlighted and animated now-playing rows
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
 - Server settings persisted locally as JSON
