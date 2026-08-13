@@ -88,7 +88,6 @@ fn main() {
             window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
             titlebar: Some(TitleBar::title_bar_options()),
             window_decorations: Some(WindowDecorations::Client),
-            window_min_size: Some(size(px(900.0), px(600.0))),
             ..Default::default()
         };
 

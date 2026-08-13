@@ -8,10 +8,11 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
+    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
     MouseButton, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
+    SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
+    WindowControlArea,
 };
 use gpui_component::{
     box_shadow,
@@ -36,6 +37,8 @@ use crate::models::{
     ServerInfo, Song, ThemePreference, TranscodingQuality,
 };
 use crate::msg::{error_message, Msg};
+
+const MINI_WINDOW_SIZE: Size<Pixels> = size(px(200.0), px(50.0));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum View {
@@ -179,6 +182,9 @@ pub struct NavidromeApp {
     lyrics_scroll_target: Option<Pixels>,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
+    mini_mode: bool,
+    restore_size: Option<Size<Pixels>>,
+    restore_maximized: bool,
 }
 
 impl NavidromeApp {
@@ -259,6 +265,9 @@ impl NavidromeApp {
             lyrics_scroll_target: None,
             active_lyric_index: None,
             _subscriptions: Vec::new(),
+            mini_mode: false,
+            restore_size: None,
+            restore_maximized: false,
         };
         app.audio.set_volume(initial_volume);
         app._subscriptions.push(
@@ -325,6 +334,7 @@ impl NavidromeApp {
             }
         })
         .detach();
+
         app
     }
 
@@ -613,7 +623,7 @@ impl NavidromeApp {
         self.state.playback_mode = self.state.playback_mode.next();
     }
 
-    fn skip(&mut self, offset: i32) {
+    pub fn skip(&mut self, offset: i32) {
         if offset > 0 {
             self.advance_queue(true);
         } else if offset < 0 {
@@ -621,7 +631,7 @@ impl NavidromeApp {
         }
     }
 
-    fn toggle_playback(&mut self) {
+    pub fn toggle_playback(&mut self) {
         let playback = self.audio.state();
         if playback.active {
             if playback.paused {
@@ -631,6 +641,51 @@ impl NavidromeApp {
             }
         } else if let Some(index) = self.state.queue_index {
             self.play_queue_index(index);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn stop_playback(&mut self) {
+        self.audio.stop();
+        self.state.now_playing = None;
+        self.state.now_playing_quality = None;
+        self.state.lyrics = None;
+        self.state.lyrics_song_id = None;
+        self.state.lyrics_loading = false;
+        self.state.lyrics_error = None;
+        self.state.ended_handled = true;
+    }
+
+    fn enter_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.settings_open = false;
+        self.mini_mode = true;
+        self.restore_size = Some(window.viewport_size());
+        self.restore_maximized = window.is_maximized();
+        window.resize(MINI_WINDOW_SIZE);
+        set_always_on_top(window, true);
+        cx.notify();
+    }
+
+    fn exit_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.mini_mode = false;
+        window.resize(
+            self.restore_size
+                .take()
+                .unwrap_or_else(|| size(px(1280.0), px(820.0))),
+        );
+        if self.restore_maximized && !window.is_maximized() {
+            window.zoom_window();
+        }
+        self.restore_maximized = false;
+        set_always_on_top(window, false);
+        cx.notify();
+    }
+
+    fn toggle_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mini_mode {
+            self.exit_mini_mode(window, cx);
+        } else {
+            self.enter_mini_mode(window, cx);
         }
     }
 
@@ -2849,6 +2904,214 @@ impl NavidromeApp {
         }
     }
 
+    fn render_mini(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = cx.theme().clone();
+        let song = self.state.now_playing.clone();
+        let has_track = song.is_some();
+        let playback = self.audio.state();
+        let is_playing = playback.active && !playback.paused;
+        let duration = playback.duration.unwrap_or_default();
+        let progress_percent = if duration.is_zero() {
+            0.0
+        } else {
+            (playback.position.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
+        };
+
+        let cover_id = song.as_ref().and_then(|song| song.cover_art.as_deref());
+        let cover = cover_id
+            .and_then(|id| self.state.covers.get(id))
+            .cloned()
+            .unwrap_or_else(|| self.default_cover.clone());
+
+        let (base, raw_accent) = self.now_playing_palette(cx);
+        let accent = self.now_playing_accent(cx);
+        let accent_fg = accent_foreground(accent);
+        let play_button_style = ButtonCustomVariant::new(cx)
+            .color(accent)
+            .foreground(accent_fg)
+            .border(accent)
+            .hover(adjust_lightness(accent, 0.05))
+            .active(adjust_lightness(accent, -0.05))
+            .shadow(true);
+
+        let light = theme.background.l >= 0.5;
+        let base_strength = if light { 0.36 } else { 0.3 };
+        let accent_strength = if light { 0.28 } else { 0.24 };
+        let bg_start = theme.background.blend(base.opacity(base_strength));
+        let bg_end = theme.background.blend(raw_accent.opacity(accent_strength));
+        let bg_animation = Animation::new(Duration::from_secs(20)).repeat();
+
+        let title = song
+            .as_ref()
+            .map(|song| song.title.clone())
+            .unwrap_or_else(|| "No track playing".to_string());
+        let artist = song
+            .as_ref()
+            .map(|song| song.artist.clone())
+            .unwrap_or_else(|| "Choose a song from your library.".to_string());
+
+        let cover_element = img(cover)
+            .w(px(26.0))
+            .h(px(26.0))
+            .flex_none()
+            .rounded_md()
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.exit_mini_mode(window, cx);
+                this.open_now_playing();
+            }))
+            .occlude();
+
+        let info = v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_0p5()
+            .id("mini-now-playing-info")
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.exit_mini_mode(window, cx);
+                this.open_now_playing();
+            }))
+            .occlude()
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(theme.muted_foreground)
+                    .truncate()
+                    .child(artist),
+            );
+
+        let controls = h_flex()
+            .flex_none()
+            .items_center()
+            .gap_0p5()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .occlude()
+            .child(
+                Button::new("mini-previous")
+                    .icon(PlayerIcon::Previous)
+                    .tooltip("Previous track")
+                    .ghost()
+                    .with_size(px(16.0))
+                    .rounded_full()
+                    .disabled(!has_track)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.skip(-1);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("mini-play-pause")
+                    .icon(if is_playing {
+                        PlayerIcon::Pause
+                    } else {
+                        PlayerIcon::Play
+                    })
+                    .tooltip(if is_playing { "Pause" } else { "Play" })
+                    .custom(play_button_style)
+                    .with_size(px(22.0))
+                    .rounded_full()
+                    .disabled(!has_track)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_playback();
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("mini-next")
+                    .icon(PlayerIcon::Next)
+                    .tooltip("Next track")
+                    .ghost()
+                    .with_size(px(16.0))
+                    .rounded_full()
+                    .disabled(!has_track)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.skip(1);
+                        cx.notify();
+                    })),
+            );
+
+        let progress_line = div()
+            .absolute()
+            .bottom_0()
+            .left_0()
+            .right_0()
+            .h(px(2.0))
+            .bg(accent.opacity(0.12))
+            .child(
+                div()
+                    .h_full()
+                    .w(relative(progress_percent / 100.0))
+                    .bg(accent.opacity(0.45)),
+            );
+
+        let expand_button = Button::new("mini-expand")
+            .icon(AppIcon::Maximize)
+            .tooltip("Exit mini player")
+            .ghost()
+            .with_size(px(16.0))
+            .rounded_full()
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.exit_mini_mode(window, cx);
+            }));
+
+        v_flex()
+            .relative()
+            .size_full()
+            .border_1()
+            .border_color(theme.border.opacity(0.5))
+            .text_color(theme.foreground)
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                let delta_y = f32::from(event.delta.pixel_delta(px(16.0)).y);
+                if delta_y.abs() < f32::EPSILON {
+                    return;
+                }
+                let delta = if delta_y > 0.0 { 0.05 } else { -0.05 };
+                this.adjust_volume(delta, window, cx);
+                cx.stop_propagation();
+            }))
+            .when(cfg!(target_os = "windows"), |this| {
+                this.window_control_area(WindowControlArea::Drag)
+            })
+            .when(cfg!(not(target_os = "windows")), |this| {
+                this.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            })
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .px_1p5()
+                    .gap_1p5()
+                    .items_center()
+                    .child(cover_element)
+                    .child(info)
+                    .child(controls)
+                    .child(expand_button),
+            )
+            .child(progress_line)
+            .with_animation(
+                "mini-player-background",
+                bg_animation,
+                move |this, delta| {
+                    this.bg(linear_gradient(
+                        120.0 + delta * 360.0,
+                        linear_color_stop(bg_start, 0.0),
+                        linear_color_stop(bg_end, 1.0),
+                    ))
+                },
+            )
+            .into_any_element()
+    }
+
     fn render_player(&self, cx: &Context<Self>) -> gpui::AnyElement {
         let playback = self.audio.state();
         let accent = self.now_playing_accent(cx);
@@ -3279,6 +3542,10 @@ impl Render for NavidromeApp {
             }
         });
 
+        if self.mini_mode {
+            return self.render_mini(window, cx);
+        }
+
         if self.state.settings_open {
             return v_flex()
                 .size_full()
@@ -3444,16 +3711,36 @@ impl Render for NavidromeApp {
                                 .child("Navidrome Client"),
                         )
                         .child(
-                            Button::new("title-settings")
-                                .icon(AppIcon::Settings)
-                                .tooltip("Settings")
-                                .ghost()
-                                .small()
-                                .selected(self.state.settings_open)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.state.settings_open = !this.state.settings_open;
-                                    cx.notify();
-                                })),
+                            h_flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new("toggle-mini-player")
+                                        .icon(AppIcon::MiniPlayer)
+                                        .tooltip(if self.mini_mode {
+                                            "Exit mini player"
+                                        } else {
+                                            "Switch to mini player"
+                                        })
+                                        .ghost()
+                                        .small()
+                                        .selected(self.mini_mode)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.toggle_mini_mode(window, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("title-settings")
+                                        .icon(AppIcon::Settings)
+                                        .tooltip("Settings")
+                                        .ghost()
+                                        .small()
+                                        .selected(self.state.settings_open)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.state.settings_open = !this.state.settings_open;
+                                            cx.notify();
+                                        })),
+                                ),
                         ),
                 ),
             )
@@ -3499,6 +3786,44 @@ impl Render for NavidromeApp {
             .child(self.render_player(cx))
             .into_any_element()
     }
+}
+
+#[cfg(target_os = "windows")]
+fn set_always_on_top(window: &mut Window, on: bool) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = window.window_handle() else {
+        log::warn!("unable to obtain the native window handle");
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    let insert_after = if on {
+        windows_sys::Win32::UI::WindowsAndMessaging::HWND_TOPMOST
+    } else {
+        windows_sys::Win32::UI::WindowsAndMessaging::HWND_NOTOPMOST
+    };
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+            hwnd,
+            insert_after,
+            0,
+            0,
+            0,
+            0,
+            windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE
+                | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_always_on_top(_window: &mut Window, on: bool) {
+    log::warn!(
+        "always-on-top is not implemented on this platform; the mini player will not stay on top (requested={on})"
+    );
 }
 
 fn normalize_volume(volume: f32) -> f32 {
@@ -3680,7 +4005,7 @@ fn contrast_ratio(a: Hsla, b: Hsla) -> f32 {
     (brighter + 0.05) / (darker + 0.05)
 }
 
-fn readable_accent(mut accent: Hsla, background: Hsla) -> Hsla {
+pub(crate) fn readable_accent(mut accent: Hsla, background: Hsla) -> Hsla {
     accent.s = accent.s.clamp(0.38, 0.78);
     accent.a = 1.0;
     let lighten = relative_luminance(background) < 0.35;
@@ -3703,7 +4028,7 @@ fn readable_accent(mut accent: Hsla, background: Hsla) -> Hsla {
     accent
 }
 
-fn accent_foreground(accent: Hsla) -> Hsla {
+pub(crate) fn accent_foreground(accent: Hsla) -> Hsla {
     let black = hsla(0.0, 0.0, 0.06, 1.0);
     let white = hsla(0.0, 0.0, 0.98, 1.0);
     if contrast_ratio(black, accent) >= contrast_ratio(white, accent) {
@@ -3713,7 +4038,7 @@ fn accent_foreground(accent: Hsla) -> Hsla {
     }
 }
 
-fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
+pub(crate) fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
     color.l = (color.l + amount).clamp(0.0, 1.0);
     color
 }

@@ -18,6 +18,9 @@ JavaScript runtime.
   vertical slider shown above the player on hover
 - Double-click song playback with highlighted and animated now-playing rows
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
+- Mini-player mode that shrinks the main window into a compact, always-on-top
+  widget with cover art, song title, prev/next/play controls, a thin bottom
+  progress line, and a dynamic cover-colored animated background
 - Server settings persisted locally as JSON
 - Navidrome-synced favorites for artists, albums, and songs
 - Light theme by default, with light, dark, and system-following appearance options

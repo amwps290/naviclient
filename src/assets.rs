@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 27] = [
+const ICON_FILES: [&str; 29] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -13,6 +13,8 @@ const ICON_FILES: [&str; 27] = [
     "media-play.svg",
     "media-pause.svg",
     "media-next.svg",
+    "media-stop.svg",
+    "mini-player.svg",
     "settings.svg",
     "refresh.svg",
     "shuffle.svg",
@@ -58,6 +60,8 @@ pub enum AppIcon {
     VolumeHigh,
     VolumeLow,
     VolumeMuted,
+    MiniPlayer,
+    Maximize,
 }
 
 #[derive(Clone, Copy)]
@@ -65,6 +69,8 @@ pub enum PlayerIcon {
     Previous,
     Play,
     Pause,
+    #[allow(dead_code)]
+    Stop,
     Next,
 }
 
@@ -91,6 +97,8 @@ impl IconNamed for AppIcon {
             Self::VolumeHigh => "icons/volume-high.svg",
             Self::VolumeLow => "icons/volume-low.svg",
             Self::VolumeMuted => "icons/volume-muted.svg",
+            Self::MiniPlayer => "icons/mini-player.svg",
+            Self::Maximize => "icons/window-maximize.svg",
         }
         .into()
     }
@@ -102,6 +110,7 @@ impl IconNamed for PlayerIcon {
             Self::Previous => "icons/media-previous.svg",
             Self::Play => "icons/media-play.svg",
             Self::Pause => "icons/media-pause.svg",
+            Self::Stop => "icons/media-stop.svg",
             Self::Next => "icons/media-next.svg",
         }
         .into()
@@ -127,6 +136,8 @@ impl AssetSource for Assets {
             "icons/media-play.svg" => Some(include_bytes!("../assets/icons/media-play.svg")),
             "icons/media-pause.svg" => Some(include_bytes!("../assets/icons/media-pause.svg")),
             "icons/media-next.svg" => Some(include_bytes!("../assets/icons/media-next.svg")),
+            "icons/media-stop.svg" => Some(include_bytes!("../assets/icons/media-stop.svg")),
+            "icons/mini-player.svg" => Some(include_bytes!("../assets/icons/mini-player.svg")),
             "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
             "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
             "icons/shuffle.svg" => Some(include_bytes!("../assets/icons/shuffle.svg")),

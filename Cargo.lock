@@ -3856,6 +3856,7 @@ dependencies = [
  "log",
  "md-5",
  "rand 0.8.7",
+ "raw-window-handle",
  "reqwest",
  "rodio",
  "serde",
@@ -3863,6 +3864,7 @@ dependencies = [
  "smol",
  "tokio",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
