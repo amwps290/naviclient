@@ -157,14 +157,14 @@ impl Api {
         Ok(albums)
     }
 
-    pub async fn albums(&self, size: u32) -> Result<Vec<Album>> {
+    pub async fn albums(&self, size: u32, offset: u32) -> Result<Vec<Album>> {
         let body = self
             .get_json(
                 "getAlbumList2",
                 &[
                     ("type", "newest"),
                     ("size", &size.to_string()),
-                    ("offset", "0"),
+                    ("offset", &offset.to_string()),
                 ],
             )
             .await?;

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -36,9 +37,10 @@ use crate::models::{
     Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode, Playlist,
     SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality,
 };
-use crate::msg::{error_message, Msg};
+use crate::msg::{error_message, DecodedCover, Msg};
 
 const MINI_WINDOW_SIZE: Size<Pixels> = size(px(200.0), px(50.0));
+const ALBUM_PAGE_SIZE: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum View {
@@ -135,12 +137,42 @@ fn advance_index(current: usize, len: usize, forward: bool, wraps: bool) -> Opti
     }
 }
 
+/// 计算专辑分页的 offset；相邻页之间连续、不重叠。
+fn album_page_offset(page: usize, page_size: usize) -> u32 {
+    (page as u32) * (page_size as u32)
+}
+
+/// 在后台线程解码封面：按需提取调色板并构造 GPUI 图片对象，避免阻塞 UI 线程。
+fn decode_cover(bytes: Vec<u8>, want_palette: bool) -> DecodedCover {
+    let decode_start = std::time::Instant::now();
+    let palette = if want_palette {
+        extract_cover_palette(&bytes)
+    } else {
+        None
+    };
+    let image = image::guess_format(&bytes)
+        .ok()
+        .and_then(gpui_image_format)
+        .map(|format| Arc::new(GpuiImage::from_bytes(format, bytes)));
+    let decode_elapsed = decode_start.elapsed();
+    if decode_elapsed > Duration::from_millis(20) {
+        log::debug!(
+            "cover decoded on background thread in {decode_elapsed:?} palette={want_palette}"
+        );
+    }
+    DecodedCover { palette, image }
+}
+
 struct AppState {
     server: Option<ServerInfo>,
     view: View,
     loading: bool,
     artists: Vec<Artist>,
+    artists_visible: usize,
     albums: Vec<Album>,
+    albums_loading: bool,
+    albums_exhausted: bool,
+    albums_page: usize,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
     current_album: Option<Album>,
@@ -152,6 +184,8 @@ struct AppState {
     current_playlist: Option<Playlist>,
     playlist_songs: Vec<Song>,
     search_results: Option<SearchResults>,
+    song_rows_visible: usize,
+    playlists_visible: usize,
     queue: Vec<Song>,
     queue_index: Option<usize>,
     now_playing: Option<Song>,
@@ -179,7 +213,11 @@ impl Default for AppState {
             view: View::Home,
             loading: false,
             artists: Vec::new(),
+            artists_visible: 0,
             albums: Vec::new(),
+            albums_loading: false,
+            albums_exhausted: false,
+            albums_page: 0,
             current_artist: None,
             artist_albums: Vec::new(),
             current_album: None,
@@ -191,6 +229,8 @@ impl Default for AppState {
             current_playlist: None,
             playlist_songs: Vec::new(),
             search_results: None,
+            song_rows_visible: 50,
+            playlists_visible: 50,
             queue: Vec::new(),
             queue_index: None,
             now_playing: None,
@@ -236,6 +276,9 @@ pub struct NavidromeApp {
     volume_panel_generation: u64,
     lyrics_scroll_handle: ScrollHandle,
     lyrics_scroll_target: Option<Pixels>,
+    content_scroll_handle: ScrollHandle,
+    cover_slots: Arc<tokio::sync::Semaphore>,
+    title_width_cache: RefCell<HashMap<SharedString, Pixels>>,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
     mini_mode: bool,
@@ -319,6 +362,9 @@ impl NavidromeApp {
             volume_panel_generation: 0,
             lyrics_scroll_handle: ScrollHandle::new(),
             lyrics_scroll_target: None,
+            content_scroll_handle: ScrollHandle::new(),
+            cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            title_width_cache: RefCell::new(HashMap::new()),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
             mini_mode: false,
@@ -428,10 +474,104 @@ impl NavidromeApp {
     fn load_albums(&mut self) {
         let Some(api) = self.api.clone() else { return };
         self.state.loading = true;
+        self.state.albums_loading = true;
+        self.state.albums_exhausted = false;
+        self.state.albums_page = 0;
+        self.state.albums.clear();
         let tx = self.tx.clone();
         self.spawn_future(async move {
-            let _ = tx.send(Msg::Albums(api.albums(200).await.map_err(error_message)));
+            let _ = tx.send(Msg::Albums(
+                api.albums(ALBUM_PAGE_SIZE as u32, 0)
+                    .await
+                    .map_err(error_message),
+            ));
         });
+    }
+
+    fn load_more_albums(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        if self.state.albums_loading || self.state.albums_exhausted {
+            return;
+        }
+        self.state.albums_loading = true;
+        let offset = album_page_offset(self.state.albums_page, ALBUM_PAGE_SIZE);
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::Albums(
+                api.albums(ALBUM_PAGE_SIZE as u32, offset)
+                    .await
+                    .map_err(error_message),
+            ));
+        });
+    }
+
+    fn maybe_load_more_content(&mut self) {
+        // 歌曲列表封面按需加载（滚动即触发，不依赖接近底部）。
+        self.maybe_load_visible_song_covers();
+
+        // 长列表增量渲染 / 分页：接近底部时追加。
+        let max = self.content_scroll_handle.max_offset().height;
+        let offset = self.content_scroll_handle.offset().y;
+        if max <= px(0.0) || f32::from(max - offset) >= 600.0 {
+            return;
+        }
+        match self.state.view {
+            View::Albums => self.load_more_albums(),
+            View::Artists if self.state.artists_visible < self.state.artists.len() => {
+                self.state.artists_visible =
+                    (self.state.artists_visible + 300).min(self.state.artists.len());
+            }
+            View::Playlists if self.state.playlists_visible < self.state.playlists.len() => {
+                self.state.playlists_visible =
+                    (self.state.playlists_visible + 100).min(self.state.playlists.len());
+            }
+            View::AlbumDetail | View::PlaylistDetail | View::Queue | View::Favorites => {
+                let songs_len = match self.state.view {
+                    View::AlbumDetail => self.state.current_songs.len(),
+                    View::PlaylistDetail => self.state.playlist_songs.len(),
+                    View::Queue => self.state.queue.len(),
+                    _ => self.state.favorites.songs.len(),
+                };
+                if self.state.song_rows_visible < songs_len {
+                    self.state.song_rows_visible =
+                        (self.state.song_rows_visible + 50).min(songs_len);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 歌曲列表（专辑详情 / 播放列表详情）滚动时按需加载可见行的封面。
+    fn maybe_load_visible_song_covers(&mut self) {
+        let songs = match self.state.view {
+            View::AlbumDetail => &self.state.current_songs,
+            View::PlaylistDetail => &self.state.playlist_songs,
+            _ => return,
+        };
+        if songs.is_empty() {
+            return;
+        }
+        let offset = f32::from(self.content_scroll_handle.offset().y);
+        // 内容区 padding 24 + 表头 36 + 行高 60 + 1px 边框
+        let row_height = 61.0_f32;
+        let first = ((offset - 60.0) / row_height).max(0.0) as usize;
+        let last = (first + 40).min(songs.len());
+        // 先收集需要加载的封面 id，避免在借用期间修改 self。
+        let pending: Vec<String> = songs[first..last]
+            .iter()
+            .filter_map(|song| song.cover_art.clone())
+            .filter(|cover| !self.state.requested_covers.contains(cover))
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        log::debug!(
+            "queued {} visible song covers; rows={first}..{last}",
+            pending.len()
+        );
+        for cover in pending {
+            self.ensure_cover(Some(&cover), false);
+        }
     }
 
     fn load_playlists(&mut self) {
@@ -455,7 +595,7 @@ impl NavidromeApp {
         self.state.current_artist = Some(artist.clone());
         self.state.artist_albums.clear();
         self.state.view = View::ArtistDetail;
-        self.ensure_cover(artist.cover_art.as_deref());
+        self.ensure_cover(artist.cover_art.as_deref(), true);
         let Some(api) = self.api.clone() else { return };
         let artist_id = artist.id.clone();
         let tx = self.tx.clone();
@@ -470,7 +610,7 @@ impl NavidromeApp {
         self.state.current_album = Some(album.clone());
         self.state.current_songs.clear();
         self.state.view = View::AlbumDetail;
-        self.ensure_cover(album.cover_art.as_deref());
+        self.ensure_cover(album.cover_art.as_deref(), true);
         let Some(api) = self.api.clone() else { return };
         let album_id = album.id.clone();
         let tx = self.tx.clone();
@@ -485,7 +625,7 @@ impl NavidromeApp {
         self.state.current_playlist = Some(playlist.clone());
         self.state.playlist_songs.clear();
         self.state.view = View::PlaylistDetail;
-        self.ensure_cover(playlist.cover_art.as_deref());
+        self.ensure_cover(playlist.cover_art.as_deref(), true);
         let Some(api) = self.api.clone() else { return };
         let playlist_id = playlist.id.clone();
         let tx = self.tx.clone();
@@ -541,7 +681,7 @@ impl NavidromeApp {
         });
     }
 
-    fn ensure_cover(&mut self, cover_id: Option<&str>) {
+    fn ensure_cover(&mut self, cover_id: Option<&str>, want_palette: bool) {
         let Some(id) = cover_id else { return };
         if !self.state.requested_covers.insert(id.to_string()) {
             return;
@@ -556,21 +696,32 @@ impl NavidromeApp {
         };
         let id = id.to_string();
         let tx = self.tx.clone();
+        let cover_slots = self.cover_slots.clone();
         self.spawn_future(async move {
+            // 网络下载不限并发（IO 等待不占 CPU），只对解码限流，避免占满后台线程。
             let result = api.get_bytes(&url).await.map_err(error_message);
+            let result = match result {
+                Ok(bytes) => {
+                    let _permit = cover_slots.acquire_owned().await;
+                    Ok(decode_cover(bytes, want_palette))
+                }
+                Err(error) => Err(error),
+            };
             let _ = tx.send(Msg::Cover { id, result });
         });
     }
 
     fn preload_covers(&mut self, ids: Vec<String>) {
+        // 网格封面只用于显示，不需要提取调色板（调色板仅播放页/详情页配色用）。
         for id in ids {
-            self.ensure_cover(Some(&id));
+            self.ensure_cover(Some(&id), false);
         }
     }
 
     fn play_song_list(&mut self, songs: &[Song], index: usize) {
         self.state.queue = songs.to_vec();
         self.state.shuffle_history.start(index);
+        self.state.song_rows_visible = songs.len().min(50);
         self.play_queue_index(index);
     }
 
@@ -616,7 +767,7 @@ impl NavidromeApp {
         self.state.now_playing = Some(song.clone());
         self.state.now_playing_quality = None;
         self.state.ended_handled = false;
-        self.ensure_cover(song.cover_art.as_deref());
+        self.ensure_cover(song.cover_art.as_deref(), true);
         self.load_lyrics(&song);
         let Some(api) = self.api.clone() else {
             self.state.error = Some("Configure a server before playing".to_string());
@@ -1031,6 +1182,7 @@ impl NavidromeApp {
                                 .filter_map(|item| item.cover_art.clone())
                                 .take(40)
                                 .collect();
+                            self.state.artists_visible = artists.len().min(300);
                             self.state.artists = artists;
                             self.preload_covers(covers);
                         }
@@ -1057,17 +1209,31 @@ impl NavidromeApp {
                 }
                 Msg::Albums(result) => {
                     self.state.loading = false;
+                    self.state.albums_loading = false;
+                    let handle_start = std::time::Instant::now();
                     match result {
                         Ok(mut albums) => {
-                            albums.sort_by_key(|album| album.created.clone().unwrap_or_default());
-                            albums.reverse();
-                            let covers = albums
-                                .iter()
-                                .filter_map(|item| item.cover_art.clone())
-                                .take(80)
-                                .collect();
-                            self.state.albums = albums;
-                            self.preload_covers(covers);
+                            if albums.is_empty() {
+                                self.state.albums_exhausted = true;
+                            } else {
+                                albums
+                                    .sort_by_key(|album| album.created.clone().unwrap_or_default());
+                                albums.reverse();
+                                let covers: Vec<String> = albums
+                                    .iter()
+                                    .filter_map(|item| item.cover_art.clone())
+                                    .take(80)
+                                    .collect();
+                                let cover_count = covers.len();
+                                self.state.albums.extend(albums);
+                                self.state.albums_page += 1;
+                                self.preload_covers(covers);
+                                log::debug!(
+                                    "albums page handled in {:?}; total={} covers_queued={cover_count}",
+                                    handle_start.elapsed(),
+                                    self.state.albums.len(),
+                                );
+                            }
                         }
                         Err(error) => self.state.error = Some(error),
                     }
@@ -1080,10 +1246,13 @@ impl NavidromeApp {
                         match result {
                             Ok(mut songs) => {
                                 songs.sort_by_key(|song| song.track.unwrap_or(i32::MAX));
+                                // 只预加载首屏封面，滚动时按需补齐，避免一次发起几百个请求。
                                 let covers = songs
                                     .iter()
                                     .filter_map(|song| song.cover_art.clone())
+                                    .take(40)
                                     .collect();
+                                self.state.song_rows_visible = songs.len().min(50);
                                 self.state.current_songs = songs;
                                 self.preload_covers(covers);
                             }
@@ -1094,7 +1263,10 @@ impl NavidromeApp {
                 Msg::Playlists(result) => {
                     self.state.loading = false;
                     match result {
-                        Ok(playlists) => self.state.playlists = playlists,
+                        Ok(playlists) => {
+                            self.state.playlists_visible = playlists.len().min(50);
+                            self.state.playlists = playlists;
+                        }
                         Err(error) => self.state.error = Some(error),
                     }
                 }
@@ -1145,6 +1317,7 @@ impl NavidromeApp {
                             .collect();
                         self.state.favorites = favorites;
                         self.state.favorite_ids = favorite_ids;
+                        self.state.song_rows_visible = 50;
                         self.preload_covers(covers);
                     }
                     Err(error) => self.state.error = Some(error),
@@ -1176,10 +1349,13 @@ impl NavidromeApp {
                     {
                         match result {
                             Ok(songs) => {
+                                // 只预加载首屏封面，滚动时按需补齐。
                                 let covers = songs
                                     .iter()
                                     .filter_map(|song| song.cover_art.clone())
+                                    .take(40)
                                     .collect();
+                                self.state.song_rows_visible = songs.len().min(50);
                                 self.state.playlist_songs = songs;
                                 self.preload_covers(covers);
                             }
@@ -1190,7 +1366,10 @@ impl NavidromeApp {
                 Msg::Search(result) => {
                     self.state.loading = false;
                     match result {
-                        Ok(results) => self.state.search_results = Some(results),
+                        Ok(results) => {
+                            self.state.song_rows_visible = 50;
+                            self.state.search_results = Some(results);
+                        }
                         Err(error) => self.state.error = Some(error),
                     }
                 }
@@ -1213,16 +1392,12 @@ impl NavidromeApp {
                     }
                 }
                 Msg::Cover { id, result } => {
-                    if let Ok(bytes) = result {
-                        if let Some(palette) = extract_cover_palette(&bytes) {
+                    if let Ok(decoded) = result {
+                        if let Some(palette) = decoded.palette {
                             self.state.cover_palettes.insert(id.clone(), palette);
                         }
-                        if let Ok(format) = image::guess_format(&bytes) {
-                            if let Some(format) = gpui_image_format(format) {
-                                self.state
-                                    .covers
-                                    .insert(id, Arc::new(GpuiImage::from_bytes(format, bytes)));
-                            }
+                        if let Some(image) = decoded.image {
+                            self.state.covers.insert(id, image);
                         }
                     }
                 }
@@ -1708,15 +1883,29 @@ impl NavidromeApp {
     ) -> gpui::AnyElement {
         let font_size = rems(0.875).to_pixels(window.rem_size());
         let text_style = window.text_style().highlight(FontWeight::MEDIUM);
-        let text_width = window
-            .text_system()
-            .shape_line(
-                text.clone(),
-                font_size,
-                &[text_style.to_run(text.len())],
-                None,
-            )
-            .width;
+        let text_width = {
+            let cache = self.title_width_cache.borrow();
+            if let Some(&width) = cache.get(&text) {
+                width
+            } else {
+                drop(cache);
+                let width = window
+                    .text_system()
+                    .shape_line(
+                        text.clone(),
+                        font_size,
+                        &[text_style.to_run(text.len())],
+                        None,
+                    )
+                    .width;
+                let mut cache = self.title_width_cache.borrow_mut();
+                if cache.len() > 20_000 {
+                    cache.clear();
+                }
+                cache.insert(text.clone(), width);
+                width
+            }
+        };
         let viewport_width = px(viewport_width);
 
         if text_width <= viewport_width {
@@ -1773,64 +1962,173 @@ impl NavidromeApp {
         cx: &Context<Self>,
         window: &mut Window,
     ) -> gpui::AnyElement {
+        let grid_start = std::time::Instant::now();
+        let grid =
+            h_flex()
+                .items_start()
+                .flex_wrap()
+                .gap_5()
+                .children(albums.iter().map(|album| {
+                    let album_for_click = album.clone();
+                    v_flex()
+                        .w(px(176.0))
+                        .gap_2()
+                        .child(
+                            div()
+                                .relative()
+                                .w(px(176.0))
+                                .h(px(176.0))
+                                .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
+                                .child(div().absolute().top_2().right_2().child(
+                                    self.favorite_button(FavoriteKind::Album, &album.id, cx),
+                                )),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("album-{}", album.id)))
+                                .ghost()
+                                .w_full()
+                                .justify_start()
+                                .child(self.render_scrolling_title(
+                                    album.name.clone().into(),
+                                    144.0,
+                                    SharedString::from(format!("album-title-{}", album.id)),
+                                    window,
+                                ))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_album(album_for_click.clone());
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            div()
+                                .px_2()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child(format!(
+                                    "{}{}",
+                                    album.artist,
+                                    album
+                                        .year
+                                        .map(|year| format!(" - {year}"))
+                                        .unwrap_or_default()
+                                )),
+                        )
+                }));
+        let grid_elapsed = grid_start.elapsed();
+        if grid_elapsed > Duration::from_millis(8) {
+            log::warn!(
+                "render_album_grid built {} albums in {grid_elapsed:?}",
+                albums.len()
+            );
+        }
+        grid.into_any_element()
+    }
+
+    /// 专辑网格骨架屏：数据加载期间占位，避免空页面跳动。
+    fn render_album_skeleton_grid(&self, cx: &Context<Self>) -> gpui::AnyElement {
+        let muted = cx.theme().muted_foreground;
         h_flex()
             .items_start()
             .flex_wrap()
             .gap_5()
-            .children(albums.iter().map(|album| {
-                let album_for_click = album.clone();
+            .children((0..12).map(|_| {
                 v_flex()
                     .w(px(176.0))
                     .gap_2()
                     .child(
                         div()
-                            .relative()
                             .w(px(176.0))
                             .h(px(176.0))
-                            .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_2()
-                                    .right_2()
-                                    .child(self.favorite_button(
-                                        FavoriteKind::Album,
-                                        &album.id,
-                                        cx,
-                                    )),
-                            ),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("album-{}", album.id)))
-                            .ghost()
-                            .w_full()
-                            .justify_start()
-                            .child(self.render_scrolling_title(
-                                album.name.clone().into(),
-                                144.0,
-                                SharedString::from(format!("album-title-{}", album.id)),
-                                window,
-                            ))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_album(album_for_click.clone());
-                                cx.notify();
-                            })),
+                            .rounded_md()
+                            .bg(muted.opacity(0.08)),
                     )
                     .child(
                         div()
-                            .px_2()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .truncate()
-                            .child(format!(
-                                "{}{}",
-                                album.artist,
-                                album
-                                    .year
-                                    .map(|year| format!(" - {year}"))
-                                    .unwrap_or_default()
-                            )),
+                            .w(px(128.0))
+                            .h(px(12.0))
+                            .rounded_full()
+                            .bg(muted.opacity(0.1)),
                     )
+                    .child(
+                        div()
+                            .w(px(88.0))
+                            .h(px(10.0))
+                            .rounded_full()
+                            .bg(muted.opacity(0.07)),
+                    )
+                    .into_any_element()
+            }))
+            .into_any_element()
+    }
+
+    /// 列表行骨架屏：播放列表 / 歌曲列表加载期间占位。
+    fn render_list_skeleton(&self, rows: usize, cx: &Context<Self>) -> gpui::AnyElement {
+        let muted = cx.theme().muted_foreground;
+        v_flex()
+            .gap_2()
+            .children((0..rows).map(|_| {
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(
+                        div()
+                            .w(px(40.0))
+                            .h(px(40.0))
+                            .rounded_md()
+                            .bg(muted.opacity(0.08)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .h(px(12.0))
+                                    .w_full()
+                                    .max_w(px(240.0))
+                                    .rounded_full()
+                                    .bg(muted.opacity(0.1)),
+                            )
+                            .child(
+                                div()
+                                    .h(px(10.0))
+                                    .w(px(120.0))
+                                    .rounded_full()
+                                    .bg(muted.opacity(0.07)),
+                            ),
+                    )
+                    .into_any_element()
+            }))
+            .into_any_element()
+    }
+
+    /// 艺术家封面网格骨架屏：与 artist 页的圆角方形封面一致。
+    fn render_artist_skeleton_grid(&self, cx: &Context<Self>) -> gpui::AnyElement {
+        let muted = cx.theme().muted_foreground;
+        h_flex()
+            .items_start()
+            .flex_wrap()
+            .gap_5()
+            .children((0..15).map(|_| {
+                v_flex()
+                    .w(px(152.0))
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(152.0))
+                            .h(px(152.0))
+                            .rounded_lg()
+                            .bg(muted.opacity(0.08)),
+                    )
+                    .child(
+                        div()
+                            .w(px(104.0))
+                            .h(px(12.0))
+                            .rounded_full()
+                            .bg(muted.opacity(0.1)),
+                    )
+                    .into_any_element()
             }))
             .into_any_element()
     }
@@ -1947,6 +2245,9 @@ impl NavidromeApp {
     }
 
     fn render_song_list(&self, songs: &[Song], cx: &Context<Self>) -> gpui::AnyElement {
+        // 增量渲染：只渲染前 song_rows_visible 行，滚动时逐批追加，避免长列表一次重建。
+        let visible = self.state.song_rows_visible.min(songs.len());
+        let songs = &songs[..visible];
         let queue_source = songs.to_vec();
         let playback = self.audio.state();
         v_flex()
@@ -2655,17 +2956,21 @@ impl NavidromeApp {
                         .child("Newest albums"),
                 )
                 .child(
-                    self.render_album_grid(
-                        &self
-                            .state
-                            .albums
-                            .iter()
-                            .take(30)
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                        cx,
-                        window,
-                    ),
+                    if self.state.albums.is_empty() && self.state.albums_loading {
+                        self.render_album_skeleton_grid(cx)
+                    } else {
+                        self.render_album_grid(
+                            &self
+                                .state
+                                .albums
+                                .iter()
+                                .take(30)
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                            cx,
+                            window,
+                        )
+                    },
                 )
                 .into_any_element(),
             View::Favorites => {
@@ -2730,7 +3035,12 @@ impl NavidromeApp {
                     cx,
                 ))
                 .children(self.error_banner(cx))
-                .child(self.render_artist_grid(&self.state.artists, cx, window))
+                .child(if self.state.artists.is_empty() && self.state.loading {
+                    self.render_artist_skeleton_grid(cx)
+                } else {
+                    let visible = self.state.artists_visible.min(self.state.artists.len());
+                    self.render_artist_grid(&self.state.artists[..visible], cx, window)
+                })
                 .into_any_element(),
             View::Albums => v_flex()
                 .gap_5()
@@ -2740,18 +3050,28 @@ impl NavidromeApp {
                     cx,
                 ))
                 .children(self.error_banner(cx))
-                .child(self.render_album_grid(&self.state.albums, cx, window))
+                .child(
+                    if self.state.albums.is_empty() && self.state.albums_loading {
+                        self.render_album_skeleton_grid(cx)
+                    } else {
+                        self.render_album_grid(&self.state.albums, cx, window)
+                    },
+                )
                 .into_any_element(),
             View::Playlists => {
-                let playlist_list =
-                    v_flex()
-                        .w_full()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .rounded_lg()
-                        .overflow_hidden()
-                        .children(self.state.playlists.iter().enumerate().map(
-                            |(index, playlist)| {
+                let visible_playlists =
+                    self.state.playlists_visible.min(self.state.playlists.len());
+                let playlist_list = v_flex()
+                    .w_full()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .children(
+                        self.state.playlists[..visible_playlists]
+                            .iter()
+                            .enumerate()
+                            .map(|(index, playlist)| {
                                 let playlist_for_click = playlist.clone();
                                 let track_count = playlist.song_count.unwrap_or_default();
                                 let details = playlist
@@ -2806,8 +3126,8 @@ impl NavidromeApp {
                                         this.open_playlist(playlist_for_click.clone());
                                         cx.notify();
                                     }))
-                            },
-                        ));
+                            }),
+                    );
 
                 v_flex()
                     .gap_5()
@@ -2817,14 +3137,21 @@ impl NavidromeApp {
                         cx,
                     ))
                     .children(self.error_banner(cx))
-                    .when(self.state.playlists.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .py_8()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("No playlists are available."),
-                        )
-                    })
+                    .when(
+                        self.state.playlists.is_empty() && self.state.loading,
+                        |this| this.child(self.render_list_skeleton(8, cx)),
+                    )
+                    .when(
+                        self.state.playlists.is_empty() && !self.state.loading,
+                        |this| {
+                            this.child(
+                                div()
+                                    .py_8()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No playlists are available."),
+                            )
+                        },
+                    )
                     .when(!self.state.playlists.is_empty(), |this| {
                         this.child(playlist_list)
                     })
@@ -3880,6 +4207,10 @@ impl Render for NavidromeApp {
                             .flex_1()
                             .h_full()
                             .overflow_y_scroll()
+                            .track_scroll(&self.content_scroll_handle)
+                            .on_scroll_wheel(cx.listener(|this, _, _, _| {
+                                this.maybe_load_more_content();
+                            }))
                             .p_6()
                             .child(self.render_content(window, cx)),
                     ),
@@ -4244,9 +4575,9 @@ mod tests {
     use gpui::hsla;
 
     use super::{
-        accent_foreground, advance_index, contrast_ratio, effective_volume, extract_cover_palette,
-        format_file_size, normalize_volume, playback_technical_info, readable_accent,
-        restored_volume, vinyl_rotation_phase, ShuffleHistory,
+        accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
+        extract_cover_palette, format_file_size, normalize_volume, playback_technical_info,
+        readable_accent, restored_volume, vinyl_rotation_phase, ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality};
 
@@ -4396,5 +4727,13 @@ mod tests {
         }
         let recent: Vec<usize> = history.recent(4).collect();
         assert_eq!(recent, vec![6, 5, 4, 3]); // 最近 4 首被排除
+    }
+
+    #[test]
+    fn album_pagination_offsets_are_contiguous() {
+        assert_eq!(album_page_offset(0, 100), 0);
+        assert_eq!(album_page_offset(1, 100), 100);
+        assert_eq!(album_page_offset(2, 100), 200);
+        assert_eq!(album_page_offset(3, 50), 150);
     }
 }

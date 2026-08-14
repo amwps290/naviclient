@@ -1,6 +1,17 @@
+use std::sync::Arc;
+
+use gpui::{Hsla, Image as GpuiImage};
+
 use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
+
+/// 后台线程解码完成的封面结果，UI 线程只负责插入缓存。
+#[derive(Debug)]
+pub struct DecodedCover {
+    pub palette: Option<(Hsla, Hsla)>,
+    pub image: Option<Arc<GpuiImage>>,
+}
 
 #[derive(Debug)]
 pub enum Msg {
@@ -33,7 +44,7 @@ pub enum Msg {
     },
     Cover {
         id: String,
-        result: Result<Vec<u8>, String>,
+        result: Result<DecodedCover, String>,
     },
 }
 
