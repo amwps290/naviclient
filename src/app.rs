@@ -11,10 +11,10 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
     relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
-    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, ScrollWheelEvent,
-    SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Transformation, Window,
-    WindowControlArea,
+    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, Keystroke,
+    Modifiers, MouseButton, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle,
+    ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled, Subscription,
+    Transformation, Window, WindowControlArea,
 };
 use gpui_component::{
     box_shadow,
@@ -142,6 +142,61 @@ fn advance_index(current: usize, len: usize, forward: bool, wraps: bool) -> Opti
 /// 计算专辑分页的 offset；相邻页之间连续、不重叠。
 fn album_page_offset(page: usize, page_size: usize) -> u32 {
     (page as u32) * (page_size as u32)
+}
+
+/// 键盘快捷键动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shortcut {
+    TogglePlayback,
+    Previous,
+    Next,
+    SeekBack,
+    SeekForward,
+    VolumeUp,
+    VolumeDown,
+    ToggleMute,
+    ToggleNowPlaying,
+    ToggleQueue,
+    CloseOverlays,
+    FocusSearch,
+    None,
+}
+
+/// 将按键映射为快捷键动作（纯逻辑，便于测试）。
+fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
+    if mods.control && !mods.alt && !mods.shift && !mods.platform {
+        match key {
+            "f" => return Shortcut::FocusSearch,
+            "left" => return Shortcut::Previous,
+            "right" => return Shortcut::Next,
+            _ => {}
+        }
+    }
+    if mods.modified() {
+        return Shortcut::None;
+    }
+    match key {
+        "space" => Shortcut::TogglePlayback,
+        "left" => Shortcut::SeekBack,
+        "right" => Shortcut::SeekForward,
+        "up" => Shortcut::VolumeUp,
+        "down" => Shortcut::VolumeDown,
+        "m" => Shortcut::ToggleMute,
+        "l" => Shortcut::ToggleNowPlaying,
+        "q" => Shortcut::ToggleQueue,
+        "escape" => Shortcut::CloseOverlays,
+        _ => Shortcut::None,
+    }
+}
+
+/// 计算快进/快退的目标位置，不越过歌曲起点与终点。
+fn seek_target(position: Duration, duration: Option<Duration>, delta_secs: i64) -> Duration {
+    let duration = duration.unwrap_or_default();
+    if delta_secs >= 0 {
+        (position + Duration::from_secs(delta_secs as u64)).min(duration)
+    } else {
+        position.saturating_sub(Duration::from_secs((-delta_secs) as u64))
+    }
 }
 
 /// 在后台线程解码封面：按需提取调色板并构造 GPUI 图片对象，避免阻塞 UI 线程。
@@ -288,6 +343,8 @@ pub struct NavidromeApp {
     tray_rx: Receiver<TrayCommand>,
     main_hwnd: Option<isize>,
     quitting: Arc<AtomicBool>,
+    last_shortcut_key: String,
+    last_shortcut_at: std::time::Instant,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
     mini_mode: bool,
@@ -377,6 +434,8 @@ impl NavidromeApp {
             tray_rx: mpsc::channel().1,
             main_hwnd: None,
             quitting: Arc::new(AtomicBool::new(false)),
+            last_shortcut_key: String::new(),
+            last_shortcut_at: std::time::Instant::now(),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
             mini_mode: false,
@@ -393,6 +452,13 @@ impl NavidromeApp {
         }
         app.tray_rx = tray_rx;
         app.main_hwnd = main_window_hwnd(window);
+
+        // 注册应用级快捷键监听（不依赖焦点；输入框聚焦时由输入框包装层阻止传播）。
+        app._subscriptions
+            .push(cx.observe_keystrokes(|this, event, window, cx| {
+                this.handle_keystroke(&event.keystroke, window, cx);
+            }));
+
         let close_quitting = app.quitting.clone();
         let close_hwnd = app.main_hwnd;
         window.on_window_should_close(cx, move |_window, _cx| {
@@ -937,6 +1003,105 @@ impl NavidromeApp {
             self.advance_queue(true);
         } else if offset < 0 {
             self.advance_queue(false);
+        }
+    }
+
+    /// 相对当前进度快进/快退（秒），不越过歌曲起点与终点。
+    fn seek_by(&mut self, delta_secs: i64) {
+        let playback = self.audio.state();
+        let target = seek_target(playback.position, playback.duration, delta_secs);
+        if target != playback.position {
+            self.audio.seek(target);
+        }
+    }
+
+    /// 处理全局键盘快捷键；输入框聚焦时不会触发（由输入框包装层阻止传播）。
+    fn handle_keystroke(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let shortcut = match_shortcut(&keystroke.key, keystroke.modifiers);
+        if shortcut == Shortcut::None {
+            return;
+        }
+        // 忽略按住重复触发的同一按键（250ms 内同键视为重复）。
+        let now = std::time::Instant::now();
+        let repeated = self.last_shortcut_key == keystroke.key
+            && now.duration_since(self.last_shortcut_at) < Duration::from_millis(250);
+        self.last_shortcut_key = keystroke.key.clone();
+        self.last_shortcut_at = now;
+        if repeated {
+            return;
+        }
+        match shortcut {
+            Shortcut::TogglePlayback => {
+                self.toggle_playback();
+                cx.notify();
+            }
+            Shortcut::Previous => {
+                self.skip(-1);
+                cx.notify();
+            }
+            Shortcut::Next => {
+                self.skip(1);
+                cx.notify();
+            }
+            Shortcut::SeekBack => {
+                self.seek_by(-5);
+                cx.notify();
+            }
+            Shortcut::SeekForward => {
+                self.seek_by(5);
+                cx.notify();
+            }
+            Shortcut::VolumeUp => self.adjust_volume(0.05, window, cx),
+            Shortcut::VolumeDown => self.adjust_volume(-0.05, window, cx),
+            Shortcut::ToggleMute => self.toggle_mute(window, cx),
+            Shortcut::ToggleNowPlaying => {
+                if self.state.view == View::NowPlaying {
+                    self.leave_now_playing();
+                } else {
+                    self.open_now_playing();
+                }
+                cx.notify();
+            }
+            Shortcut::ToggleQueue => {
+                if self.state.view == View::Queue {
+                    self.state.view = self.state.view_before_now_playing;
+                } else {
+                    if self.state.view != View::NowPlaying {
+                        self.state.view_before_now_playing = self.state.view;
+                    }
+                    self.state.view = View::Queue;
+                }
+                cx.notify();
+            }
+            Shortcut::CloseOverlays => {
+                if self.state.settings_open {
+                    self.state.settings_open = false;
+                } else if self.state.view == View::NowPlaying {
+                    self.leave_now_playing();
+                } else if matches!(
+                    self.state.view,
+                    View::ArtistDetail | View::AlbumDetail | View::PlaylistDetail
+                ) {
+                    self.state.view = View::Home;
+                }
+                cx.notify();
+            }
+            Shortcut::FocusSearch => {
+                // 先切到搜索页，再聚焦搜索框。
+                self.state.settings_open = false;
+                self.state.view = View::Search;
+                cx.notify();
+                let mut async_cx = window.to_async(cx);
+                let _ = self
+                    .search_input
+                    .update_in(&mut async_cx, |input, window, cx| input.focus(window, cx));
+            }
+            Shortcut::None => {}
         }
     }
 
@@ -2742,7 +2907,12 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Server URL"),
                     )
-                    .child(Input::new(&self.server_input).w_full()),
+                    .child(
+                        div()
+                            .w_full()
+                            .on_key_down(|_, _, cx| cx.stop_propagation())
+                            .child(Input::new(&self.server_input).w_full()),
+                    ),
             )
             .child(
                 v_flex()
@@ -2753,7 +2923,12 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Username"),
                     )
-                    .child(Input::new(&self.username_input).w_full()),
+                    .child(
+                        div()
+                            .w_full()
+                            .on_key_down(|_, _, cx| cx.stop_propagation())
+                            .child(Input::new(&self.username_input).w_full()),
+                    ),
             )
             .child(
                 v_flex()
@@ -2764,7 +2939,12 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Password"),
                     )
-                    .child(Input::new(&self.password_input).w_full()),
+                    .child(
+                        div()
+                            .w_full()
+                            .on_key_down(|_, _, cx| cx.stop_propagation())
+                            .child(Input::new(&self.password_input).w_full()),
+                    ),
             )
             .child(
                 h_flex().justify_end().gap_2().child(
@@ -3401,7 +3581,12 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(Input::new(&self.search_input).flex_1())
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .on_key_down(|_, _, cx| cx.stop_propagation())
+                                    .child(Input::new(&self.search_input).w_full()),
+                            )
                             .child(
                                 Button::new("run-search")
                                     .label("Search")
@@ -4861,10 +5046,12 @@ mod tests {
 
     use super::{
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
-        extract_cover_palette, format_file_size, normalize_volume, playback_technical_info,
-        readable_accent, restored_volume, vinyl_rotation_phase, ShuffleHistory,
+        extract_cover_palette, format_file_size, match_shortcut, normalize_volume,
+        playback_technical_info, readable_accent, restored_volume, seek_target,
+        vinyl_rotation_phase, Shortcut, ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality};
+    use gpui::Modifiers;
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
@@ -5020,5 +5207,53 @@ mod tests {
         assert_eq!(album_page_offset(1, 100), 100);
         assert_eq!(album_page_offset(2, 100), 200);
         assert_eq!(album_page_offset(3, 50), 150);
+    }
+
+    #[test]
+    fn shortcut_mapping_covers_playback_controls() {
+        let none = Modifiers::default();
+        assert_eq!(match_shortcut("space", none), Shortcut::TogglePlayback);
+        assert_eq!(match_shortcut("left", none), Shortcut::SeekBack);
+        assert_eq!(match_shortcut("right", none), Shortcut::SeekForward);
+        assert_eq!(match_shortcut("up", none), Shortcut::VolumeUp);
+        assert_eq!(match_shortcut("down", none), Shortcut::VolumeDown);
+        assert_eq!(match_shortcut("m", none), Shortcut::ToggleMute);
+        assert_eq!(match_shortcut("l", none), Shortcut::ToggleNowPlaying);
+        assert_eq!(match_shortcut("q", none), Shortcut::ToggleQueue);
+        assert_eq!(match_shortcut("escape", none), Shortcut::CloseOverlays);
+        assert_eq!(match_shortcut("x", none), Shortcut::None);
+    }
+
+    #[test]
+    fn shortcut_mapping_uses_ctrl_for_navigation_and_search() {
+        let ctrl = Modifiers {
+            control: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(match_shortcut("f", ctrl), Shortcut::FocusSearch);
+        assert_eq!(match_shortcut("left", ctrl), Shortcut::Previous);
+        assert_eq!(match_shortcut("right", ctrl), Shortcut::Next);
+        assert_eq!(match_shortcut("space", ctrl), Shortcut::None);
+    }
+
+    #[test]
+    fn seek_target_clamps_to_track_bounds() {
+        let duration = Some(Duration::from_secs(180));
+        assert_eq!(
+            seek_target(Duration::from_secs(3), duration, -5),
+            Duration::ZERO
+        );
+        assert_eq!(
+            seek_target(Duration::from_secs(178), duration, 5),
+            Duration::from_secs(180)
+        );
+        assert_eq!(
+            seek_target(Duration::from_secs(60), duration, 5),
+            Duration::from_secs(65)
+        );
+        assert_eq!(
+            seek_target(Duration::from_secs(60), duration, -5),
+            Duration::from_secs(55)
+        );
     }
 }
