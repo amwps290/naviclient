@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,6 +39,7 @@ use crate::models::{
     SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality,
 };
 use crate::msg::{error_message, DecodedCover, Msg};
+use crate::tray::{self, TrayCommand};
 
 const MINI_WINDOW_SIZE: Size<Pixels> = size(px(200.0), px(50.0));
 const ALBUM_PAGE_SIZE: usize = 100;
@@ -279,6 +281,9 @@ pub struct NavidromeApp {
     content_scroll_handle: ScrollHandle,
     cover_slots: Arc<tokio::sync::Semaphore>,
     title_width_cache: RefCell<HashMap<SharedString, Pixels>>,
+    tray_rx: Receiver<TrayCommand>,
+    main_hwnd: Option<isize>,
+    quitting: Arc<AtomicBool>,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
     mini_mode: bool,
@@ -365,6 +370,9 @@ impl NavidromeApp {
             content_scroll_handle: ScrollHandle::new(),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             title_width_cache: RefCell::new(HashMap::new()),
+            tray_rx: mpsc::channel().1,
+            main_hwnd: None,
+            quitting: Arc::new(AtomicBool::new(false)),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
             mini_mode: false,
@@ -373,6 +381,26 @@ impl NavidromeApp {
         };
         app.state.playback_mode = app.config.playback_mode;
         app.audio.set_volume(initial_volume);
+
+        // 启动系统托盘（Windows），并拦截"关闭"改为隐藏到托盘。
+        let (tray_tx, tray_rx) = mpsc::channel();
+        if let Err(error) = tray::start_tray_worker(tray_tx) {
+            log::warn!("failed to start tray worker: {error:#}");
+        }
+        app.tray_rx = tray_rx;
+        app.main_hwnd = main_window_hwnd(window);
+        let close_quitting = app.quitting.clone();
+        let close_hwnd = app.main_hwnd;
+        window.on_window_should_close(cx, move |_window, _cx| {
+            if close_quitting.load(Ordering::Relaxed) {
+                true
+            } else if let Some(hwnd) = close_hwnd {
+                hide_main_window(hwnd);
+                false
+            } else {
+                true
+            }
+        });
         app._subscriptions.push(
             cx.subscribe(&search_input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
@@ -426,6 +454,7 @@ impl NavidromeApp {
             Timer::after(Duration::from_millis(40)).await;
             if this
                 .update(cx, |this, cx| {
+                    this.poll_tray_commands();
                     this.poll_messages();
                     this.handle_playback_end();
                     this.update_active_lyric();
@@ -1147,6 +1176,27 @@ impl NavidromeApp {
             self.state.status = format!("Theme save failed: {error:#}");
         }
         cx.notify();
+    }
+
+    fn poll_tray_commands(&mut self) {
+        while let Ok(command) = self.tray_rx.try_recv() {
+            match command {
+                TrayCommand::TogglePlayback => self.toggle_playback(),
+                TrayCommand::Previous => self.skip(-1),
+                TrayCommand::Next => self.skip(1),
+                TrayCommand::ShowWindow => {
+                    if let Some(hwnd) = self.main_hwnd {
+                        show_main_window(hwnd);
+                    }
+                }
+                TrayCommand::Quit => {
+                    self.quitting.store(true, Ordering::Relaxed);
+                    if let Some(hwnd) = self.main_hwnd {
+                        request_window_close(hwnd);
+                    }
+                }
+            }
+        }
     }
 
     fn poll_messages(&mut self) {
@@ -4219,6 +4269,58 @@ impl Render for NavidromeApp {
             .into_any_element()
     }
 }
+
+#[cfg(target_os = "windows")]
+fn main_window_hwnd(window: &Window) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return None;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return None;
+    };
+    Some(handle.hwnd.get())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn main_window_hwnd(_window: &Window) -> Option<isize> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn hide_main_window(hwnd: isize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    unsafe {
+        ShowWindow(hwnd as windows_sys::Win32::Foundation::HWND, SW_HIDE);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_main_window(_hwnd: isize) {}
+
+#[cfg(target_os = "windows")]
+fn show_main_window(hwnd: isize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOW};
+    unsafe {
+        ShowWindow(hwnd as windows_sys::Win32::Foundation::HWND, SW_SHOW);
+        SetForegroundWindow(hwnd as windows_sys::Win32::Foundation::HWND);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_main_window(_hwnd: isize) {}
+
+#[cfg(target_os = "windows")]
+fn request_window_close(hwnd: isize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    unsafe {
+        PostMessageW(hwnd as windows_sys::Win32::Foundation::HWND, WM_CLOSE, 0, 0);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn request_window_close(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
 fn set_always_on_top(window: &mut Window, on: bool) {

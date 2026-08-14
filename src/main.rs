@@ -7,6 +7,7 @@ mod audio;
 mod config;
 mod models;
 mod msg;
+mod tray;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
