@@ -188,6 +188,8 @@ struct AppState {
     search_results: Option<SearchResults>,
     song_rows_visible: usize,
     playlists_visible: usize,
+    hovered_item: Option<String>,
+    pending_play_album: bool,
     queue: Vec<Song>,
     queue_index: Option<usize>,
     now_playing: Option<Song>,
@@ -233,6 +235,8 @@ impl Default for AppState {
             search_results: None,
             song_rows_visible: 50,
             playlists_visible: 50,
+            hovered_item: None,
+            pending_play_album: false,
             queue: Vec::new(),
             queue_index: None,
             now_playing: None,
@@ -647,6 +651,42 @@ impl NavidromeApp {
         self.spawn_future(async move {
             let result = api.album_songs(&album_id).await.map_err(error_message);
             let _ = tx.send(Msg::AlbumSongs { album_id, result });
+        });
+    }
+
+    /// 立即播放整张专辑：加载歌曲后在后台开始播放（不切换视图）。
+    fn play_album(&mut self, album: Album) {
+        self.state.current_album = Some(album.clone());
+        self.state.pending_play_album = true;
+        self.ensure_cover(album.cover_art.as_deref(), true);
+        let Some(api) = self.api.clone() else { return };
+        let album_id = album.id.clone();
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.album_songs(&album_id).await.map_err(error_message);
+            let _ = tx.send(Msg::AlbumSongs { album_id, result });
+        });
+    }
+
+    /// 立即播放艺术家的全部歌曲（聚合其所有专辑的曲目）。
+    fn play_artist(&mut self, artist: Artist) {
+        self.state.current_artist = Some(artist.clone());
+        self.ensure_cover(artist.cover_art.as_deref(), true);
+        let Some(api) = self.api.clone() else { return };
+        let artist_id = artist.id.clone();
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = async {
+                let albums = api.artist_albums(&artist_id).await?;
+                let mut songs = Vec::new();
+                for album in albums {
+                    songs.extend(api.album_songs(&album.id).await?);
+                }
+                Ok::<_, anyhow::Error>(songs)
+            }
+            .await
+            .map_err(error_message);
+            let _ = tx.send(Msg::PlayArtistSongs(result));
         });
     }
 
@@ -1178,6 +1218,16 @@ impl NavidromeApp {
         cx.notify();
     }
 
+    /// 记录 hover 中的列表项 id，供 hover 时浮现的交互元素使用。
+    fn set_hovered(&mut self, id: &str, hovering: bool, cx: &mut Context<Self>) {
+        if hovering {
+            self.state.hovered_item = Some(id.to_string());
+        } else if self.state.hovered_item.as_deref() == Some(id) {
+            self.state.hovered_item = None;
+        }
+        cx.notify();
+    }
+
     fn poll_tray_commands(&mut self) {
         while let Ok(command) = self.tray_rx.try_recv() {
             match command {
@@ -1305,6 +1355,11 @@ impl NavidromeApp {
                                 self.state.song_rows_visible = songs.len().min(50);
                                 self.state.current_songs = songs;
                                 self.preload_covers(covers);
+                                if self.state.pending_play_album {
+                                    self.state.pending_play_album = false;
+                                    let songs = self.state.current_songs.clone();
+                                    self.play_song_list(&songs, 0);
+                                }
                             }
                             Err(error) => self.state.error = Some(error),
                         }
@@ -1423,6 +1478,13 @@ impl NavidromeApp {
                         Err(error) => self.state.error = Some(error),
                     }
                 }
+                Msg::PlayArtistSongs(result) => match result {
+                    Ok(songs) => {
+                        self.state.song_rows_visible = songs.len().min(50);
+                        self.play_song_list(&songs, 0);
+                    }
+                    Err(error) => self.state.error = Some(error),
+                },
                 Msg::Lyrics { song_id, result } => {
                     if self.state.now_playing.as_ref().map(|song| song.id.as_str())
                         == Some(song_id.as_str())
@@ -2020,18 +2082,77 @@ impl NavidromeApp {
                 .gap_5()
                 .children(albums.iter().map(|album| {
                     let album_for_click = album.clone();
+                    let album_for_play = album.clone();
+                    let album_for_cover = album.clone();
+                    let album_id_for_hover = album.id.clone();
                     v_flex()
                         .w(px(176.0))
                         .gap_2()
                         .child(
                             div()
+                                .id(SharedString::from(format!("album-cover-{}", album.id)))
                                 .relative()
                                 .w(px(176.0))
                                 .h(px(176.0))
+                                .cursor_pointer()
+                                .on_hover(cx.listener(move |this, hovering, _, cx| {
+                                    this.set_hovered(&album_id_for_hover, *hovering, cx);
+                                }))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_album(album_for_cover.clone());
+                                    cx.notify();
+                                }))
                                 .child(self.render_cover(album.cover_art.as_deref(), 176.0, cx))
                                 .child(div().absolute().top_2().right_2().child(
                                     self.favorite_button(FavoriteKind::Album, &album.id, cx),
-                                )),
+                                ))
+                                .when(
+                                    self.state.hovered_item.as_deref() == Some(album.id.as_str()),
+                                    |this| {
+                                        this.child(
+                                            div()
+                                                .absolute()
+                                                .inset_0()
+                                                .rounded_lg()
+                                                .bg(hsla(0.0, 0.0, 0.0, 0.32))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                    cx.stop_propagation()
+                                                })
+                                                .child(
+                                                    div()
+                                                        .id(SharedString::from(format!(
+                                                            "album-play-{}",
+                                                            album.id
+                                                        )))
+                                                        .size(px(48.0))
+                                                        .rounded_full()
+                                                        .bg(hsla(0.0, 0.0, 1.0, 0.92))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .shadow_md()
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.play_album(
+                                                                    album_for_play.clone(),
+                                                                );
+                                                                cx.notify();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            Icon::new(PlayerIcon::Play)
+                                                                .size(px(22.0))
+                                                                .text_color(hsla(
+                                                                    0.0, 0.0, 0.12, 1.0,
+                                                                )),
+                                                        ),
+                                                ),
+                                        )
+                                    },
+                                ),
                         )
                         .child(
                             Button::new(SharedString::from(format!("album-{}", album.id)))
@@ -2195,14 +2316,26 @@ impl NavidromeApp {
             .gap_5()
             .children(artists.iter().map(|artist| {
                 let artist_for_click = artist.clone();
+                let artist_for_play = artist.clone();
+                let artist_for_cover = artist.clone();
+                let artist_id_for_hover = artist.id.clone();
                 v_flex()
                     .w(px(152.0))
                     .gap_2()
                     .child(
                         div()
+                            .id(SharedString::from(format!("artist-cover-{}", artist.id)))
                             .relative()
                             .w(px(152.0))
                             .h(px(152.0))
+                            .cursor_pointer()
+                            .on_hover(cx.listener(move |this, hovering, _, cx| {
+                                this.set_hovered(&artist_id_for_hover, *hovering, cx);
+                            }))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_artist(artist_for_cover.clone());
+                                cx.notify();
+                            }))
                             .child(self.render_cover(artist.cover_art.as_deref(), 152.0, cx))
                             .child(
                                 div()
@@ -2214,6 +2347,47 @@ impl NavidromeApp {
                                         &artist.id,
                                         cx,
                                     )),
+                            )
+                            .when(
+                                self.state.hovered_item.as_deref() == Some(artist.id.as_str()),
+                                |this| {
+                                    this.child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .rounded_lg()
+                                            .bg(hsla(0.0, 0.0, 0.0, 0.32))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation()
+                                            })
+                                            .child(
+                                                div()
+                                                    .id(SharedString::from(format!(
+                                                        "artist-play-{}",
+                                                        artist.id
+                                                    )))
+                                                    .size(px(48.0))
+                                                    .rounded_full()
+                                                    .bg(hsla(0.0, 0.0, 1.0, 0.92))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .shadow_md()
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.play_artist(artist_for_play.clone());
+                                                        cx.notify();
+                                                    }))
+                                                    .child(
+                                                        Icon::new(PlayerIcon::Play)
+                                                            .size(px(22.0))
+                                                            .text_color(hsla(0.0, 0.0, 0.12, 1.0)),
+                                                    ),
+                                            ),
+                                    )
+                                },
                             ),
                     )
                     .child(
@@ -2256,6 +2430,12 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui::AnyElement {
         if !current {
+            if self.state.hovered_item.as_deref() == Some(song_id) {
+                return Icon::new(PlayerIcon::Play)
+                    .size(px(15.0))
+                    .text_color(cx.theme().muted_foreground)
+                    .into_any_element();
+            }
             return div().w(px(16.0)).h(px(16.0)).flex_none().into_any_element();
         }
 
@@ -2333,6 +2513,7 @@ impl NavidromeApp {
                 } else {
                     song.album.clone()
                 };
+                let song_id_for_hover = song.id.clone();
                 let row = h_flex()
                     .id(SharedString::from(format!("song-row-{}", song.id)))
                     .h(px(60.0))
@@ -2340,6 +2521,9 @@ impl NavidromeApp {
                     .gap_3()
                     .border_t_1()
                     .border_color(cx.theme().border.opacity(0.6))
+                    .on_hover(cx.listener(move |this, hovering, _, cx| {
+                        this.set_hovered(&song_id_for_hover, *hovering, cx);
+                    }))
                     .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
                     .cursor_pointer();
                 let row = if current {
@@ -2413,11 +2597,10 @@ impl NavidromeApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(format_duration(song.duration)),
                     )
-                    .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
-                        if event.standard_click() && event.click_count() == 2 {
-                            this.play_song_list(&queue, index);
-                            cx.notify();
-                        }
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        // 单击立即播放该歌曲
+                        this.play_song_list(&queue, index);
+                        cx.notify();
                     }))
             }))
             .into_any_element()

@@ -38,6 +38,7 @@ pub enum Msg {
         result: Result<Vec<Song>, String>,
     },
     Search(Result<SearchResults, String>),
+    PlayArtistSongs(Result<Vec<Song>, String>),
     Lyrics {
         song_id: String,
         result: Result<Lyrics, String>,
