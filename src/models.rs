@@ -225,6 +225,16 @@ pub struct ServerInfo {
     pub app_name: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackMode {
+    #[default]
+    Sequential,
+    RepeatAll,
+    RepeatOne,
+    Shuffle,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub server_url: String,
@@ -238,6 +248,8 @@ pub struct Config {
     pub transcoding_quality: TranscodingQuality,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default)]
+    pub playback_mode: PlaybackMode,
 }
 
 impl Default for Config {
@@ -250,6 +262,7 @@ impl Default for Config {
             cache_dir: None,
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
+            playback_mode: PlaybackMode::Sequential,
         }
     }
 }
@@ -262,7 +275,7 @@ fn default_volume() -> f32 {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Config, ThemePreference, TranscodingQuality};
+    use super::{Config, PlaybackMode, ThemePreference, TranscodingQuality};
 
     #[test]
     fn legacy_config_defaults_to_light_theme() {
@@ -311,5 +324,29 @@ mod tests {
         let json = serde_json::to_string(&config).expect("config should serialize");
 
         assert!(json.contains(r#""theme":"system""#));
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_sequential_playback_mode() {
+        let config: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without playback_mode should still deserialize");
+
+        assert_eq!(config.playback_mode, PlaybackMode::Sequential);
+    }
+
+    #[test]
+    fn playback_mode_round_trips_through_config_json() {
+        let config = Config {
+            playback_mode: PlaybackMode::Shuffle,
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+
+        assert_eq!(restored.playback_mode, PlaybackMode::Shuffle);
+        assert!(json.contains(r#""playback_mode":"shuffle""#));
     }
 }

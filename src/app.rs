@@ -33,8 +33,8 @@ use crate::assets::{AppIcon, PlayerIcon};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
-    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, Playlist, SearchResults,
-    ServerInfo, Song, ThemePreference, TranscodingQuality,
+    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode, Playlist,
+    SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality,
 };
 use crate::msg::{error_message, Msg};
 
@@ -55,29 +55,83 @@ enum View {
     Queue,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-enum PlaybackMode {
-    #[default]
-    RepeatAll,
-    RepeatOne,
-    Shuffle,
-}
-
 impl PlaybackMode {
     fn next(self) -> Self {
         match self {
+            Self::Sequential => Self::RepeatAll,
             Self::RepeatAll => Self::RepeatOne,
             Self::RepeatOne => Self::Shuffle,
-            Self::Shuffle => Self::RepeatAll,
+            Self::Shuffle => Self::Sequential,
         }
     }
 
     fn tooltip(self) -> &'static str {
         match self {
+            Self::Sequential => "Play sequentially",
             Self::RepeatAll => "Repeat all",
             Self::RepeatOne => "Repeat current track",
             Self::Shuffle => "Shuffle queue",
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ShuffleHistory {
+    played: Vec<usize>,
+    forward: Vec<usize>,
+}
+
+impl ShuffleHistory {
+    fn start(&mut self, index: usize) {
+        self.played = vec![index];
+        self.forward.clear();
+    }
+
+    /// 前进到 next：丢弃回退暂存，记录已播放序列。
+    fn advance(&mut self, next: usize) {
+        self.forward.clear();
+        self.played.push(next);
+    }
+
+    /// 回退到上一首：返回真正播放过的上一首；无可回退时返回 None。
+    fn previous(&mut self) -> Option<usize> {
+        let current = self.played.pop()?;
+        self.forward.push(current);
+        self.played.last().copied()
+    }
+
+    /// 回退后恢复前进：返回暂存的下一首；无暂存时返回 None。
+    fn restore_forward(&mut self) -> Option<usize> {
+        let index = self.forward.pop()?;
+        self.played.push(index);
+        Some(index)
+    }
+
+    /// 最近播放过的 index（用于随机排除，避免短时重复）。
+    fn recent(&self, max: usize) -> impl Iterator<Item = usize> + '_ {
+        self.played.iter().rev().take(max).copied()
+    }
+}
+
+/// 计算顺序（非随机）切歌的目标 index；`wraps` 为 true 时队列首尾循环，否则在边界停止。
+fn advance_index(current: usize, len: usize, forward: bool, wraps: bool) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    if forward {
+        if current + 1 < len {
+            Some(current + 1)
+        } else if wraps {
+            Some(0)
+        } else {
+            None
+        }
+    } else if current > 0 {
+        Some(current - 1)
+    } else if wraps {
+        Some(len - 1)
+    } else {
+        None
     }
 }
 
@@ -114,6 +168,7 @@ struct AppState {
     settings_open: bool,
     view_before_now_playing: View,
     playback_mode: PlaybackMode,
+    shuffle_history: ShuffleHistory,
     ended_handled: bool,
 }
 
@@ -152,6 +207,7 @@ impl Default for AppState {
             settings_open: false,
             view_before_now_playing: View::Home,
             playback_mode: PlaybackMode::default(),
+            shuffle_history: ShuffleHistory::default(),
             ended_handled: false,
         }
     }
@@ -269,6 +325,7 @@ impl NavidromeApp {
             restore_size: None,
             restore_maximized: false,
         };
+        app.state.playback_mode = app.config.playback_mode;
         app.audio.set_volume(initial_volume);
         app._subscriptions.push(
             cx.subscribe(&search_input, |this, _, event: &InputEvent, cx| {
@@ -513,6 +570,7 @@ impl NavidromeApp {
 
     fn play_song_list(&mut self, songs: &[Song], index: usize) {
         self.state.queue = songs.to_vec();
+        self.state.shuffle_history.start(index);
         self.play_queue_index(index);
     }
 
@@ -590,12 +648,25 @@ impl NavidromeApp {
         }
     }
 
-    fn random_queue_index(&self, excluding: Option<usize>) -> Option<usize> {
-        let mut indices = (0..self.state.queue.len()).collect::<Vec<_>>();
-        if let Some(excluding) = excluding {
-            indices.retain(|index| *index != excluding);
+    fn random_shuffle_next(&self) -> usize {
+        let len = self.state.queue.len();
+        let current = self.state.queue_index.unwrap_or(0);
+        if len <= 1 {
+            return current;
         }
-        indices.choose(&mut thread_rng()).copied().or(excluding)
+        let recent: HashSet<usize> = self
+            .state
+            .shuffle_history
+            .recent((len - 1).min(8))
+            .collect();
+        let mut candidates: Vec<usize> = (0..len).filter(|index| !recent.contains(index)).collect();
+        if candidates.is_empty() {
+            candidates = (0..len).filter(|index| *index != current).collect();
+        }
+        candidates
+            .choose(&mut thread_rng())
+            .copied()
+            .unwrap_or(current)
     }
 
     fn advance_queue(&mut self, forward: bool) {
@@ -607,20 +678,38 @@ impl NavidromeApp {
             return;
         }
 
-        let next = if forward {
-            match self.state.playback_mode {
-                PlaybackMode::Shuffle => self.random_queue_index(Some(index)).unwrap_or(index),
-                _ => (index + 1) % len,
+        if self.state.playback_mode == PlaybackMode::Shuffle {
+            if forward {
+                if let Some(index) = self.state.shuffle_history.restore_forward() {
+                    self.play_queue_index(index);
+                } else {
+                    let next = self.random_shuffle_next();
+                    self.state.shuffle_history.advance(next);
+                    self.play_queue_index(next);
+                }
+            } else if let Some(previous) = self.state.shuffle_history.previous() {
+                self.play_queue_index(previous);
             }
-        } else {
-            (index + len - 1) % len
-        };
+            return;
+        }
 
+        let wraps = matches!(
+            self.state.playback_mode,
+            PlaybackMode::RepeatAll | PlaybackMode::RepeatOne
+        );
+        let Some(next) = advance_index(index, len, forward, wraps) else {
+            return;
+        };
         self.play_queue_index(next);
     }
 
-    fn cycle_playback_mode(&mut self) {
+    fn cycle_playback_mode(&mut self, cx: &mut Context<Self>) {
         self.state.playback_mode = self.state.playback_mode.next();
+        self.config.playback_mode = self.state.playback_mode;
+        if let Err(error) = config::save(&self.config) {
+            self.state.error = Some(format!("Playback mode save failed: {error:#}"));
+        }
+        cx.notify();
     }
 
     pub fn skip(&mut self, offset: i32) {
@@ -807,6 +896,7 @@ impl NavidromeApp {
             cache_dir: self.config.cache_dir.clone(),
             transcoding_quality: self.config.transcoding_quality,
             volume: self.config.volume,
+            playback_mode: self.config.playback_mode,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -1152,6 +1242,7 @@ impl NavidromeApp {
         } else if playback.ended {
             self.state.ended_handled = true;
             match self.state.playback_mode {
+                PlaybackMode::Sequential => self.advance_queue(true),
                 PlaybackMode::RepeatAll => self.advance_queue(true),
                 PlaybackMode::RepeatOne => {
                     if let Some(index) = self.state.queue_index {
@@ -1159,8 +1250,12 @@ impl NavidromeApp {
                     }
                 }
                 PlaybackMode::Shuffle => {
-                    if let Some(index) = self.random_queue_index(self.state.queue_index) {
+                    if let Some(index) = self.state.shuffle_history.restore_forward() {
                         self.play_queue_index(index);
+                    } else {
+                        let next = self.random_shuffle_next();
+                        self.state.shuffle_history.advance(next);
+                        self.play_queue_index(next);
                     }
                 }
             }
@@ -1278,11 +1373,11 @@ impl NavidromeApp {
             .with_size(px(30.0))
             .rounded_full()
             .on_click(cx.listener(|this, _, _, cx| {
-                this.cycle_playback_mode();
-                cx.notify();
+                this.cycle_playback_mode(cx);
             }));
 
         match self.state.playback_mode {
+            PlaybackMode::Sequential => button.icon(AppIcon::PlaySequential),
             PlaybackMode::RepeatAll => button.icon(AppIcon::Repeat),
             PlaybackMode::RepeatOne => button.icon(AppIcon::RepeatOne),
             PlaybackMode::Shuffle => button.icon(AppIcon::Shuffle),
@@ -4149,11 +4244,11 @@ mod tests {
     use gpui::hsla;
 
     use super::{
-        accent_foreground, contrast_ratio, effective_volume, extract_cover_palette,
+        accent_foreground, advance_index, contrast_ratio, effective_volume, extract_cover_palette,
         format_file_size, normalize_volume, playback_technical_info, readable_accent,
-        restored_volume, vinyl_rotation_phase,
+        restored_volume, vinyl_rotation_phase, ShuffleHistory,
     };
-    use crate::models::{Song, TranscodingQuality};
+    use crate::models::{PlaybackMode, Song, TranscodingQuality};
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
@@ -4245,5 +4340,61 @@ mod tests {
         assert!((restored_volume(0.42) - 0.42).abs() < f32::EPSILON);
         assert!((restored_volume(0.0) - 0.7).abs() < f32::EPSILON);
         assert!((restored_volume(f32::NAN) - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn sequential_mode_stops_at_queue_boundaries() {
+        assert_eq!(advance_index(2, 3, true, false), None); // 末尾 next → 不循环
+        assert_eq!(advance_index(0, 3, false, false), None); // 开头 prev → 不循环
+        assert_eq!(advance_index(1, 3, true, false), Some(2)); // 中间 next → 下一首
+    }
+
+    #[test]
+    fn repeat_modes_wrap_around_queue() {
+        assert_eq!(advance_index(2, 3, true, true), Some(0));
+        assert_eq!(advance_index(0, 3, false, true), Some(2));
+        assert_eq!(advance_index(1, 3, true, true), Some(2));
+    }
+
+    #[test]
+    fn playback_mode_defaults_to_sequential_and_cycles_in_order() {
+        assert_eq!(PlaybackMode::default(), PlaybackMode::Sequential);
+        assert_eq!(PlaybackMode::Sequential.next(), PlaybackMode::RepeatAll);
+        assert_eq!(PlaybackMode::RepeatAll.next(), PlaybackMode::RepeatOne);
+        assert_eq!(PlaybackMode::RepeatOne.next(), PlaybackMode::Shuffle);
+        assert_eq!(PlaybackMode::Shuffle.next(), PlaybackMode::Sequential);
+    }
+
+    #[test]
+    fn shuffle_previous_returns_actually_played_tracks() {
+        let mut history = ShuffleHistory::default();
+        history.start(2);
+        history.advance(5);
+        history.advance(0);
+        assert_eq!(history.previous(), Some(5)); // 回到真正播放过的上一首
+        assert_eq!(history.previous(), Some(2));
+        assert_eq!(history.previous(), None); // 无更多历史时停在当前
+    }
+
+    #[test]
+    fn shuffle_restores_forward_after_going_back() {
+        let mut history = ShuffleHistory::default();
+        history.start(2);
+        history.advance(5);
+        history.advance(0);
+        assert_eq!(history.previous(), Some(5));
+        assert_eq!(history.restore_forward(), Some(0)); // 前进恢复刚才回退的歌
+        assert_eq!(history.restore_forward(), None);
+    }
+
+    #[test]
+    fn shuffle_next_excludes_recently_played_tracks() {
+        let mut history = ShuffleHistory::default();
+        history.start(0);
+        for index in 1..=6 {
+            history.advance(index);
+        }
+        let recent: Vec<usize> = history.recent(4).collect();
+        assert_eq!(recent, vec![6, 5, 4, 3]); // 最近 4 首被排除
     }
 }

@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 use gpui_component::IconNamed;
 
-const ICON_FILES: [&str; 29] = [
+const ICON_FILES: [&str; 30] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -34,6 +34,7 @@ const ICON_FILES: [&str; 29] = [
     "volume-high.svg",
     "volume-low.svg",
     "volume-muted.svg",
+    "play-sequential.svg",
 ];
 
 pub struct Assets;
@@ -62,6 +63,7 @@ pub enum AppIcon {
     VolumeMuted,
     MiniPlayer,
     Maximize,
+    PlaySequential,
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +101,7 @@ impl IconNamed for AppIcon {
             Self::VolumeMuted => "icons/volume-muted.svg",
             Self::MiniPlayer => "icons/mini-player.svg",
             Self::Maximize => "icons/window-maximize.svg",
+            Self::PlaySequential => "icons/play-sequential.svg",
         }
         .into()
     }
@@ -163,6 +166,9 @@ impl AssetSource for Assets {
             "icons/volume-high.svg" => Some(include_bytes!("../assets/icons/volume-high.svg")),
             "icons/volume-low.svg" => Some(include_bytes!("../assets/icons/volume-low.svg")),
             "icons/volume-muted.svg" => Some(include_bytes!("../assets/icons/volume-muted.svg")),
+            "icons/play-sequential.svg" => {
+                Some(include_bytes!("../assets/icons/play-sequential.svg"))
+            }
             _ => None,
         };
 
