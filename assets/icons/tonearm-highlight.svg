@@ -1,5 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M104 119C104 141 108 158 117 174C124 185 132 191 143 197" stroke-width="2.2"/>
-  <path d="M103 109C108 106 114 106 118 109" stroke-width="1.6"/>
-  <path d="M143 199L156 202" stroke-width="1.5"/>
+  <path d="M113 103C126 107 137 124 147 149C153 166 159 180 168 189" stroke-width="1.8"/>
+  <path d="M168 189L179 195" stroke-width="1.4"/>
 </svg>

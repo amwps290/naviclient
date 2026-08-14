@@ -1341,10 +1341,11 @@ impl NavidromeApp {
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
-        let label_size = size * 0.42;
+        let label_size = size * 0.56;
         let label_offset = (size - label_size) * 0.5;
-        let inner_cover_size = label_size - 10.0;
-        let tonearm_size = size * 0.72;
+        let inner_cover_size = label_size - 16.0;
+        let hole_size = size * 0.05;
+        let tonearm_size = size * 0.82;
         let tonearm_pivot_x = size * 0.94;
         let tonearm_pivot_y = size * -0.02;
         let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
@@ -1352,7 +1353,7 @@ impl NavidromeApp {
         let tonearm_base_size = size * 0.14;
         let tonearm_engaged_turns = 28.0 / 360.0;
         let metal_tint = self.now_playing_accent(_cx);
-        let metal_body = hsla(0.1, 0.06, 0.8, 1.0).blend(metal_tint.opacity(0.1));
+        let metal_body = hsla(0.09, 0.05, 0.74, 1.0).blend(metal_tint.opacity(0.12));
         let cover_key = cover_id.unwrap_or("default");
         let tonearm_layer =
             |icon: AppIcon, layer: &'static str, offset_x: f32, offset_y: f32, color: Hsla| {
@@ -1400,7 +1401,7 @@ impl NavidromeApp {
                 132.0,
                 linear_color_stop(hsla(0.1, 0.08, 0.94, 1.0), 0.0),
                 linear_color_stop(
-                    hsla(0.1, 0.05, 0.44, 1.0).blend(metal_tint.opacity(0.08)),
+                    hsla(0.1, 0.05, 0.4, 1.0).blend(metal_tint.opacity(0.08)),
                     1.0,
                 ),
             ))
@@ -1452,8 +1453,26 @@ impl NavidromeApp {
             .top_0()
             .left_0()
             .with_size(px(size))
-            .text_color(hsla(0.0, 0.0, 1.0, 0.24))
+            .text_color(hsla(0.0, 0.0, 1.0, 0.13))
             .transform(Transformation::rotate(percentage(rotation_phase)));
+
+        let grooves: Vec<gpui::AnyElement> = (0..9)
+            .map(|i| {
+                let radius = 0.24 + i as f32 * 0.028;
+                let inset = (0.5 - radius) * size;
+                let diameter = radius * 2.0 * size;
+                let opacity = 0.085 - i as f32 * 0.006;
+                div()
+                    .absolute()
+                    .top(px(inset))
+                    .left(px(inset))
+                    .size(px(diameter))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, opacity))
+                    .into_any_element()
+            })
+            .collect();
 
         div()
             .relative()
@@ -1462,41 +1481,28 @@ impl NavidromeApp {
             .flex_none()
             .rounded_full()
             .bg(linear_gradient(
-                138.0,
-                linear_color_stop(hsla(0.0, 0.0, 0.12, 1.0), 0.0),
-                linear_color_stop(hsla(0.0, 0.0, 0.035, 1.0), 1.0),
+                132.0,
+                linear_color_stop(hsla(0.0, 0.0, 0.155, 1.0), 0.0),
+                linear_color_stop(hsla(0.0, 0.0, 0.02, 1.0), 1.0),
             ))
             .shadow_md()
             .child(
                 div()
                     .absolute()
-                    .top(px(size * 0.07))
-                    .left(px(size * 0.07))
-                    .size(px(size * 0.86))
+                    .inset_0()
                     .rounded_full()
                     .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, 0.08)),
+                    .border_color(hsla(0.0, 0.0, 0.0, 0.5)),
             )
             .child(
                 div()
                     .absolute()
-                    .top(px(size * 0.14))
-                    .left(px(size * 0.14))
-                    .size(px(size * 0.72))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, 0.06)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(px(size * 0.21))
-                    .left(px(size * 0.21))
-                    .size(px(size * 0.58))
+                    .inset(px(1.5))
                     .rounded_full()
                     .border_1()
                     .border_color(hsla(0.0, 0.0, 1.0, 0.05)),
             )
+            .children(grooves)
             .child(highlight)
             .child(
                 div()
@@ -1515,24 +1521,26 @@ impl NavidromeApp {
                     .child(
                         div()
                             .absolute()
-                            .size(px(9.0))
+                            .size(px(hole_size))
                             .rounded_full()
-                            .bg(hsla(0.0, 0.0, 0.08, 1.0)),
+                            .bg(hsla(0.0, 0.0, 0.02, 1.0))
+                            .border_1()
+                            .border_color(hsla(0.0, 0.0, 1.0, 0.06)),
                     ),
             )
             .child(tonearm_layer(
                 AppIcon::Tonearm,
                 "shadow-soft",
-                4.5,
                 6.0,
-                hsla(0.0, 0.0, 0.0, 0.13),
+                8.0,
+                hsla(0.0, 0.0, 0.0, 0.22),
             ))
             .child(tonearm_layer(
                 AppIcon::Tonearm,
                 "shadow-close",
-                2.2,
-                3.2,
-                hsla(0.0, 0.0, 0.0, 0.28),
+                3.0,
+                4.2,
+                hsla(0.0, 0.0, 0.0, 0.4),
             ))
             .child(tonearm_layer(
                 AppIcon::Tonearm,
@@ -1546,14 +1554,14 @@ impl NavidromeApp {
                 "shade",
                 0.0,
                 0.0,
-                hsla(0.1, 0.06, 0.25, 0.52),
+                hsla(0.1, 0.06, 0.25, 0.48),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmHighlight,
                 "highlight",
                 0.0,
                 0.0,
-                hsla(0.0, 0.0, 1.0, 0.72),
+                hsla(0.0, 0.0, 1.0, 0.5),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
@@ -1567,7 +1575,7 @@ impl NavidromeApp {
                 "stylus",
                 0.0,
                 0.0,
-                hsla(0.11, 0.58, 0.58, 1.0),
+                hsla(0.0, 0.0, 1.0, 0.65),
             ))
             .child(tonearm_base)
             .into_any_element()
@@ -2502,8 +2510,6 @@ impl NavidromeApp {
                     .min_w_0()
                     .h_full()
                     .pl_6()
-                    .border_l_1()
-                    .border_color(cx.theme().border.opacity(0.38))
                     .child(
                         v_flex()
                             .items_center()
