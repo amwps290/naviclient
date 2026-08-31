@@ -24,7 +24,8 @@ use gpui_component::{
     scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode, TitleBar,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme,
+    ThemeMode, TitleBar,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -43,7 +44,12 @@ use crate::msg::{error_message, DecodedCover, Msg};
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
 
-const MINI_WINDOW_SIZE: Size<Pixels> = size(px(200.0), px(50.0));
+// The mini player content target size. On Linux, the client-side window shadow
+// (gpui-component's WindowBorder) pads each edge of the window, so the actual
+// drawable area is smaller than the outer window size. enter_mini_mode adds the
+// window paddings to keep the content at this size on every platform.
+const MINI_WINDOW_WIDTH: Pixels = px(200.0);
+const MINI_WINDOW_HEIGHT: Pixels = px(50.0);
 const ALBUM_PAGE_SIZE: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -351,7 +357,7 @@ pub struct NavidromeApp {
     lyrics_scroll_target: Option<Pixels>,
     content_scroll_handle: ScrollHandle,
     cover_slots: Arc<tokio::sync::Semaphore>,
-    title_width_cache: RefCell<HashMap<SharedString, Pixels>>,
+    title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
     tray_rx: Receiver<TrayCommand>,
     main_hwnd: Option<isize>,
     quitting: Arc<AtomicBool>,
@@ -364,6 +370,7 @@ pub struct NavidromeApp {
     mini_mode: bool,
     restore_size: Option<Size<Pixels>>,
     restore_maximized: bool,
+    mini_target_size: Option<Size<Pixels>>,
 }
 
 impl NavidromeApp {
@@ -457,6 +464,7 @@ impl NavidromeApp {
             mini_mode: false,
             restore_size: None,
             restore_maximized: false,
+            mini_target_size: None,
         };
         app.state.playback_mode = app.config.playback_mode;
         app.audio.set_volume(initial_volume);
@@ -1204,13 +1212,25 @@ impl NavidromeApp {
         self.mini_mode = true;
         self.restore_size = Some(window.viewport_size());
         self.restore_maximized = window.is_maximized();
-        window.resize(MINI_WINDOW_SIZE);
+        // The window shadow/border (Linux client-side decorations) shrinks the
+        // drawable area by its padding, so request a larger outer window to keep
+        // the mini player content at the intended size on every platform.
+        let paddings = window_paddings(window);
+        let mini_size = size(
+            MINI_WINDOW_WIDTH + paddings.left + paddings.right,
+            MINI_WINDOW_HEIGHT + paddings.top + paddings.bottom,
+        );
+        // Lock the mini window to a fixed size: remember the target and snap back
+        // to it in render() if the user drags a border to resize it.
+        self.mini_target_size = Some(mini_size);
+        window.resize(mini_size);
         set_always_on_top(window, true);
         cx.notify();
     }
 
     fn exit_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.mini_mode = false;
+        self.mini_target_size = None;
         window.resize(
             self.restore_size
                 .take()
@@ -2262,11 +2282,30 @@ impl NavidromeApp {
         id: SharedString,
         window: &mut Window,
     ) -> gpui::AnyElement {
-        let font_size = rems(0.875).to_pixels(window.rem_size());
-        let text_style = window.text_style().highlight(FontWeight::MEDIUM);
+        self.render_scrolling_text(
+            text,
+            viewport_width,
+            rems(0.875).to_pixels(window.rem_size()),
+            FontWeight::MEDIUM,
+            id,
+            window,
+        )
+    }
+
+    fn render_scrolling_text(
+        &self,
+        text: SharedString,
+        viewport_width: f32,
+        font_size: Pixels,
+        weight: FontWeight,
+        id: SharedString,
+        window: &mut Window,
+    ) -> gpui::AnyElement {
+        let text_style = window.text_style().highlight(weight);
         let text_width = {
             let cache = self.title_width_cache.borrow();
-            if let Some(&width) = cache.get(&text) {
+            let key = (f32::from(font_size).to_bits(), weight, text.clone());
+            if let Some(&width) = cache.get(&key) {
                 width
             } else {
                 drop(cache);
@@ -2283,7 +2322,7 @@ impl NavidromeApp {
                 if cache.len() > 20_000 {
                     cache.clear();
                 }
-                cache.insert(text.clone(), width);
+                cache.insert(key, width);
                 width
             }
         };
@@ -2295,8 +2334,8 @@ impl NavidromeApp {
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_sm()
-                .font_weight(FontWeight::MEDIUM)
+                .text_size(font_size)
+                .font_weight(weight)
                 .child(text)
                 .into_any_element();
         }
@@ -2326,8 +2365,8 @@ impl NavidromeApp {
                 h_flex()
                     .flex_none()
                     .gap(gap)
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(font_size)
+                    .font_weight(weight)
                     .child(text)
                     .child(repeated_text)
                     .with_animation(id, animation, move |this, delta| {
@@ -3854,7 +3893,7 @@ impl NavidromeApp {
         }
     }
 
-    fn render_mini(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_mini(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = cx.theme().clone();
         let song = self.state.now_playing.clone();
         let has_track = song.is_some();
@@ -3913,10 +3952,25 @@ impl NavidromeApp {
             }))
             .occlude();
 
+        // Fixed widths in the mini row that leave room for the scrolling info text:
+        // px_1p5 padding (12) + cover (26) + gap_1p5 between the 4 row children (18)
+        // + controls (16+2+22+2+16 = 58) + expand button (16) = 130. On Linux the
+        // window shadow shrinks the content, so use the content (inner) width.
+        let paddings = window_paddings(window);
+        let content_width = window.viewport_size().width - paddings.left - paddings.right;
+        let info_width = f32::from(content_width - px(130.0)).max(1.0);
+        let track_id = song
+            .as_ref()
+            .map(|song| song.id.clone())
+            .unwrap_or_default();
+        let title_id = SharedString::from(format!("mini-title-{track_id}"));
+        let artist_id = SharedString::from(format!("mini-artist-{track_id}"));
+
         let info = v_flex()
             .flex_1()
             .min_w_0()
             .gap_0p5()
+            .overflow_hidden()
             .id("mini-now-playing-info")
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3925,19 +3979,25 @@ impl NavidromeApp {
                 this.open_now_playing();
             }))
             .occlude()
+            .child(self.render_scrolling_text(
+                title.clone().into(),
+                info_width,
+                rems(0.75).to_pixels(window.rem_size()),
+                FontWeight::SEMIBOLD,
+                title_id,
+                window,
+            ))
             .child(
                 div()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
-                    .child(title),
-            )
-            .child(
-                div()
-                    .text_size(px(10.0))
                     .text_color(theme.muted_foreground)
-                    .truncate()
-                    .child(artist),
+                    .child(self.render_scrolling_text(
+                        artist.clone().into(),
+                        info_width,
+                        px(10.0),
+                        FontWeight::NORMAL,
+                        artist_id,
+                        window,
+                    )),
             );
 
         let controls = h_flex()
@@ -4493,6 +4553,16 @@ impl Render for NavidromeApp {
         });
 
         if self.mini_mode {
+            // Lock the mini window to its target size: if the user drags a border
+            // to resize it, snap it back on the next frame.
+            if let Some(target) = self.mini_target_size {
+                let viewport = window.viewport_size();
+                let resized = (viewport.width - target.width).abs() > px(1.0)
+                    || (viewport.height - target.height).abs() > px(1.0);
+                if resized {
+                    window.resize(target);
+                }
+            }
             return self.render_mini(window, cx);
         }
 
