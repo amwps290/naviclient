@@ -14,7 +14,8 @@ use reqwest::blocking::{Client, Response};
 use reqwest::header::{CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use reqwest::StatusCode;
 use rodio::{
-    cpal::BufferSize, ChannelCount, Decoder, DeviceSinkBuilder, Player, Sample, SampleRate, Source,
+    cpal::BufferSize, source::UniformSourceIterator, ChannelCount, Decoder, DeviceSinkBuilder,
+    Player, Sample, SampleRate, Source,
 };
 use url::Url;
 
@@ -217,7 +218,11 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             return;
         }
     };
-    log::info!("default audio output device opened");
+    log::info!(
+        "default audio output device opened; channels={} sample_rate={}",
+        device_sink.config().channel_count().get(),
+        device_sink.config().sample_rate().get()
+    );
 
     let client = match Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -237,6 +242,8 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     };
 
     device_sink.log_on_drop(false);
+    let output_channels = device_sink.config().channel_count();
+    let output_sample_rate = device_sink.config().sample_rate();
     let mixer = device_sink.mixer().clone();
     let (player, source) = Player::new();
     mixer.add(source);
@@ -439,7 +446,11 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             match prepared.result {
                 Ok(stream) => {
                     player.set_volume(volume);
-                    player.append(stream.source);
+                    player.append(normalize_for_output(
+                        stream.source,
+                        output_channels,
+                        output_sample_rate,
+                    ));
                     if prepared.paused {
                         player.pause();
                     } else {
@@ -532,6 +543,17 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             s.error = error;
         });
     }
+}
+
+fn normalize_for_output<S>(
+    source: S,
+    channels: ChannelCount,
+    sample_rate: SampleRate,
+) -> UniformSourceIterator<S>
+where
+    S: Source,
+{
+    UniformSourceIterator::new(source, channels, sample_rate)
 }
 
 fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
@@ -1567,6 +1589,97 @@ mod tests {
         assert_eq!(
             first.1.extension().and_then(|value| value.to_str()),
             Some("part")
+        );
+    }
+
+    #[test]
+    fn normalizes_each_song_before_it_enters_the_shared_player_queue() {
+        use rodio::Player;
+
+        // BufferedStreamSource 在播放期间上报无限 span。若把不同采样率的源直接放进
+        // 长期复用的 Player 队列，rodio 会让后续歌曲沿用第一首的采样率。
+        struct FakeSong {
+            samples: std::vec::IntoIter<f32>,
+            channels: ChannelCount,
+            sample_rate: SampleRate,
+        }
+
+        impl Iterator for FakeSong {
+            type Item = f32;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                self.samples.next()
+            }
+        }
+
+        impl Source for FakeSong {
+            fn current_span_len(&self) -> Option<usize> {
+                None
+            }
+
+            fn channels(&self) -> ChannelCount {
+                self.channels
+            }
+
+            fn sample_rate(&self) -> SampleRate {
+                self.sample_rate
+            }
+
+            fn total_duration(&self) -> Option<Duration> {
+                None
+            }
+        }
+
+        let channels = ChannelCount::new(2).unwrap();
+        let output_rate = SampleRate::new(48_000).unwrap();
+        let (player, queue) = Player::new();
+        player.append(normalize_for_output(
+            FakeSong {
+                samples: vec![0.5_f32; 88_200].into_iter(),
+                channels,
+                sample_rate: SampleRate::new(44_100).unwrap(),
+            },
+            channels,
+            output_rate,
+        ));
+        player.append(normalize_for_output(
+            FakeSong {
+                samples: vec![0.25_f32; 192_000].into_iter(),
+                channels,
+                sample_rate: SampleRate::new(96_000).unwrap(),
+            },
+            channels,
+            output_rate,
+        ));
+
+        // 模拟设备 mixer 对共享 Player 队列再做一次统一格式检查。
+        let mut output = UniformSourceIterator::new(queue, channels, output_rate);
+        let mut first_count = 0usize;
+        let mut second_count = 0usize;
+        let mut silence_run = 0usize;
+        for sample in output.by_ref() {
+            if sample == 0.5 {
+                first_count += 1;
+                silence_run = 0;
+            } else if sample == 0.25 {
+                second_count += 1;
+                silence_run = 0;
+            } else {
+                silence_run += 1;
+                if silence_run > 100_000 {
+                    break;
+                }
+            }
+        }
+
+        // 两首都是 1 秒立体声，规范到 48kHz 后均应约为 96_000 个样本。
+        assert!(
+            (96_000.0_f64 - first_count as f64).abs() < 4096.0,
+            "44.1k song produced {first_count} samples (expected ~96000)"
+        );
+        assert!(
+            (96_000.0_f64 - second_count as f64).abs() < 4096.0,
+            "96k song produced {second_count} samples (expected ~96000)"
         );
     }
 
