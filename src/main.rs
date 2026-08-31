@@ -7,6 +7,7 @@ mod audio;
 mod config;
 mod models;
 mod msg;
+mod single_instance;
 mod tray;
 
 use std::fs::{self, File, OpenOptions};
@@ -79,6 +80,12 @@ fn main() {
     match init_logging() {
         Ok(path) => log::info!("application starting; log_file={}", path.display()),
         Err(error) => eprintln!("failed to initialize file logging: {error:#}"),
+    }
+
+    // 单实例：若已有实例在运行，通知其激活窗口后退出。
+    if single_instance::acquire() {
+        log::info!("another instance is already running; activating it and exiting");
+        return;
     }
 
     Application::new().with_assets(assets::Assets).run(|cx| {

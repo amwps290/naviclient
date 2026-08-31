@@ -40,6 +40,7 @@ use crate::models::{
     TranscodingQuality,
 };
 use crate::msg::{error_message, DecodedCover, Msg};
+use crate::single_instance;
 use crate::tray::{self, TrayCommand};
 
 const MINI_WINDOW_SIZE: Size<Pixels> = size(px(200.0), px(50.0));
@@ -580,6 +581,12 @@ impl NavidromeApp {
             if this
                 .update(cx, |this, cx| {
                     this.poll_tray_commands();
+                    // 单实例激活信号：显示并置前窗口。
+                    if single_instance::poll_activation() {
+                        if let Some(hwnd) = this.main_hwnd {
+                            show_main_window(hwnd);
+                        }
+                    }
                     this.maybe_save_session();
                     this.poll_messages();
                     this.handle_playback_end();
