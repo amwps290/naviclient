@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::models::Config;
+use crate::models::{Config, PlaybackSession};
 
 fn config_path() -> PathBuf {
     if let Some(project_dirs) =
@@ -12,6 +12,16 @@ fn config_path() -> PathBuf {
         project_dirs.config_dir().join("config.json")
     } else {
         PathBuf::from("navidrome-client.json")
+    }
+}
+
+fn session_path() -> PathBuf {
+    if let Some(project_dirs) =
+        directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
+    {
+        project_dirs.config_dir().join("session.json")
+    } else {
+        PathBuf::from("navidrome-session.json")
     }
 }
 
@@ -66,4 +76,21 @@ pub fn save(config: &Config) -> Result<()> {
     }
     let text = serde_json::to_string_pretty(config)?;
     fs::write(path, text).context("failed to write config")
+}
+
+/// 加载播放会话；文件缺失或损坏时安全回退为 None。
+pub fn load_session() -> Option<PlaybackSession> {
+    let path = session_path();
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+}
+
+pub fn save_session(session: &PlaybackSession) -> Result<()> {
+    let path = session_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("failed to create config directory")?;
+    }
+    let text = serde_json::to_string_pretty(session)?;
+    fs::write(path, text).context("failed to write session")
 }

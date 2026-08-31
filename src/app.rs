@@ -35,8 +35,9 @@ use crate::assets::{AppIcon, PlayerIcon};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
 use crate::models::{
-    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode, Playlist,
-    SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality,
+    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode,
+    PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
+    TranscodingQuality,
 };
 use crate::msg::{error_message, DecodedCover, Msg};
 use crate::tray::{self, TrayCommand};
@@ -114,6 +115,16 @@ impl ShuffleHistory {
     /// 最近播放过的 index（用于随机排除，避免短时重复）。
     fn recent(&self, max: usize) -> impl Iterator<Item = usize> + '_ {
         self.played.iter().rev().take(max).copied()
+    }
+
+    /// 从持久化快照恢复。
+    fn restore(played: Vec<usize>, forward: Vec<usize>) -> Self {
+        Self { played, forward }
+    }
+
+    /// 导出快照用于持久化。
+    fn snapshot(&self) -> (Vec<usize>, Vec<usize>) {
+        (self.played.clone(), self.forward.clone())
     }
 }
 
@@ -345,6 +356,8 @@ pub struct NavidromeApp {
     quitting: Arc<AtomicBool>,
     last_shortcut_key: String,
     last_shortcut_at: std::time::Instant,
+    resume_position: Option<Duration>,
+    last_session_save: std::time::Instant,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
     mini_mode: bool,
@@ -436,6 +449,8 @@ impl NavidromeApp {
             quitting: Arc::new(AtomicBool::new(false)),
             last_shortcut_key: String::new(),
             last_shortcut_at: std::time::Instant::now(),
+            resume_position: None,
+            last_session_save: std::time::Instant::now(),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
             mini_mode: false,
@@ -444,6 +459,42 @@ impl NavidromeApp {
         };
         app.state.playback_mode = app.config.playback_mode;
         app.audio.set_volume(initial_volume);
+
+        // 恢复上次播放会话（仅服务器匹配时；不自动播放，点播放时从保存位置继续）。
+        if let Some(session) = config::load_session() {
+            let server_matches = app
+                .api
+                .as_ref()
+                .map(|api| api.base_url() == session.server_url)
+                .unwrap_or(false);
+            if server_matches && !session.queue.is_empty() {
+                let index = session
+                    .queue_index
+                    .filter(|index| *index < session.queue.len());
+                let restored_index = index;
+                app.state.queue = session.queue;
+                app.state.queue_index = index;
+                app.state.playback_mode = session.playback_mode;
+                app.config.playback_mode = session.playback_mode;
+                app.state.shuffle_history =
+                    ShuffleHistory::restore(session.shuffle_played, session.shuffle_forward);
+                app.state.song_rows_visible = app.state.queue.len().min(50);
+                if let Some(index) = restored_index {
+                    let song = app.state.queue.get(index).cloned();
+                    if let Some(song) = song {
+                        app.state.now_playing = Some(song.clone());
+                        app.resume_position =
+                            Some(Duration::from_secs_f64(session.position_secs.max(0.0)));
+                        app.ensure_cover(song.cover_art.as_deref(), true);
+                    }
+                }
+                log::info!(
+                    "restored playback session; queue={} index={restored_index:?} position={:.1}s",
+                    app.state.queue.len(),
+                    session.position_secs
+                );
+            }
+        }
 
         // 启动系统托盘（Windows），并拦截"关闭"改为隐藏到托盘。
         let (tray_tx, tray_rx) = mpsc::channel();
@@ -461,8 +512,12 @@ impl NavidromeApp {
 
         let close_quitting = app.quitting.clone();
         let close_hwnd = app.main_hwnd;
-        window.on_window_should_close(cx, move |_window, _cx| {
+        window.on_window_should_close(cx, move |window, cx| {
             if close_quitting.load(Ordering::Relaxed) {
+                // 真正退出前保存最后状态。
+                if let Some(Some(root)) = window.root::<NavidromeApp>() {
+                    root.update(cx, |app, _cx| app.save_session());
+                }
                 true
             } else if let Some(hwnd) = close_hwnd {
                 hide_main_window(hwnd);
@@ -525,6 +580,7 @@ impl NavidromeApp {
             if this
                 .update(cx, |this, cx| {
                     this.poll_tray_commands();
+                    this.maybe_save_session();
                     this.poll_messages();
                     this.handle_playback_end();
                     this.update_active_lyric();
@@ -858,6 +914,7 @@ impl NavidromeApp {
         self.state.shuffle_history.start(index);
         self.state.song_rows_visible = songs.len().min(50);
         self.play_queue_index(index);
+        self.save_session();
     }
 
     fn load_lyrics(&mut self, song: &Song) {
@@ -995,6 +1052,7 @@ impl NavidromeApp {
         if let Err(error) = config::save(&self.config) {
             self.state.error = Some(format!("Playback mode save failed: {error:#}"));
         }
+        self.save_session();
         cx.notify();
     }
 
@@ -1115,6 +1173,10 @@ impl NavidromeApp {
             }
         } else if let Some(index) = self.state.queue_index {
             self.play_queue_index(index);
+            // 会话恢复后首次播放：从上次保存的位置继续。
+            if let Some(position) = self.resume_position.take() {
+                self.audio.seek(position);
+            }
         }
     }
 
@@ -1391,6 +1453,41 @@ impl NavidromeApp {
             self.state.hovered_item = None;
         }
         cx.notify();
+    }
+
+    /// 持久化当前播放会话（队列、索引、位置、模式、随机历史）。
+    fn save_session(&mut self) {
+        let Some(api) = self.api.as_ref() else { return };
+        if self.state.queue.is_empty() {
+            return;
+        }
+        let position = self.audio.state().position;
+        let (shuffle_played, shuffle_forward) = self.state.shuffle_history.snapshot();
+        let session = PlaybackSession {
+            server_url: api.base_url().to_string(),
+            queue: self.state.queue.clone(),
+            queue_index: self.state.queue_index,
+            position_secs: position.as_secs_f64(),
+            playback_mode: self.state.playback_mode,
+            shuffle_played,
+            shuffle_forward,
+        };
+        if let Err(error) = config::save_session(&session) {
+            log::warn!("failed to save playback session: {error:#}");
+        }
+    }
+
+    /// 位置变化节流保存（每 5 秒一次，避免频繁写盘）。
+    fn maybe_save_session(&mut self) {
+        if self.state.queue.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_session_save) < Duration::from_secs(5) {
+            return;
+        }
+        self.last_session_save = now;
+        self.save_session();
     }
 
     fn poll_tray_commands(&mut self) {

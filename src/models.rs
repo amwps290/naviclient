@@ -235,6 +235,24 @@ pub enum PlaybackMode {
     Shuffle,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PlaybackSession {
+    /// 归属服务器（切换服务器时不恢复其他服务器的会话）。
+    pub server_url: String,
+    /// 播放队列快照。
+    pub queue: Vec<Song>,
+    /// 当前播放的队列索引。
+    pub queue_index: Option<usize>,
+    /// 播放位置（秒）。
+    pub position_secs: f64,
+    /// 播放模式。
+    pub playback_mode: PlaybackMode,
+    /// 随机播放历史（播放过的索引）。
+    pub shuffle_played: Vec<usize>,
+    /// 随机播放回退暂存。
+    pub shuffle_forward: Vec<usize>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub server_url: String,
@@ -275,7 +293,7 @@ fn default_volume() -> f32 {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Config, PlaybackMode, ThemePreference, TranscodingQuality};
+    use super::{Config, PlaybackMode, PlaybackSession, Song, ThemePreference, TranscodingQuality};
 
     #[test]
     fn legacy_config_defaults_to_light_theme() {
@@ -348,5 +366,35 @@ mod tests {
 
         assert_eq!(restored.playback_mode, PlaybackMode::Shuffle);
         assert!(json.contains(r#""playback_mode":"shuffle""#));
+    }
+
+    #[test]
+    fn playback_session_round_trips_through_json() {
+        let session = PlaybackSession {
+            server_url: "http://localhost:4533".to_string(),
+            queue: vec![Song::default()],
+            queue_index: Some(2),
+            position_secs: 61.5,
+            playback_mode: PlaybackMode::Shuffle,
+            shuffle_played: vec![0, 3, 1],
+            shuffle_forward: vec![2],
+        };
+
+        let json = serde_json::to_string(&session).expect("session should serialize");
+        let restored: PlaybackSession =
+            serde_json::from_str(&json).expect("session should deserialize");
+
+        assert_eq!(restored.server_url, session.server_url);
+        assert_eq!(restored.queue.len(), 1);
+        assert_eq!(restored.queue_index, Some(2));
+        assert!((restored.position_secs - 61.5).abs() < 1e-9);
+        assert_eq!(restored.playback_mode, PlaybackMode::Shuffle);
+        assert_eq!(restored.shuffle_played, vec![0, 3, 1]);
+        assert_eq!(restored.shuffle_forward, vec![2]);
+    }
+
+    #[test]
+    fn corrupted_session_json_fails_cleanly() {
+        assert!(serde_json::from_str::<PlaybackSession>("not json at all").is_err());
     }
 }
