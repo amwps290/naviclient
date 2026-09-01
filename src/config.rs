@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -22,6 +23,16 @@ fn session_path() -> PathBuf {
         project_dirs.config_dir().join("session.json")
     } else {
         PathBuf::from("navidrome-session.json")
+    }
+}
+
+fn loudness_path() -> PathBuf {
+    if let Some(project_dirs) =
+        directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
+    {
+        project_dirs.config_dir().join("loudness.json")
+    } else {
+        PathBuf::from("navidrome-loudness.json")
     }
 }
 
@@ -76,6 +87,24 @@ pub fn save(config: &Config) -> Result<()> {
     }
     let text = serde_json::to_string_pretty(config)?;
     fs::write(path, text).context("failed to write config")
+}
+
+/// 加载本地测量的歌曲响度缓存（song_id → (rms_db, peak)）；文件缺失或损坏时安全回退。
+pub fn load_loudness() -> HashMap<String, (f32, f32)> {
+    let path = loudness_path();
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_loudness(cache: &HashMap<String, (f32, f32)>) -> Result<()> {
+    let path = loudness_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("failed to create config directory")?;
+    }
+    let text = serde_json::to_string_pretty(cache)?;
+    fs::write(path, text).context("failed to write loudness cache")
 }
 
 /// 加载播放会话；文件缺失或损坏时安全回退为 None。

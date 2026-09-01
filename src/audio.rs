@@ -43,6 +43,10 @@ pub struct PlaybackState {
     pub buffered: Duration,
     pub duration: Option<Duration>,
     pub error: Option<String>,
+    /// 当前歌曲已测响度（RMS，dB），未测时为 0.0。
+    pub loudness_db: f32,
+    /// 当前歌曲已测峰值（0..=1），未测时为 0.0。
+    pub loudness_peak: f32,
 }
 
 #[derive(Debug)]
@@ -254,6 +258,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
 
     let mut volume = 1.0;
     let mut current_gain = 1.0;
+    let loudness_shared = Arc::new(Mutex::new(None::<(f32, f32)>));
     let mut duration: Option<Duration> = None;
     let mut stream_error: Option<SharedStreamError> = None;
     let mut buffer_progress: Option<Arc<BufferProgress>> = None;
@@ -299,6 +304,9 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                         duration_hint.map(|duration| duration.as_millis())
                     );
                     current_gain = gain.clamp(0.1, 4.0);
+                    if let Ok(mut shared) = loudness_shared.lock() {
+                        *shared = None;
+                    }
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
                     desired_paused = false;
@@ -452,8 +460,9 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             match prepared.result {
                 Ok(stream) => {
                     player.set_volume(volume * current_gain);
+                    let metered = LoudnessMeter::new(stream.source, loudness_shared.clone());
                     player.append(normalize_for_output(
-                        stream.source,
+                        metered,
                         output_channels,
                         output_sample_rate,
                     ));
@@ -539,6 +548,11 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             .zip(buffer_progress.as_ref())
             .map(|(duration, progress)| progress.buffered_duration(duration))
             .unwrap_or_default();
+        let (loudness_db, loudness_peak) = loudness_shared
+            .lock()
+            .ok()
+            .and_then(|shared| *shared)
+            .unwrap_or((0.0, 0.0));
         set_state(&state, |s| {
             s.position = position;
             s.buffered = buffered;
@@ -547,6 +561,8 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             s.ended = ended;
             s.active = preparing || !empty;
             s.error = error;
+            s.loudness_db = loudness_db;
+            s.loudness_peak = loudness_peak;
         });
     }
 }
@@ -560,6 +576,71 @@ where
     S: Source,
 {
     UniformSourceIterator::new(source, channels, sample_rate)
+}
+
+/// 测量播放中音频响度（RMS，dB）与峰值的 Source 包装；
+/// 采样经由此处流入播放器，结果周期性写入共享槽供 worker 在曲目结束时读取。
+struct LoudnessMeter<S> {
+    inner: S,
+    sum_squares: f64,
+    sample_count: u64,
+    peak: f32,
+    shared: Arc<Mutex<Option<(f32, f32)>>>,
+}
+
+impl<S: Source> LoudnessMeter<S> {
+    fn new(inner: S, shared: Arc<Mutex<Option<(f32, f32)>>>) -> Self {
+        Self {
+            inner,
+            sum_squares: 0.0,
+            sample_count: 0,
+            peak: 0.0,
+            shared,
+        }
+    }
+}
+
+impl<S: Source> Iterator for LoudnessMeter<S> {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Sample> {
+        let sample = self.inner.next()?;
+        let value = f64::from(sample);
+        self.sum_squares += value * value;
+        self.sample_count += 1;
+        self.peak = self.peak.max(sample.abs());
+        // 每 4096 个采样（约 93ms @44.1kHz）更新一次共享读数。
+        if self.sample_count & 4095 == 0 {
+            let rms = (self.sum_squares / self.sample_count as f64).sqrt();
+            let db = if rms > 1e-6 {
+                20.0 * rms.log10()
+            } else {
+                -100.0
+            };
+            if let Ok(mut shared) = self.shared.lock() {
+                *shared = Some((db as f32, self.peak));
+            }
+        }
+        Some(sample)
+    }
+}
+
+impl<S: Source> Source for LoudnessMeter<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
 }
 
 fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
@@ -1442,6 +1523,56 @@ mod tests {
         assert_eq!(latest, Duration::from_secs(30));
         assert_eq!(count, 2);
         assert!(matches!(pending.pop_front(), Some(Command::Pause)));
+    }
+
+    #[test]
+    fn loudness_meter_reports_rms_and_peak() {
+        struct Constant {
+            value: f32,
+            remaining: usize,
+            sample_rate: SampleRate,
+        }
+        impl Iterator for Constant {
+            type Item = f32;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.remaining == 0 {
+                    None
+                } else {
+                    self.remaining -= 1;
+                    Some(self.value)
+                }
+            }
+        }
+        impl Source for Constant {
+            fn current_span_len(&self) -> Option<usize> {
+                Some(self.remaining)
+            }
+            fn channels(&self) -> ChannelCount {
+                ChannelCount::new(1).unwrap()
+            }
+            fn sample_rate(&self) -> SampleRate {
+                self.sample_rate
+            }
+            fn total_duration(&self) -> Option<Duration> {
+                None
+            }
+        }
+
+        let shared = Arc::new(Mutex::new(None::<(f32, f32)>));
+        // 振幅 0.5 的恒信号：RMS = 0.5 → ≈ -6.02 dB，峰值 = 0.5。
+        let meter = LoudnessMeter::new(
+            Constant {
+                value: 0.5,
+                remaining: 20_000,
+                sample_rate: SampleRate::new(44_100).unwrap(),
+            },
+            shared.clone(),
+        );
+        // 排空迭代器，触发共享读数更新。
+        let _: Vec<f32> = meter.collect();
+        let (rms_db, peak) = shared.lock().unwrap().expect("meter should have reported");
+        assert!((rms_db - 20.0 * 0.5f32.log10()).abs() < 0.1);
+        assert!((peak - 0.5).abs() < 0.001);
     }
 
     #[test]

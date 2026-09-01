@@ -228,6 +228,19 @@ fn replay_gain_factor(
     factor.clamp(0.1, 4.0)
 }
 
+/// 本地响度标准化的目标 RMS（dBFS）。
+const LOUDNESS_TARGET_DB: f32 = -16.0;
+
+/// 依据本地测量的响度与峰值计算增益系数（1.0 = 不变）。
+fn loudness_gain_factor(measured_rms_db: f32, peak: f32) -> f32 {
+    let gain_db = LOUDNESS_TARGET_DB - measured_rms_db;
+    let mut factor = 10f32.powf(gain_db / 20.0);
+    if peak > 0.0 && peak.is_finite() {
+        factor = factor.min(1.0 / peak);
+    }
+    factor.clamp(0.1, 4.0)
+}
+
 /// 计算专辑分页的 offset；相邻页之间连续、不重叠。
 fn album_page_offset(page: usize, page_size: usize) -> u32 {
     (page as u32) * (page_size as u32)
@@ -357,6 +370,8 @@ struct AppState {
     ended_handled: bool,
     now_playing_reported: Option<String>,
     scrobbled_song_id: Option<String>,
+    /// 本地测量的歌曲响度缓存：song_id → (rms_db, peak)。
+    loudness_cache: HashMap<String, (f32, f32)>,
 }
 
 impl Default for AppState {
@@ -409,6 +424,7 @@ impl Default for AppState {
             ended_handled: false,
             now_playing_reported: None,
             scrobbled_song_id: None,
+            loudness_cache: HashMap::new(),
         }
     }
 }
@@ -547,6 +563,7 @@ impl NavidromeApp {
             restore_maximized: false,
             mini_target_size: None,
         };
+        app.state.loudness_cache = config::load_loudness();
         app.state.playback_mode = app.config.playback_mode;
         app.audio.set_volume(initial_volume);
 
@@ -1181,19 +1198,14 @@ impl NavidromeApp {
                     quality.cache_profile()
                 );
                 self.state.now_playing_quality = Some(quality);
-                let gain = replay_gain_factor(
-                    self.config.volume_normalization,
-                    song.replay_gain_track_gain,
-                    song.replay_gain_track_peak,
-                    song.replay_gain_album_gain,
-                    song.replay_gain_album_peak,
-                );
+                let gain = self.song_gain(&song);
                 log::debug!(
-                    "replay gain song={} mode={:?} track_gain={:?} album_gain={:?} factor={gain:.3}",
+                    "volume gain song={} mode={:?} server_track_gain={:?} server_album_gain={:?} measured={:?} factor={gain:.3}",
                     song.id,
                     self.config.volume_normalization,
                     song.replay_gain_track_gain,
                     song.replay_gain_album_gain,
+                    self.state.loudness_cache.get(&song.id).copied(),
                 );
                 self.audio.play(url, cache_key, duration, gain);
                 self.report_now_playing(&song);
@@ -1264,6 +1276,70 @@ impl NavidromeApp {
                 log::warn!("scrobble on end failed (non-fatal): {error:#}");
             }
         });
+    }
+
+    /// 计算该歌曲的响度补偿增益：优先用服务器 ReplayGain，缺失时用本地测量缓存，都没有则 1.0。
+    fn song_gain(&self, song: &Song) -> f32 {
+        match self.config.volume_normalization {
+            VolumeNormalization::Off => 1.0,
+            VolumeNormalization::Track => {
+                if song.replay_gain_track_gain.is_some() {
+                    replay_gain_factor(
+                        VolumeNormalization::Track,
+                        song.replay_gain_track_gain,
+                        song.replay_gain_track_peak,
+                        None,
+                        None,
+                    )
+                } else if let Some(&(rms_db, peak)) = self.state.loudness_cache.get(&song.id) {
+                    loudness_gain_factor(rms_db, peak)
+                } else {
+                    1.0
+                }
+            }
+            VolumeNormalization::Album => {
+                if song.replay_gain_album_gain.is_some() {
+                    replay_gain_factor(
+                        VolumeNormalization::Album,
+                        None,
+                        None,
+                        song.replay_gain_album_gain,
+                        song.replay_gain_album_peak,
+                    )
+                } else if let Some(&(rms_db, peak)) = self.state.loudness_cache.get(&song.id) {
+                    loudness_gain_factor(rms_db, peak)
+                } else {
+                    1.0
+                }
+            }
+        }
+    }
+
+    /// 自然结束时把本地测量的歌曲响度写入缓存并持久化，供后续播放做音量补偿。
+    fn cache_measured_loudness(&mut self) {
+        if self.config.volume_normalization == VolumeNormalization::Off {
+            return;
+        }
+        let Some(song_id) = self.state.now_playing.as_ref().map(|song| song.id.clone()) else {
+            return;
+        };
+        let playback = self.audio.state();
+        if playback.loudness_db == 0.0 || !playback.loudness_db.is_finite() {
+            return;
+        }
+        self.state.loudness_cache.insert(
+            song_id.clone(),
+            (playback.loudness_db, playback.loudness_peak),
+        );
+        if let Err(error) = config::save_loudness(&self.state.loudness_cache) {
+            log::warn!("loudness cache save failed: {error:#}");
+        }
+        log::debug!(
+            "measured loudness cached song={} rms_db={:.1} peak={:.3}",
+            song_id,
+            playback.loudness_db,
+            playback.loudness_peak,
+        );
     }
 
     fn random_shuffle_next(&self) -> usize {
@@ -2105,6 +2181,7 @@ impl NavidromeApp {
         } else if playback.ended {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
+            self.cache_measured_loudness();
             match self.state.playback_mode {
                 PlaybackMode::Sequential => self.advance_queue(true),
                 PlaybackMode::RepeatAll => self.advance_queue(true),
@@ -5822,10 +5899,10 @@ mod tests {
 
     use super::{
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
-        extract_cover_palette, format_file_size, match_shortcut, normalize_volume,
-        playback_technical_info, queue_index_after_move, queue_index_after_remove, readable_accent,
-        replay_gain_factor, restored_volume, seek_target, should_scrobble, vinyl_rotation_phase,
-        Shortcut, ShuffleHistory,
+        extract_cover_palette, format_file_size, loudness_gain_factor, match_shortcut,
+        normalize_volume, playback_technical_info, queue_index_after_move,
+        queue_index_after_remove, readable_accent, replay_gain_factor, restored_volume,
+        seek_target, should_scrobble, vinyl_rotation_phase, Shortcut, ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
     use gpui::Modifiers;
@@ -6055,6 +6132,18 @@ mod tests {
             replay_gain_factor(VolumeNormalization::Track, Some(100.0), None, None, None),
             4.0
         );
+    }
+
+    #[test]
+    fn measured_loudness_maps_rms_to_gain() {
+        // 目标 -16 dBFS：rms -12 → 增益 -4 dB ≈ 0.631；rms -24 → +8 dB ≈ 2.512
+        let loud = loudness_gain_factor(-12.0, 0.0);
+        assert!((loud - 10f32.powf(-4.0 / 20.0)).abs() < 0.001);
+        let quiet = loudness_gain_factor(-24.0, 0.0);
+        assert!((quiet - 10f32.powf(8.0 / 20.0)).abs() < 0.001);
+        // 峰值防削波：峰值 0.9 时增益不超过 1/0.9。
+        let clamped = loudness_gain_factor(-24.0, 0.9);
+        assert!((clamped - (1.0 / 0.9)).abs() < 0.001);
     }
 
     #[test]
