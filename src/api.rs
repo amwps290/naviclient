@@ -173,10 +173,24 @@ impl Api {
 
     /// 最近播放的专辑列表（依赖 Navidrome/Subsonic 的 `type=recent`）。
     pub async fn albums_recent(&self, size: u32) -> Result<Vec<Album>> {
+        self.albums_by_type("recent", size).await
+    }
+
+    /// 播放次数最多的专辑列表（`type=frequent`）。
+    pub async fn albums_frequent(&self, size: u32) -> Result<Vec<Album>> {
+        self.albums_by_type("frequent", size).await
+    }
+
+    /// 随机专辑列表（`type=random`）。
+    pub async fn albums_random(&self, size: u32) -> Result<Vec<Album>> {
+        self.albums_by_type("random", size).await
+    }
+
+    async fn albums_by_type(&self, list_type: &str, size: u32) -> Result<Vec<Album>> {
         let body = self
             .get_json(
                 "getAlbumList2",
-                &[("type", "recent"), ("size", &size.to_string())],
+                &[("type", list_type), ("size", &size.to_string())],
             )
             .await?;
         parse_album_list2(&body)
@@ -523,6 +537,19 @@ mod tests {
         let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
         assert_eq!(params["type"], "recent");
         assert_eq!(params["size"], "30");
+    }
+
+    #[test]
+    fn home_album_sections_use_supported_list_types() {
+        for list_type in ["frequent", "random"] {
+            let api = Api::new("http://example.test", "alice", "secret").unwrap();
+            let url = api
+                .url_for("getAlbumList2", &[("type", list_type), ("size", "30")])
+                .unwrap();
+            let parsed = Url::parse(&url).unwrap();
+            let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+            assert_eq!(params["type"], list_type);
+        }
     }
 
     #[test]

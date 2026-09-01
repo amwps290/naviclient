@@ -334,6 +334,10 @@ struct AppState {
     albums_page: usize,
     recent_albums: Vec<Album>,
     recent_albums_loading: bool,
+    frequent_albums: Vec<Album>,
+    frequent_albums_loading: bool,
+    random_albums: Vec<Album>,
+    random_albums_loading: bool,
     collapsed_sections: HashSet<String>,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
@@ -388,6 +392,10 @@ impl Default for AppState {
             albums_page: 0,
             recent_albums: Vec::new(),
             recent_albums_loading: false,
+            frequent_albums: Vec::new(),
+            frequent_albums_loading: false,
+            random_albums: Vec::new(),
+            random_albums_loading: false,
             collapsed_sections: HashSet::new(),
             current_artist: None,
             artist_albums: Vec::new(),
@@ -730,6 +738,8 @@ impl NavidromeApp {
         self.load_playlists();
         self.load_favorites();
         self.load_recent_albums();
+        self.load_frequent_albums();
+        self.load_random_albums();
     }
 
     fn load_artists(&mut self) {
@@ -766,6 +776,30 @@ impl NavidromeApp {
         self.spawn_future(async move {
             let _ = tx.send(Msg::RecentAlbums(
                 api.albums_recent(30).await.map_err(error_message),
+            ));
+        });
+    }
+
+    /// 加载播放次数最多的专辑（Home 页展示）。
+    fn load_frequent_albums(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        self.state.frequent_albums_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::FrequentAlbums(
+                api.albums_frequent(30).await.map_err(error_message),
+            ));
+        });
+    }
+
+    /// 加载随机专辑（Home 页展示）。
+    fn load_random_albums(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        self.state.random_albums_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::RandomAlbums(
+                api.albums_random(30).await.map_err(error_message),
             ));
         });
     }
@@ -1988,6 +2022,36 @@ impl NavidromeApp {
                             // 非关键增强：加载失败只记录日志，不阻断其余页面。
                             log::warn!("recent albums load failed: {error}");
                         }
+                    }
+                }
+                Msg::FrequentAlbums(result) => {
+                    self.state.frequent_albums_loading = false;
+                    match result {
+                        Ok(albums) => {
+                            let covers: Vec<String> = albums
+                                .iter()
+                                .filter_map(|item| item.cover_art.clone())
+                                .take(30)
+                                .collect();
+                            self.state.frequent_albums = albums;
+                            self.preload_covers(covers);
+                        }
+                        Err(error) => log::warn!("frequent albums load failed: {error}"),
+                    }
+                }
+                Msg::RandomAlbums(result) => {
+                    self.state.random_albums_loading = false;
+                    match result {
+                        Ok(albums) => {
+                            let covers: Vec<String> = albums
+                                .iter()
+                                .filter_map(|item| item.cover_art.clone())
+                                .take(30)
+                                .collect();
+                            self.state.random_albums = albums;
+                            self.preload_covers(covers);
+                        }
+                        Err(error) => log::warn!("random albums load failed: {error}"),
                     }
                 }
                 Msg::AlbumSongs { album_id, result } => {
@@ -4070,6 +4134,28 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// Home 页专辑区块的通用内容：加载骨架 / 空状态提示 / 专辑网格。
+    fn render_home_album_content(
+        &self,
+        albums: &[Album],
+        loading: bool,
+        empty_text: &str,
+        cx: &Context<Self>,
+        window: &mut Window,
+    ) -> gpui::AnyElement {
+        if albums.is_empty() && loading {
+            self.render_album_skeleton_grid(cx)
+        } else if albums.is_empty() {
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(empty_text.to_string())
+                .into_any_element()
+        } else {
+            self.render_album_grid(albums, cx, window)
+        }
+    }
+
     fn toggle_home_section(&mut self, id: &'static str, cx: &mut Context<Self>) {
         if self.state.collapsed_sections.contains(id) {
             self.state.collapsed_sections.remove(id);
@@ -4102,26 +4188,44 @@ impl NavidromeApp {
                 .child(self.render_home_section(
                     "recent",
                     "Recently played",
-                    if self.state.recent_albums.is_empty() && self.state.recent_albums_loading {
-                        self.render_album_skeleton_grid(cx)
-                    } else if self.state.recent_albums.is_empty() {
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Nothing played yet — recently played albums will appear here.")
-                            .into_any_element()
-                    } else {
-                        self.render_album_grid(&self.state.recent_albums, cx, window)
-                    },
+                    self.render_home_album_content(
+                        &self.state.recent_albums,
+                        self.state.recent_albums_loading,
+                        "Nothing played yet — recently played albums will appear here.",
+                        cx,
+                        window,
+                    ),
                     cx,
                 ))
                 .child(self.render_home_section(
-                    "newest",
-                    "Newest albums",
-                    if self.state.albums.is_empty() && self.state.albums_loading {
-                        self.render_album_skeleton_grid(cx)
-                    } else {
-                        self.render_album_grid(
+                    "frequent",
+                    "Frequently played",
+                    self.render_home_album_content(
+                        &self.state.frequent_albums,
+                        self.state.frequent_albums_loading,
+                        "Nothing frequently played yet — your most-played albums will appear here.",
+                        cx,
+                        window,
+                    ),
+                    cx,
+                ))
+                .child(self.render_home_section(
+                    "random",
+                    "Random albums",
+                    self.render_home_album_content(
+                        &self.state.random_albums,
+                        self.state.random_albums_loading,
+                        "No random albums to show — refresh the library for a fresh pick.",
+                        cx,
+                        window,
+                    ),
+                    cx,
+                ))
+                .child(
+                    self.render_home_section(
+                        "newest",
+                        "Newest albums",
+                        self.render_home_album_content(
                             &self
                                 .state
                                 .albums
@@ -4129,12 +4233,14 @@ impl NavidromeApp {
                                 .take(30)
                                 .cloned()
                                 .collect::<Vec<_>>(),
+                            self.state.albums_loading,
+                            "No albums in your library yet.",
                             cx,
                             window,
-                        )
-                    },
-                    cx,
-                ))
+                        ),
+                        cx,
+                    ),
+                )
                 .into_any_element(),
             View::Favorites => {
                 let favorites = &self.state.favorites;
