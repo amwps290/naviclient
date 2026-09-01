@@ -51,6 +51,8 @@ enum Command {
         url: String,
         cache_key: String,
         duration_hint: Option<Duration>,
+        /// 该曲目的响度补偿增益系数（1.0 = 不变），与用户音量相乘。
+        gain: f32,
     },
     Pause,
     Resume,
@@ -79,13 +81,14 @@ impl AudioHandle {
         Ok(Self { tx, state })
     }
 
-    pub fn play(&self, url: String, cache_key: String, duration_hint: Option<Duration>) {
+    pub fn play(&self, url: String, cache_key: String, duration_hint: Option<Duration>, gain: f32) {
         if self
             .tx
             .send(Command::Play {
                 url,
                 cache_key,
                 duration_hint,
+                gain,
             })
             .is_err()
         {
@@ -250,6 +253,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let (preparation_tx, preparation_rx) = mpsc::channel::<PreparationResult>();
 
     let mut volume = 1.0;
+    let mut current_gain = 1.0;
     let mut duration: Option<Duration> = None;
     let mut stream_error: Option<SharedStreamError> = None;
     let mut buffer_progress: Option<Arc<BufferProgress>> = None;
@@ -287,12 +291,14 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     url,
                     cache_key,
                     duration_hint,
+                    gain,
                 } => {
                     log::info!(
-                        "play requested; endpoint={} duration_hint_ms={:?}",
+                        "play requested; endpoint={} duration_hint_ms={:?} gain={gain}",
                         stream_endpoint(&url),
                         duration_hint.map(|duration| duration.as_millis())
                     );
+                    current_gain = gain.clamp(0.1, 4.0);
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
                     desired_paused = false;
@@ -367,7 +373,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                 }
                 Command::SetVolume(new_volume) => {
                     volume = new_volume.clamp(0.0, 1.0);
-                    player.set_volume(volume);
+                    player.set_volume(volume * current_gain);
                 }
                 Command::SetCacheDirectory(new_cache_dir) => {
                     match prepare_cache_dir(&new_cache_dir) {
@@ -445,7 +451,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             preparing = false;
             match prepared.result {
                 Ok(stream) => {
-                    player.set_volume(volume);
+                    player.set_volume(volume * current_gain);
                     player.append(normalize_for_output(
                         stream.source,
                         output_channels,

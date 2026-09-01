@@ -38,7 +38,7 @@ use crate::config;
 use crate::models::{
     Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode,
     PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
-    TranscodingQuality,
+    TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, DecodedCover, Msg};
 use crate::single_instance;
@@ -201,6 +201,31 @@ fn should_scrobble(position: Duration, duration: Option<Duration>) -> bool {
         }
         _ => false,
     }
+}
+
+/// 根据 ReplayGain 元数据与标准化模式计算增益系数（1.0 = 不变）。
+/// 正增益（dB）表示歌曲偏轻需放大，负增益表示偏响需降低；结合峰值做防削波。
+fn replay_gain_factor(
+    mode: VolumeNormalization,
+    track_gain_db: Option<f32>,
+    track_peak: Option<f32>,
+    album_gain_db: Option<f32>,
+    album_peak: Option<f32>,
+) -> f32 {
+    let (gain_db, peak) = match mode {
+        VolumeNormalization::Off => return 1.0,
+        VolumeNormalization::Track => (track_gain_db, track_peak),
+        VolumeNormalization::Album => (album_gain_db, album_peak),
+    };
+    let Some(gain_db) = gain_db.filter(|gain| gain.is_finite()) else {
+        return 1.0;
+    };
+    let mut factor = 10f32.powf(gain_db / 20.0);
+    // 防削波：有峰值元数据时，增益不能把输出峰值推过 1.0。
+    if let Some(peak) = peak.filter(|peak| peak.is_finite() && *peak > 0.0) {
+        factor = factor.min(1.0 / peak);
+    }
+    factor.clamp(0.1, 4.0)
 }
 
 /// 计算专辑分页的 offset；相邻页之间连续、不重叠。
@@ -1156,7 +1181,21 @@ impl NavidromeApp {
                     quality.cache_profile()
                 );
                 self.state.now_playing_quality = Some(quality);
-                self.audio.play(url, cache_key, duration);
+                let gain = replay_gain_factor(
+                    self.config.volume_normalization,
+                    song.replay_gain_track_gain,
+                    song.replay_gain_track_peak,
+                    song.replay_gain_album_gain,
+                    song.replay_gain_album_peak,
+                );
+                log::debug!(
+                    "replay gain song={} mode={:?} track_gain={:?} album_gain={:?} factor={gain:.3}",
+                    song.id,
+                    self.config.volume_normalization,
+                    song.replay_gain_track_gain,
+                    song.replay_gain_album_gain,
+                );
+                self.audio.play(url, cache_key, duration, gain);
                 self.report_now_playing(&song);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
@@ -1592,6 +1631,7 @@ impl NavidromeApp {
             transcoding_quality: self.config.transcoding_quality,
             volume: self.config.volume,
             playback_mode: self.config.playback_mode,
+            volume_normalization: self.config.volume_normalization,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -1671,6 +1711,14 @@ impl NavidromeApp {
         } else {
             self.state.error = None;
             log::info!("transcoding quality changed; quality={}", quality.label());
+        }
+        cx.notify();
+    }
+
+    fn set_volume_normalization(&mut self, mode: VolumeNormalization, cx: &mut Context<Self>) {
+        self.config.volume_normalization = mode;
+        if let Err(error) = config::save(&self.config) {
+            self.state.error = Some(format!("Volume normalization save failed: {error:#}"));
         }
         cx.notify();
     }
@@ -3576,6 +3624,49 @@ impl NavidromeApp {
                                             }))
                                         }),
                                     )),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Volume normalization"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_4()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        "Adjust per-song loudness with ReplayGain so quiet and loud tracks play at a similar level.",
+                                    ),
+                            )
+                            .child(
+                                h_flex().gap_2().flex_wrap().children(
+                                    VolumeNormalization::ALL.into_iter().map(|mode| {
+                                        Button::new(SharedString::from(format!(
+                                            "volume-normalization-{}",
+                                            mode.label().to_ascii_lowercase()
+                                        )))
+                                        .label(mode.label())
+                                        .tooltip(mode.tooltip())
+                                        .selected(self.config.volume_normalization == mode)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.set_volume_normalization(mode, cx);
+                                        }))
+                                    }),
+                                ),
                             ),
                     ),
             )
@@ -5733,10 +5824,10 @@ mod tests {
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
         extract_cover_palette, format_file_size, match_shortcut, normalize_volume,
         playback_technical_info, queue_index_after_move, queue_index_after_remove, readable_accent,
-        restored_volume, seek_target, should_scrobble, vinyl_rotation_phase, Shortcut,
-        ShuffleHistory,
+        replay_gain_factor, restored_volume, seek_target, should_scrobble, vinyl_rotation_phase,
+        Shortcut, ShuffleHistory,
     };
-    use crate::models::{PlaybackMode, Song, TranscodingQuality};
+    use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
     use gpui::Modifiers;
 
     #[test]
@@ -5913,6 +6004,57 @@ mod tests {
             Duration::ZERO,
             Some(Duration::from_secs(300))
         ));
+    }
+
+    #[test]
+    fn replay_gain_applies_db_gain_in_track_mode() {
+        // -3.5 dB ≈ 0.668；0 dB = 1.0；+6 dB ≈ 1.995
+        let factor = replay_gain_factor(VolumeNormalization::Track, Some(-3.5), None, None, None);
+        assert!((factor - 10f32.powf(-3.5 / 20.0)).abs() < 0.001);
+        assert_eq!(
+            replay_gain_factor(VolumeNormalization::Track, Some(0.0), None, None, None),
+            1.0
+        );
+        let boost = replay_gain_factor(VolumeNormalization::Track, Some(6.0), None, None, None);
+        assert!((boost - 10f32.powf(6.0 / 20.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn replay_gain_album_mode_uses_album_values() {
+        let factor = replay_gain_factor(VolumeNormalization::Album, None, None, Some(-2.0), None);
+        assert!((factor - 10f32.powf(-2.0 / 20.0)).abs() < 0.001);
+        // Track 模式下 album 增益不生效。
+        assert_eq!(
+            replay_gain_factor(VolumeNormalization::Track, None, None, Some(-2.0), None),
+            1.0
+        );
+    }
+
+    #[test]
+    fn replay_gain_off_ignores_metadata_and_prevents_clipping() {
+        assert_eq!(
+            replay_gain_factor(VolumeNormalization::Off, Some(-8.0), None, None, None),
+            1.0
+        );
+        // 缺失增益数据时安全回退为 1.0。
+        assert_eq!(
+            replay_gain_factor(VolumeNormalization::Track, None, Some(0.9), None, None),
+            1.0
+        );
+        // 峰值防削波：增益被限制在 1/peak。
+        let clamped = replay_gain_factor(
+            VolumeNormalization::Track,
+            Some(10.0),
+            Some(0.8),
+            None,
+            None,
+        );
+        assert!((clamped - 1.25).abs() < 0.001);
+        // 结果始终落在安全范围内。
+        assert_eq!(
+            replay_gain_factor(VolumeNormalization::Track, Some(100.0), None, None, None),
+            4.0
+        );
     }
 
     #[test]

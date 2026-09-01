@@ -157,6 +157,37 @@ pub struct Song {
     pub size: Option<i64>,
     #[serde(default)]
     pub path: Option<String>,
+    /// ReplayGain 曲目增益（dB）；Navidrome/Subsonic 可选字段，缺失时安全回退。
+    #[serde(
+        default,
+        alias = "replayGainTrack",
+        deserialize_with = "deserialize_optional_f32"
+    )]
+    pub replay_gain_track_gain: Option<f32>,
+    #[serde(default, deserialize_with = "deserialize_optional_f32")]
+    pub replay_gain_track_peak: Option<f32>,
+    #[serde(
+        default,
+        alias = "replayGainAlbum",
+        deserialize_with = "deserialize_optional_f32"
+    )]
+    pub replay_gain_album_gain: Option<f32>,
+    #[serde(default, deserialize_with = "deserialize_optional_f32")]
+    pub replay_gain_album_peak: Option<f32>,
+}
+
+/// 容错解析可选的 f32 字段：接受数字或字符串，其他情况返回 None，
+/// 避免个别字段类型不符导致整首歌解析失败。
+fn deserialize_optional_f32<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        serde_json::Value::Number(number) => number.as_f64().map(|n| n as f32),
+        serde_json::Value::String(text) => text.parse::<f32>().ok(),
+        _ => None,
+    }))
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -268,6 +299,8 @@ pub struct Config {
     pub volume: f32,
     #[serde(default)]
     pub playback_mode: PlaybackMode,
+    #[serde(default)]
+    pub volume_normalization: VolumeNormalization,
 }
 
 impl Default for Config {
@@ -281,6 +314,7 @@ impl Default for Config {
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
             playback_mode: PlaybackMode::Sequential,
+            volume_normalization: VolumeNormalization::Track,
         }
     }
 }
@@ -289,11 +323,44 @@ fn default_volume() -> f32 {
     0.7
 }
 
+/// 音量标准化模式：关闭 / 按曲目 / 按专辑（ReplayGain）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VolumeNormalization {
+    Off,
+    #[default]
+    Track,
+    Album,
+}
+
+impl VolumeNormalization {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Track, Self::Album];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Track => "Track",
+            Self::Album => "Album",
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Off => "Play every song at its recorded loudness",
+            Self::Track => "Normalize each track to a consistent loudness (ReplayGain)",
+            Self::Album => "Normalize by album so a record's relative dynamics are preserved",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Config, PlaybackMode, PlaybackSession, Song, ThemePreference, TranscodingQuality};
+    use super::{
+        Config, PlaybackMode, PlaybackSession, Song, ThemePreference, TranscodingQuality,
+        VolumeNormalization,
+    };
 
     #[test]
     fn legacy_config_defaults_to_light_theme() {
@@ -305,7 +372,39 @@ mod tests {
         assert_eq!(config.theme, ThemePreference::Light);
         assert_eq!(config.cache_dir, None);
         assert_eq!(config.transcoding_quality, TranscodingQuality::Original);
+        assert_eq!(config.volume_normalization, VolumeNormalization::Track);
         assert!((config.volume - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn song_parses_replay_gain_fields_tolerantly() {
+        let song: Song = serde_json::from_str(
+            r#"{
+                "id": "s1", "title": "Track",
+                "replayGainTrackGain": -3.5,
+                "replayGainTrackPeak": "0.98",
+                "replayGainAlbumGain": -2.1,
+                "replayGainAlbumPeak": 1.0,
+                "replayGainWeird": "not-a-number"
+            }"#,
+        )
+        .expect("song should parse despite mixed replay gain types");
+
+        assert_eq!(song.replay_gain_track_gain, Some(-3.5));
+        assert_eq!(song.replay_gain_track_peak, Some(0.98));
+        assert_eq!(song.replay_gain_album_gain, Some(-2.1));
+        assert_eq!(song.replay_gain_album_peak, Some(1.0));
+    }
+
+    #[test]
+    fn volume_normalization_round_trips_through_config_json() {
+        let config = Config {
+            volume_normalization: VolumeNormalization::Album,
+            ..Config::default()
+        };
+        let text = serde_json::to_string(&config).expect("config should serialize");
+        let parsed: Config = serde_json::from_str(&text).expect("config should round-trip");
+        assert_eq!(parsed.volume_normalization, VolumeNormalization::Album);
     }
 
     #[test]
