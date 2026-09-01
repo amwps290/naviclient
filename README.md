@@ -20,6 +20,7 @@ JavaScript runtime.
   records completed plays (50% or 4-minute threshold), failures never interrupt
   local playback
 - Home page "Recently played" section fed by Navidrome's recent-play list
+- Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
 - Double-click song playback with highlighted and animated now-playing rows
