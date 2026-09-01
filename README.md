@@ -24,7 +24,8 @@ JavaScript runtime.
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
 - ReplayGain volume normalization (Off / Track / Album) so loud and quiet
-  tracks play at a similar level, with peak-based anti-clipping
+  tracks play at a similar level, with peak-based anti-clipping; falls back to
+  locally measured loudness when the server provides no ReplayGain metadata
 - Double-click song playback with highlighted and animated now-playing rows
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
 - Mini-player mode that shrinks the main window into a compact, always-on-top
