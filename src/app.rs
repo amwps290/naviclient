@@ -190,6 +190,19 @@ fn queue_index_after_move(from: usize, to: usize, current: usize) -> usize {
     }
 }
 
+/// 判断播放是否达到有效播放阈值（满足其一即可）：播放时长达到歌曲总长的 50%，或达到 4 分钟。
+fn should_scrobble(position: Duration, duration: Option<Duration>) -> bool {
+    if position.as_secs() >= 4 * 60 {
+        return true;
+    }
+    match duration {
+        Some(duration) if duration > Duration::ZERO => {
+            position.as_secs_f64() >= duration.as_secs_f64() * 0.5
+        }
+        _ => false,
+    }
+}
+
 /// 计算专辑分页的 offset；相邻页之间连续、不重叠。
 fn album_page_offset(page: usize, page_size: usize) -> u32 {
     (page as u32) * (page_size as u32)
@@ -314,6 +327,8 @@ struct AppState {
     playback_mode: PlaybackMode,
     shuffle_history: ShuffleHistory,
     ended_handled: bool,
+    now_playing_reported: Option<String>,
+    scrobbled_song_id: Option<String>,
 }
 
 impl Default for AppState {
@@ -361,6 +376,8 @@ impl Default for AppState {
             playback_mode: PlaybackMode::default(),
             shuffle_history: ShuffleHistory::default(),
             ended_handled: false,
+            now_playing_reported: None,
+            scrobbled_song_id: None,
         }
     }
 }
@@ -631,6 +648,7 @@ impl NavidromeApp {
                     this.maybe_save_session();
                     this.poll_messages();
                     this.handle_playback_end();
+                    this.maybe_scrobble_current();
                     this.update_active_lyric();
                     cx.notify();
                 })
@@ -1091,6 +1109,8 @@ impl NavidromeApp {
         self.state.now_playing = Some(song.clone());
         self.state.now_playing_quality = None;
         self.state.ended_handled = false;
+        self.state.now_playing_reported = None;
+        self.state.scrobbled_song_id = None;
         self.ensure_cover(song.cover_art.as_deref(), true);
         self.load_lyrics(&song);
         let Some(api) = self.api.clone() else {
@@ -1118,9 +1138,74 @@ impl NavidromeApp {
                 );
                 self.state.now_playing_quality = Some(quality);
                 self.audio.play(url, cache_key, duration);
+                self.report_now_playing(&song);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
         }
+    }
+
+    /// 通知 Navidrome 当前正在播放的歌曲（每首最多发送一次，不阻塞播放）。
+    fn report_now_playing(&mut self, song: &Song) {
+        if self.state.now_playing_reported.as_deref() == Some(song.id.as_str()) {
+            return;
+        }
+        self.state.now_playing_reported = Some(song.id.clone());
+        let Some(api) = self.api.clone() else { return };
+        let song_id = song.id.clone();
+        let time_secs = self.audio.state().position.as_secs() as u32;
+        self.spawn_future(async move {
+            if let Err(error) = api.update_now_playing(&song_id, time_secs).await {
+                log::warn!("updateNowPlaying failed (non-fatal): {error:#}");
+            }
+        });
+    }
+
+    /// 当前歌曲播放达到有效阈值后，向 Navidrome 发送一次 Scrobble（每首一次）。
+    fn maybe_scrobble_current(&mut self) {
+        let already_scrobbled = self
+            .state
+            .scrobbled_song_id
+            .as_ref()
+            .zip(self.state.now_playing.as_ref())
+            .is_some_and(|(scrobbled, playing)| scrobbled == &playing.id);
+        if already_scrobbled {
+            return;
+        }
+        let Some(song_id) = self.state.now_playing.as_ref().map(|song| song.id.clone()) else {
+            return;
+        };
+        let playback = self.audio.state();
+        if !playback.active || playback.paused {
+            return;
+        }
+        if !should_scrobble(playback.position, playback.duration) {
+            return;
+        }
+        self.state.scrobbled_song_id = Some(song_id.clone());
+        let Some(api) = self.api.clone() else { return };
+        self.spawn_future(async move {
+            if let Err(error) = api.scrobble(&song_id, true).await {
+                log::warn!("scrobble failed (non-fatal): {error:#}");
+            }
+        });
+    }
+
+    /// 自然播放结束时，若尚未提交 Scrobble 则提交（完整播放一定有效）。
+    fn ensure_scrobble_on_end(&mut self) {
+        let Some(song) = self.state.now_playing.clone() else {
+            return;
+        };
+        if self.state.scrobbled_song_id.as_deref() == Some(song.id.as_str()) {
+            return;
+        }
+        self.state.scrobbled_song_id = Some(song.id.clone());
+        let Some(api) = self.api.clone() else { return };
+        let song_id = song.id.clone();
+        self.spawn_future(async move {
+            if let Err(error) = api.scrobble(&song_id, true).await {
+                log::warn!("scrobble on end failed (non-fatal): {error:#}");
+            }
+        });
     }
 
     fn random_shuffle_next(&self) -> usize {
@@ -1934,6 +2019,7 @@ impl NavidromeApp {
             self.state.error = Some(error);
         } else if playback.ended {
             self.state.ended_handled = true;
+            self.ensure_scrobble_on_end();
             match self.state.playback_mode {
                 PlaybackMode::Sequential => self.advance_queue(true),
                 PlaybackMode::RepeatAll => self.advance_queue(true),
@@ -5548,7 +5634,8 @@ mod tests {
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
         extract_cover_palette, format_file_size, match_shortcut, normalize_volume,
         playback_technical_info, queue_index_after_move, queue_index_after_remove, readable_accent,
-        restored_volume, seek_target, vinyl_rotation_phase, Shortcut, ShuffleHistory,
+        restored_volume, seek_target, should_scrobble, vinyl_rotation_phase, Shortcut,
+        ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality};
     use gpui::Modifiers;
@@ -5705,6 +5792,28 @@ mod tests {
     fn adjacent_moves_keep_relative_position() {
         assert_eq!(queue_index_after_move(1, 2, 2), 1);
         assert_eq!(queue_index_after_move(1, 2, 1), 2);
+    }
+
+    #[test]
+    fn scrobbles_at_half_duration_or_four_minutes() {
+        assert!(!should_scrobble(
+            Duration::from_secs(10),
+            Some(Duration::from_secs(30))
+        ));
+        assert!(should_scrobble(
+            Duration::from_secs(15),
+            Some(Duration::from_secs(30))
+        ));
+        assert!(should_scrobble(
+            Duration::from_secs(241),
+            Some(Duration::from_secs(600))
+        ));
+        assert!(should_scrobble(Duration::from_secs(240), None));
+        assert!(!should_scrobble(Duration::from_secs(120), None));
+        assert!(!should_scrobble(
+            Duration::ZERO,
+            Some(Duration::from_secs(300))
+        ));
     }
 
     #[test]
