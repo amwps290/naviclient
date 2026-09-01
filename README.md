@@ -19,7 +19,8 @@ JavaScript runtime.
 - Navidrome now-playing and scrobble sync: reports the current track and
   records completed plays (50% or 4-minute threshold), failures never interrupt
   local playback
-- Home page "Recently played" section fed by Navidrome's recent-play list
+- Home page with collapsible sections: recently played, frequently played,
+  random albums and newest albums, fed by Navidrome's album lists
 - Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
