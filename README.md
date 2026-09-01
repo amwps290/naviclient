@@ -14,6 +14,8 @@ JavaScript runtime.
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, seek, and queue
   progression
+- Editable playback queue: play next, append to queue, remove, reorder,
+  clear-after-current and clear-all, plus append-all from albums and playlists
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
 - Double-click song playback with highlighted and animated now-playing rows
