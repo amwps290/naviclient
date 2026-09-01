@@ -22,6 +22,7 @@ pub enum Msg {
         result: Result<Vec<Album>, String>,
     },
     Albums(Result<Vec<Album>, String>),
+    RecentAlbums(Result<Vec<Album>, String>),
     AlbumSongs {
         album_id: String,
         result: Result<Vec<Song>, String>,

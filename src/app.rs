@@ -294,6 +294,8 @@ struct AppState {
     albums_loading: bool,
     albums_exhausted: bool,
     albums_page: usize,
+    recent_albums: Vec<Album>,
+    recent_albums_loading: bool,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
     current_album: Option<Album>,
@@ -343,6 +345,8 @@ impl Default for AppState {
             albums_loading: false,
             albums_exhausted: false,
             albums_page: 0,
+            recent_albums: Vec::new(),
+            recent_albums_loading: false,
             current_artist: None,
             artist_albums: Vec::new(),
             current_album: None,
@@ -681,6 +685,7 @@ impl NavidromeApp {
         self.load_albums();
         self.load_playlists();
         self.load_favorites();
+        self.load_recent_albums();
     }
 
     fn load_artists(&mut self) {
@@ -705,6 +710,18 @@ impl NavidromeApp {
                 api.albums(ALBUM_PAGE_SIZE as u32, 0)
                     .await
                     .map_err(error_message),
+            ));
+        });
+    }
+
+    /// 加载最近播放的专辑（Home 页展示）。
+    fn load_recent_albums(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        self.state.recent_albums_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::RecentAlbums(
+                api.albums_recent(30).await.map_err(error_message),
             ));
         });
     }
@@ -1827,6 +1844,24 @@ impl NavidromeApp {
                             }
                         }
                         Err(error) => self.state.error = Some(error),
+                    }
+                }
+                Msg::RecentAlbums(result) => {
+                    self.state.recent_albums_loading = false;
+                    match result {
+                        Ok(albums) => {
+                            let covers: Vec<String> = albums
+                                .iter()
+                                .filter_map(|item| item.cover_art.clone())
+                                .take(30)
+                                .collect();
+                            self.state.recent_albums = albums;
+                            self.preload_covers(covers);
+                        }
+                        Err(error) => {
+                            // 非关键增强：加载失败只记录日志，不阻断其余页面。
+                            log::warn!("recent albums load failed: {error}");
+                        }
                     }
                 }
                 Msg::AlbumSongs { album_id, result } => {
@@ -3845,6 +3880,25 @@ impl NavidromeApp {
                     ),
                 )
                 .children(self.error_banner(cx))
+                .child(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Recently played"),
+                )
+                .child(
+                    if self.state.recent_albums.is_empty() && self.state.recent_albums_loading {
+                        self.render_album_skeleton_grid(cx)
+                    } else if self.state.recent_albums.is_empty() {
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Nothing played yet — recently played albums will appear here.")
+                            .into_any_element()
+                    } else {
+                        self.render_album_grid(&self.state.recent_albums, cx, window)
+                    },
+                )
                 .child(
                     div()
                         .text_lg()

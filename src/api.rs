@@ -168,11 +168,18 @@ impl Api {
                 ],
             )
             .await?;
-        let mut albums = Vec::new();
-        for album in body["albumList2"]["album"].as_array().into_iter().flatten() {
-            albums.push(serde_json::from_value(album.clone())?);
-        }
-        Ok(albums)
+        parse_album_list2(&body)
+    }
+
+    /// 最近播放的专辑列表（依赖 Navidrome/Subsonic 的 `type=recent`）。
+    pub async fn albums_recent(&self, size: u32) -> Result<Vec<Album>> {
+        let body = self
+            .get_json(
+                "getAlbumList2",
+                &[("type", "recent"), ("size", &size.to_string())],
+            )
+            .await?;
+        parse_album_list2(&body)
     }
 
     pub async fn album_songs(&self, album_id: &str) -> Result<Vec<Song>> {
@@ -323,6 +330,15 @@ fn favorite_param(kind: FavoriteKind) -> &'static str {
         FavoriteKind::Album => "albumId",
         FavoriteKind::Song => "id",
     }
+}
+
+/// 从 `getAlbumList2` 响应体中解析专辑列表。
+fn parse_album_list2(body: &Value) -> Result<Vec<Album>> {
+    let mut albums = Vec::new();
+    for album in body["albumList2"]["album"].as_array().into_iter().flatten() {
+        albums.push(serde_json::from_value(album.clone())?);
+    }
+    Ok(albums)
 }
 
 fn parse_array<T>(value: &Value, key: &str) -> Result<Vec<T>>
@@ -495,6 +511,18 @@ mod tests {
         let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
         assert_eq!(params["id"], "song-9");
         assert_eq!(params["submission"], "true");
+    }
+
+    #[test]
+    fn recent_album_list_uses_the_recent_type() {
+        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let url = api
+            .url_for("getAlbumList2", &[("type", "recent"), ("size", "30")])
+            .unwrap();
+        let parsed = Url::parse(&url).unwrap();
+        let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(params["type"], "recent");
+        assert_eq!(params["size"], "30");
     }
 
     #[test]
