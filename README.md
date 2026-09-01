@@ -16,6 +16,9 @@ JavaScript runtime.
   progression
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
+- Navidrome now-playing and scrobble sync: reports the current track and
+  records completed plays (50% or 4-minute threshold), failures never interrupt
+  local playback
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
 - Double-click song playback with highlighted and animated now-playing rows
