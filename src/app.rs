@@ -24,8 +24,8 @@ use gpui_component::{
     scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme,
-    ThemeMode, TitleBar,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode,
+    TitleBar,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -154,6 +154,39 @@ fn advance_index(current: usize, len: usize, forward: bool, wraps: bool) -> Opti
         Some(len - 1)
     } else {
         None
+    }
+}
+
+/// 从队列移除 `index`（`len_after` 为删除后的长度）后，返回修正后的当前索引。
+/// 删除正在播放的歌曲时，回落到原位置的下一首；队列被清空时返回 `None`。
+fn queue_index_after_remove(
+    index: usize,
+    current: Option<usize>,
+    len_after: usize,
+) -> Option<usize> {
+    let current = current?;
+    if len_after == 0 {
+        return None;
+    }
+    if index < current {
+        Some(current - 1)
+    } else if index == current {
+        Some(current.min(len_after - 1))
+    } else {
+        Some(current)
+    }
+}
+
+/// 将队列项从 `from` 移到 `to` 后，返回修正后的当前索引。
+fn queue_index_after_move(from: usize, to: usize, current: usize) -> usize {
+    if from == current {
+        return to;
+    }
+    let current_after_remove = if from < current { current - 1 } else { current };
+    if current_after_remove >= to {
+        current_after_remove + 1
+    } else {
+        current_after_remove
     }
 }
 
@@ -929,6 +962,90 @@ impl NavidromeApp {
         self.state.shuffle_history.start(index);
         self.state.song_rows_visible = songs.len().min(50);
         self.play_queue_index(index);
+        self.save_session();
+    }
+
+    /// 将单首歌曲插入到当前播放歌曲之后；未在播放时插入队首（不自动播放）。
+    fn insert_next(&mut self, song: Song) {
+        let insert_at = match self.state.queue_index {
+            Some(index) => (index + 1).min(self.state.queue.len()),
+            None => 0,
+        };
+        self.state.queue.insert(insert_at, song);
+        self.save_session();
+    }
+
+    /// 将单首歌曲追加到队列末尾（不自动播放；空队列时设为队首索引以便播放键可用）。
+    fn add_to_queue(&mut self, song: Song) {
+        if self.state.queue.is_empty() {
+            self.state.queue_index = Some(0);
+        }
+        self.state.queue.push(song);
+        self.save_session();
+    }
+
+    /// 追加整个列表到队列末尾（不自动播放）。
+    fn append_all(&mut self, songs: &[Song]) {
+        if songs.is_empty() {
+            return;
+        }
+        if self.state.queue.is_empty() {
+            self.state.queue_index = Some(0);
+        }
+        self.state.queue.extend(songs.iter().cloned());
+        self.save_session();
+    }
+
+    /// 从队列移除指定项并修正当前索引。删除正在播放的歌曲时改播原位置的下一首；队列清空则停止播放。
+    fn remove_from_queue(&mut self, index: usize) {
+        if index >= self.state.queue.len() {
+            return;
+        }
+        let removed_current = self.state.queue_index == Some(index);
+        self.state.queue.remove(index);
+        self.state.queue_index =
+            queue_index_after_remove(index, self.state.queue_index, self.state.queue.len());
+        if removed_current {
+            if self.state.queue.is_empty() {
+                self.stop_playback();
+            } else if let Some(next) = self.state.queue_index {
+                self.play_queue_index(next);
+            }
+        }
+        self.save_session();
+    }
+
+    /// 清空当前播放歌曲之后的所有队列项。
+    fn clear_queue_after_current(&mut self) {
+        if let Some(current) = self.state.queue_index {
+            let keep = current + 1;
+            if self.state.queue.len() > keep {
+                self.state.queue.truncate(keep);
+                self.save_session();
+            }
+        }
+    }
+
+    /// 清空整个队列并停止播放。
+    fn clear_queue(&mut self) {
+        self.state.queue.clear();
+        self.state.queue_index = None;
+        self.state.shuffle_history = ShuffleHistory::default();
+        self.stop_playback();
+        self.save_session();
+    }
+
+    /// 将队列项从 `from` 移动到 `to`，并修正当前索引。
+    fn move_queue_item(&mut self, from: usize, to: usize) {
+        let len = self.state.queue.len();
+        if from >= len || to >= len || from == to {
+            return;
+        }
+        let song = self.state.queue.remove(from);
+        self.state.queue.insert(to, song);
+        if let Some(current) = self.state.queue_index {
+            self.state.queue_index = Some(queue_index_after_move(from, to, current));
+        }
         self.save_session();
     }
 
@@ -2782,7 +2899,12 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_song_list(&self, songs: &[Song], cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_song_list(
+        &self,
+        songs: &[Song],
+        editable: bool,
+        cx: &Context<Self>,
+    ) -> gpui::AnyElement {
         // 增量渲染：只渲染前 song_rows_visible 行，滚动时逐批追加，避免长列表一次重建。
         let visible = self.state.song_rows_visible.min(songs.len());
         let songs = &songs[..visible];
@@ -2827,6 +2949,7 @@ impl NavidromeApp {
                     .h(px(60.0))
                     .px_3()
                     .gap_3()
+                    .relative()
                     .border_t_1()
                     .border_color(cx.theme().border.opacity(0.6))
                     .on_hover(cx.listener(move |this, hovering, _, cx| {
@@ -2839,6 +2962,7 @@ impl NavidromeApp {
                 } else {
                     row
                 };
+                let hovered = self.state.hovered_item.as_deref() == Some(song.id.as_str());
 
                 row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
                     .child(
@@ -2905,6 +3029,136 @@ impl NavidromeApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(format_duration(song.duration)),
                     )
+                    .when(hovered, |row| {
+                        let song_id = song.id.clone();
+                        if editable {
+                            let queue_len = queue.len();
+                            row.child(
+                                h_flex()
+                                    .absolute()
+                                    .right_2()
+                                    .top(px(12.0))
+                                    .items_center()
+                                    .gap_0p5()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background.opacity(0.96))
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "queue-up-{song_id}"
+                                        )))
+                                        .icon(AppIcon::ChevronUp)
+                                        .tooltip("Move up")
+                                        .ghost()
+                                        .small()
+                                        .disabled(index == 0)
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.move_queue_item(index, index - 1);
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "queue-down-{song_id}"
+                                        )))
+                                        .icon(AppIcon::ChevronDown)
+                                        .tooltip("Move down")
+                                        .ghost()
+                                        .small()
+                                        .disabled(index + 1 >= queue_len)
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.move_queue_item(index, index + 1);
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "queue-remove-{song_id}"
+                                        )))
+                                        .icon(AppIcon::Close)
+                                        .tooltip("Remove from queue")
+                                        .ghost()
+                                        .small()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.remove_from_queue(index);
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    ),
+                            )
+                        } else {
+                            let play_next_song = song.clone();
+                            let add_queue_song = song.clone();
+                            row.child(
+                                h_flex()
+                                    .absolute()
+                                    .right_2()
+                                    .top(px(12.0))
+                                    .items_center()
+                                    .gap_0p5()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_lg()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background.opacity(0.96))
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "play-next-{song_id}"
+                                        )))
+                                        .icon(PlayerIcon::Next)
+                                        .tooltip("Play next")
+                                        .ghost()
+                                        .small()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.insert_next(play_next_song.clone());
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new(SharedString::from(format!(
+                                            "add-to-queue-{song_id}"
+                                        )))
+                                        .icon(AppIcon::Queue)
+                                        .tooltip("Add to queue")
+                                        .ghost()
+                                        .small()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.add_to_queue(add_queue_song.clone());
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    ),
+                            )
+                        }
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         // 单击立即播放该歌曲
                         this.play_song_list(&queue, index);
@@ -3578,7 +3832,7 @@ impl NavidromeApp {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Songs"),
                         )
-                        .child(self.render_song_list(&favorites.songs, cx));
+                        .child(self.render_song_list(&favorites.songs, false, cx));
                 }
 
                 content.into_any_element()
@@ -3770,7 +4024,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Songs"),
                             )
-                            .child(self.render_song_list(&results.songs, cx));
+                            .child(self.render_song_list(&results.songs, false, cx));
                     }
                 }
                 content.into_any_element()
@@ -3821,21 +4075,38 @@ impl NavidromeApp {
                                             ),
                                     ))
                                     .child(
-                                        Button::new("play-album")
-                                            .label("Play album")
-                                            .primary()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let songs = this.state.current_songs.clone();
-                                                if !songs.is_empty() {
-                                                    this.play_song_list(&songs, 0);
-                                                }
-                                                cx.notify();
-                                            })),
+                                        h_flex()
+                                            .gap_2()
+                                            .child(
+                                                Button::new("play-album")
+                                                    .label("Play album")
+                                                    .primary()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let songs =
+                                                            this.state.current_songs.clone();
+                                                        if !songs.is_empty() {
+                                                            this.play_song_list(&songs, 0);
+                                                        }
+                                                        cx.notify();
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("append-album")
+                                                    .icon(AppIcon::Queue)
+                                                    .label("Append all")
+                                                    .outline()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let songs =
+                                                            this.state.current_songs.clone();
+                                                        this.append_all(&songs);
+                                                        cx.notify();
+                                                    })),
+                                            ),
                                     ),
                             ),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(&self.state.current_songs, cx))
+                    .child(self.render_song_list(&self.state.current_songs, false, cx))
                     .into_any_element()
             }
             View::PlaylistDetail => {
@@ -3850,24 +4121,38 @@ impl NavidromeApp {
                         cx,
                     ))
                     .child(
-                        h_flex().child(
-                            Button::new("play-playlist")
-                                .icon(PlayerIcon::Play)
-                                .label("Play all")
-                                .small()
-                                .info()
-                                .outline()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    let songs = this.state.playlist_songs.clone();
-                                    if !songs.is_empty() {
-                                        this.play_song_list(&songs, 0);
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new("play-playlist")
+                                    .icon(PlayerIcon::Play)
+                                    .label("Play all")
+                                    .small()
+                                    .info()
+                                    .outline()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let songs = this.state.playlist_songs.clone();
+                                        if !songs.is_empty() {
+                                            this.play_song_list(&songs, 0);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("append-playlist")
+                                    .icon(AppIcon::Queue)
+                                    .label("Append all")
+                                    .small()
+                                    .outline()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let songs = this.state.playlist_songs.clone();
+                                        this.append_all(&songs);
+                                        cx.notify();
+                                    })),
+                            ),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(&self.state.playlist_songs, cx))
+                    .child(self.render_song_list(&self.state.playlist_songs, false, cx))
                     .into_any_element()
             }
             View::NowPlaying => self.render_now_playing(window, cx),
@@ -3887,7 +4172,48 @@ impl NavidromeApp {
                     )
                 })
                 .when(!self.state.queue.is_empty(), |this| {
-                    this.child(self.render_song_list(&self.state.queue, cx))
+                    this.child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new("queue-play-all")
+                                    .icon(PlayerIcon::Play)
+                                    .label("Play all")
+                                    .small()
+                                    .info()
+                                    .outline()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let songs = this.state.queue.clone();
+                                        if !songs.is_empty() {
+                                            this.play_song_list(&songs, 0);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("queue-clear-after")
+                                    .label("Clear after current")
+                                    .small()
+                                    .outline()
+                                    .disabled(self.state.queue_index.is_none())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_queue_after_current();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("queue-clear-all")
+                                    .icon(AppIcon::Close)
+                                    .label("Clear queue")
+                                    .small()
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_queue();
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(self.render_song_list(&self.state.queue, true, cx))
                 })
                 .into_any_element(),
         }
@@ -5221,8 +5547,8 @@ mod tests {
     use super::{
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
         extract_cover_palette, format_file_size, match_shortcut, normalize_volume,
-        playback_technical_info, readable_accent, restored_volume, seek_target,
-        vinyl_rotation_phase, Shortcut, ShuffleHistory,
+        playback_technical_info, queue_index_after_move, queue_index_after_remove, readable_accent,
+        restored_volume, seek_target, vinyl_rotation_phase, Shortcut, ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality};
     use gpui::Modifiers;
@@ -5331,6 +5657,54 @@ mod tests {
         assert_eq!(advance_index(2, 3, true, true), Some(0));
         assert_eq!(advance_index(0, 3, false, true), Some(2));
         assert_eq!(advance_index(1, 3, true, true), Some(2));
+    }
+
+    #[test]
+    fn removing_item_before_current_shifts_index_down() {
+        assert_eq!(queue_index_after_remove(0, Some(2), 3), Some(1));
+        assert_eq!(queue_index_after_remove(1, Some(4), 4), Some(3));
+    }
+
+    #[test]
+    fn removing_current_falls_back_to_same_slot() {
+        // 删除正在播放的歌曲后，改播原位置的下一首。
+        assert_eq!(queue_index_after_remove(2, Some(2), 2), Some(1));
+        assert_eq!(queue_index_after_remove(1, Some(1), 3), Some(1));
+    }
+
+    #[test]
+    fn removing_last_current_clears_the_queue_index() {
+        assert_eq!(queue_index_after_remove(0, Some(0), 0), None);
+    }
+
+    #[test]
+    fn removing_item_after_current_keeps_index() {
+        assert_eq!(queue_index_after_remove(3, Some(1), 3), Some(1));
+        assert_eq!(queue_index_after_remove(2, None, 3), None);
+    }
+
+    #[test]
+    fn moving_item_before_current_to_after_shifts_index_down() {
+        assert_eq!(queue_index_after_move(0, 3, 2), 1);
+        assert_eq!(queue_index_after_move(1, 3, 2), 1);
+    }
+
+    #[test]
+    fn moving_item_after_current_to_before_shifts_index_up() {
+        assert_eq!(queue_index_after_move(3, 0, 2), 3);
+    }
+
+    #[test]
+    fn moving_current_repositions_the_index() {
+        assert_eq!(queue_index_after_move(2, 0, 2), 0);
+        assert_eq!(queue_index_after_move(0, 3, 0), 3);
+        assert_eq!(queue_index_after_move(2, 3, 2), 3);
+    }
+
+    #[test]
+    fn adjacent_moves_keep_relative_position() {
+        assert_eq!(queue_index_after_move(1, 2, 2), 1);
+        assert_eq!(queue_index_after_move(1, 2, 1), 2);
     }
 
     #[test]
