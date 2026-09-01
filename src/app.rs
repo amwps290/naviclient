@@ -296,6 +296,7 @@ struct AppState {
     albums_page: usize,
     recent_albums: Vec<Album>,
     recent_albums_loading: bool,
+    collapsed_sections: HashSet<String>,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
     current_album: Option<Album>,
@@ -347,6 +348,7 @@ impl Default for AppState {
             albums_page: 0,
             recent_albums: Vec::new(),
             recent_albums_loading: false,
+            collapsed_sections: HashSet::new(),
             current_artist: None,
             artist_albums: Vec::new(),
             current_album: None,
@@ -3860,6 +3862,55 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// Home 页可折叠区块：标题行（点击折叠/展开）+ 内容。后续新增区块只需传入唯一 id 与内容。
+    fn render_home_section(
+        &self,
+        id: &'static str,
+        title: &str,
+        content: gpui::AnyElement,
+        cx: &Context<Self>,
+    ) -> gpui::AnyElement {
+        let collapsed = self.state.collapsed_sections.contains(id);
+        v_flex()
+            .gap_3()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .cursor_pointer()
+                    .id(SharedString::from(format!("home-section-{id}")))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_home_section(id, cx);
+                    }))
+                    .child(
+                        Icon::new(if collapsed {
+                            AppIcon::ChevronRight
+                        } else {
+                            AppIcon::ChevronDown
+                        })
+                        .size(px(16.0))
+                        .text_color(cx.theme().muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title.to_string()),
+                    ),
+            )
+            .when(!collapsed, |this| this.child(content))
+            .into_any_element()
+    }
+
+    fn toggle_home_section(&mut self, id: &'static str, cx: &mut Context<Self>) {
+        if self.state.collapsed_sections.contains(id) {
+            self.state.collapsed_sections.remove(id);
+        } else {
+            self.state.collapsed_sections.insert(id.to_string());
+        }
+        cx.notify();
+    }
+
     fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui::AnyElement {
         if self.state.settings_open {
             return self.render_settings(cx);
@@ -3880,13 +3931,9 @@ impl NavidromeApp {
                     ),
                 )
                 .children(self.error_banner(cx))
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Recently played"),
-                )
-                .child(
+                .child(self.render_home_section(
+                    "recent",
+                    "Recently played",
                     if self.state.recent_albums.is_empty() && self.state.recent_albums_loading {
                         self.render_album_skeleton_grid(cx)
                     } else if self.state.recent_albums.is_empty() {
@@ -3898,14 +3945,11 @@ impl NavidromeApp {
                     } else {
                         self.render_album_grid(&self.state.recent_albums, cx, window)
                     },
-                )
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Newest albums"),
-                )
-                .child(
+                    cx,
+                ))
+                .child(self.render_home_section(
+                    "newest",
+                    "Newest albums",
                     if self.state.albums.is_empty() && self.state.albums_loading {
                         self.render_album_skeleton_grid(cx)
                     } else {
@@ -3921,7 +3965,8 @@ impl NavidromeApp {
                             window,
                         )
                     },
-                )
+                    cx,
+                ))
                 .into_any_element(),
             View::Favorites => {
                 let favorites = &self.state.favorites;
