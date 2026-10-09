@@ -9,13 +9,14 @@ mod models;
 mod msg;
 mod single_instance;
 mod tray;
+mod vinyl;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 
 use anyhow::Context as _;
-use gpui::*;
-use gpui_component::{Root, Theme, ThemeMode, TitleBar};
+use gpui_kit::component::{Theme, ThemeMode, TitleBar};
+use gpui_kit::*;
 
 use crate::models::ThemePreference;
 
@@ -88,33 +89,41 @@ fn main() {
         return;
     }
 
-    Application::new().with_assets(assets::Assets).run(|cx| {
-        gpui_component::init(cx);
-        let theme_preference = config::load().theme;
+    gpui_kit::application()
+        .with_assets(assets::Assets)
+        .run(|cx| {
+            gpui_kit::init(cx);
+            let theme_preference = config::load().theme;
 
-        let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
-            titlebar: Some(TitleBar::title_bar_options()),
-            window_decorations: Some(WindowDecorations::Client),
-            ..Default::default()
-        };
+            let window_options = WindowOptions {
+                window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
+                window_decorations: Some(WindowDecorations::Client),
+                ..TitleBar::window_options()
+            };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                window.activate_window();
-                window.set_window_title("Navidrome Client");
-                match theme_preference {
-                    ThemePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
-                    ThemePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
-                    ThemePreference::System => Theme::sync_system_appearance(Some(window), cx),
-                }
+            cx.spawn(async move |cx| {
+                cx.update(|cx| {
+                    gpui_kit::open_window(window_options, cx, |window, cx| {
+                        window.activate_window();
+                        window.set_window_title("Navidrome Client");
+                        match theme_preference {
+                            ThemePreference::Light => {
+                                Theme::change(ThemeMode::Light, Some(window), cx)
+                            }
+                            ThemePreference::Dark => {
+                                Theme::change(ThemeMode::Dark, Some(window), cx)
+                            }
+                            ThemePreference::System => {
+                                Theme::sync_system_appearance(Some(window), cx)
+                            }
+                        }
 
-                let view = cx.new(|cx| app::NavidromeApp::new(window, cx));
-                cx.new(|cx| Root::new(view, window, cx))
-            })?;
+                        cx.new(|cx| app::NavidromeApp::new(window, cx))
+                    })
+                })?;
 
-            Ok::<_, anyhow::Error>(())
-        })
-        .detach();
-    });
+                Ok::<_, anyhow::Error>(())
+            })
+            .detach();
+        });
 }

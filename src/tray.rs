@@ -1,10 +1,14 @@
 use std::sync::mpsc::Sender;
+#[cfg(target_os = "windows")]
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
+#[cfg(target_os = "windows")]
+use anyhow::{anyhow, Context};
 
 /// 系统托盘菜单触发的播放器命令。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub enum TrayCommand {
     TogglePlayback,
     Previous,
@@ -30,6 +34,7 @@ pub fn start_tray_worker(tx: Sender<TrayCommand>) -> Result<()> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = tx;
         log::warn!("system tray is not implemented on this platform");
         Ok(())
     }
@@ -105,6 +110,7 @@ fn pump_windows_messages() {
 }
 
 /// 生成 32x32 RGBA 托盘图标（使用默认封面图）。
+#[cfg(target_os = "windows")]
 fn tray_icon_rgba() -> Result<Vec<u8>> {
     let bytes = include_bytes!("../assets/default-cover.png");
     let image = image::load_from_memory(bytes)

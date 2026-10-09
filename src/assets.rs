@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use gpui::{AssetSource, SharedString};
-use gpui_component::IconNamed;
+use gpui_kit::component::IconNamed;
+use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 32] = [
+const ICON_FILES: [&str; 33] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -27,6 +27,7 @@ const ICON_FILES: [&str; 32] = [
     "chevron-right.svg",
     "arrow-left.svg",
     "vinyl-highlight.svg",
+    "vinyl-grooves.svg",
     "tonearm.svg",
     "tonearm-shade.svg",
     "tonearm-highlight.svg",
@@ -58,6 +59,7 @@ pub enum AppIcon {
     ChevronDown,
     ArrowLeft,
     VinylHighlight,
+    VinylGrooves,
     Tonearm,
     TonearmShade,
     TonearmHighlight,
@@ -98,6 +100,7 @@ impl IconNamed for AppIcon {
             Self::ChevronDown => "icons/chevron-down.svg",
             Self::ArrowLeft => "icons/arrow-left.svg",
             Self::VinylHighlight => "icons/vinyl-highlight.svg",
+            Self::VinylGrooves => "icons/vinyl-grooves.svg",
             Self::Tonearm => "icons/tonearm.svg",
             Self::TonearmShade => "icons/tonearm-shade.svg",
             Self::TonearmHighlight => "icons/tonearm-highlight.svg",
@@ -163,6 +166,7 @@ impl AssetSource for Assets {
             "icons/vinyl-highlight.svg" => {
                 Some(include_bytes!("../assets/icons/vinyl-highlight.svg"))
             }
+            "icons/vinyl-grooves.svg" => Some(include_bytes!("../assets/icons/vinyl-grooves.svg")),
             "icons/tonearm.svg" => Some(include_bytes!("../assets/icons/tonearm.svg")),
             "icons/tonearm-shade.svg" => Some(include_bytes!("../assets/icons/tonearm-shade.svg")),
             "icons/tonearm-highlight.svg" => {
@@ -180,22 +184,31 @@ impl AssetSource for Assets {
             _ => None,
         };
 
-        Ok(bytes.map(Cow::Borrowed))
+        match bytes {
+            Some(bytes) => Ok(Some(Cow::Borrowed(bytes))),
+            None => gpui_kit::assets::Assets.load(path),
+        }
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        if path == "icons" {
-            Ok(ICON_FILES.into_iter().map(SharedString::from).collect())
-        } else {
-            Ok(Vec::new())
-        }
+        let mut paths = gpui_kit::assets::Assets.list(path)?;
+        paths.extend(
+            ICON_FILES
+                .into_iter()
+                .map(|filename| format!("icons/{filename}"))
+                .filter(|name| name.starts_with(path))
+                .map(SharedString::from),
+        );
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Assets, ICON_FILES};
-    use gpui::AssetSource;
+    use gpui_kit::AssetSource;
 
     #[test]
     fn embeds_all_application_icons() {
@@ -204,5 +217,31 @@ mod tests {
             let icon = Assets.load(&path).expect("asset lookup should succeed");
             assert!(icon.is_some(), "missing embedded asset: {path}");
         }
+    }
+
+    #[test]
+    fn includes_kit_icons_without_replacing_application_icons() {
+        use gpui_kit::assets::IconName;
+
+        let search = IconName::Search.path();
+        assert!(Assets.load(&search).unwrap().is_some());
+        assert_eq!(
+            Assets
+                .load("icons/chevron-down.svg")
+                .unwrap()
+                .unwrap()
+                .as_ref(),
+            include_bytes!("../assets/icons/chevron-down.svg"),
+        );
+        let paths = Assets.list("icons/").unwrap();
+        assert!(paths.contains(&search));
+        assert!(paths.iter().any(|path| path == "icons/vinyl-grooves.svg"));
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| *path == "icons/chevron-down.svg")
+                .count(),
+            1,
+        );
     }
 }

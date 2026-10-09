@@ -7,16 +7,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
-    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, Keystroke,
-    Modifiers, MouseButton, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle,
-    ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled, Subscription,
-    Transformation, Window, WindowControlArea,
-};
-use gpui_component::{
+use gpui_kit::component::{
     box_shadow,
     button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
@@ -26,6 +17,15 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex, window_paddings, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode,
     TitleBar,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
+    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
+    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, Keystroke,
+    Modifiers, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
+    ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
+    StyledImage, Subscription, Transformation, Window, WindowControlArea,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -43,6 +43,7 @@ use crate::models::{
 use crate::msg::{error_message, DecodedCover, Msg};
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
+use crate::vinyl::VinylCover;
 
 // The mini player content target size. On Linux, the client-side window shadow
 // (gpui-component's WindowBorder) pads each edge of the window, so the actual
@@ -445,6 +446,7 @@ pub struct NavidromeApp {
     rx: Receiver<Msg>,
     audio: AudioHandle,
     default_cover: Arc<GpuiImage>,
+    vinyl_cover: VinylCover,
     state: AppState,
     search_input: Entity<InputState>,
     server_input: Entity<InputState>,
@@ -476,6 +478,14 @@ pub struct NavidromeApp {
     restore_size: Option<Size<Pixels>>,
     restore_maximized: bool,
     mini_target_size: Option<Size<Pixels>>,
+}
+
+impl Drop for NavidromeApp {
+    fn drop(&mut self) {
+        // Close the bounded frame channel before Runtime::drop waits for its
+        // blocking worker; otherwise a producer could wait on a full queue.
+        self.vinyl_cover.cancel_pending();
+    }
 }
 
 impl NavidromeApp {
@@ -535,6 +545,7 @@ impl NavidromeApp {
             rx,
             audio,
             default_cover,
+            vinyl_cover: VinylCover::default(),
             state: AppState::default(),
             search_input: search_input.clone(),
             server_input,
@@ -690,27 +701,81 @@ impl NavidromeApp {
             app.state.settings_open = true;
         }
 
-        cx.spawn(async move |this, cx| loop {
-            Timer::after(Duration::from_millis(40)).await;
-            if this
-                .update(cx, |this, cx| {
-                    this.poll_tray_commands();
-                    // 单实例激活信号：显示并置前窗口。
-                    if single_instance::poll_activation() {
-                        if let Some(hwnd) = this.main_hwnd {
-                            show_main_window(hwnd);
+        cx.spawn_in(window, async move |this, cx| {
+            let mut previous_playback = None;
+            let mut playback_dirty = false;
+            let mut last_playback_render = std::time::Instant::now();
+            let mut was_foreground = false;
+            loop {
+                Timer::after(Duration::from_millis(50)).await;
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        let mut changed = this.poll_tray_commands();
+                        // 单实例激活信号：显示并置前窗口。
+                        if single_instance::poll_activation() {
+                            if let Some(hwnd) = this.main_hwnd {
+                                show_main_window(hwnd);
+                            }
                         }
-                    }
-                    this.maybe_save_session();
-                    this.poll_messages();
-                    this.handle_playback_end();
-                    this.maybe_scrobble_current();
-                    this.update_active_lyric();
-                    cx.notify();
-                })
-                .is_err()
-            {
-                break;
+                        this.maybe_save_session();
+                        changed |= this.poll_messages();
+                        this.handle_playback_end();
+                        this.maybe_scrobble_current();
+                        let scrolling = this.lyrics_scroll_target.is_some();
+                        this.update_active_lyric();
+                        changed |= this.vinyl_cover.poll_ready();
+                        let playback = this.audio.state();
+                        let foreground = window.is_visible() && window.is_window_active();
+                        changed |= this.vinyl_cover.tick(
+                            std::time::Instant::now(),
+                            foreground
+                                && this.state.view == View::NowPlaying
+                                && !this.state.settings_open
+                                && !this.mini_mode
+                                && playback.active
+                                && !playback.paused,
+                        );
+                        playback_dirty |= previous_playback.as_ref() != Some(&playback);
+                        let transport_changed = previous_playback.as_ref().is_none_or(
+                            |last: &crate::audio::PlaybackState| {
+                                last.active != playback.active
+                                    || last.paused != playback.paused
+                                    || last.ended != playback.ended
+                                    || last.error != playback.error
+                                    || last.duration != playback.duration
+                            },
+                        );
+                        previous_playback = Some(playback);
+                        if !foreground {
+                            this.vinyl_cover.cancel_pending();
+                        }
+                        // Keep polling messages/audio while idle, but don't redraw the
+                        // whole window for an unchanged or background playback clock.
+                        let interval = if this.state.view == View::NowPlaying
+                            && !this.state.settings_open
+                            && !this.mini_mode
+                        {
+                            Duration::from_millis(50)
+                        } else {
+                            Duration::from_millis(250)
+                        };
+                        if changed
+                            || foreground
+                                && (!was_foreground
+                                    || transport_changed
+                                    || scrolling
+                                    || playback_dirty && last_playback_render.elapsed() >= interval)
+                        {
+                            playback_dirty = false;
+                            last_playback_render = std::time::Instant::now();
+                            cx.notify();
+                        }
+                        was_foreground = foreground;
+                    })
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
@@ -826,8 +891,9 @@ impl NavidromeApp {
         self.maybe_load_visible_song_covers();
 
         // 长列表增量渲染 / 分页：接近底部时追加。
-        let max = self.content_scroll_handle.max_offset().height;
-        let offset = self.content_scroll_handle.offset().y;
+        let max = self.content_scroll_handle.max_offset().y;
+        // GPUI stores the translated content position as a negative offset.
+        let offset = -self.content_scroll_handle.offset().y;
         if max <= px(0.0) || f32::from(max - offset) >= 600.0 {
             return;
         }
@@ -867,10 +933,10 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
-        let offset = f32::from(self.content_scroll_handle.offset().y);
+        let offset = f32::from(-self.content_scroll_handle.offset().y);
         // 内容区 padding 24 + 表头 36 + 行高 60 + 1px 边框
         let row_height = 61.0_f32;
-        let first = ((offset - 60.0) / row_height).max(0.0) as usize;
+        let first = (((offset - 60.0) / row_height).max(0.0) as usize).min(songs.len());
         let last = (first + 40).min(songs.len());
         // 先收集需要加载的封面 id，避免在借用期间修改 self。
         let pending: Vec<String> = songs[first..last]
@@ -1896,8 +1962,10 @@ impl NavidromeApp {
         self.save_session();
     }
 
-    fn poll_tray_commands(&mut self) {
+    fn poll_tray_commands(&mut self) -> bool {
+        let mut changed = false;
         while let Ok(command) = self.tray_rx.try_recv() {
+            changed = true;
             match command {
                 TrayCommand::TogglePlayback => self.toggle_playback(),
                 TrayCommand::Previous => self.skip(-1),
@@ -1915,10 +1983,13 @@ impl NavidromeApp {
                 }
             }
         }
+        changed
     }
 
-    fn poll_messages(&mut self) {
+    fn poll_messages(&mut self) -> bool {
+        let mut changed = false;
         while let Ok(message) = self.rx.try_recv() {
+            changed = true;
             match message {
                 Msg::Ping(result) => {
                     self.state.loading = false;
@@ -2231,6 +2302,7 @@ impl NavidromeApp {
                 }
             }
         }
+        changed
     }
 
     fn handle_playback_end(&mut self) {
@@ -2413,18 +2485,17 @@ impl NavidromeApp {
         cover_id: Option<&str>,
         size: f32,
         _cx: &Context<Self>,
-    ) -> gpui::AnyElement {
-        if let Some(image) = cover_id.and_then(|id| self.state.covers.get(id)) {
-            return img(image.clone())
-                .w(px(size))
-                .h(px(size))
-                .rounded_lg()
-                .into_any_element();
-        }
-        img(self.default_cover.clone())
-            .w(px(size))
-            .h(px(size))
-            .flex_shrink_0()
+    ) -> gpui_kit::AnyElement {
+        let cover = cover_id
+            .and_then(|id| self.state.covers.get(id))
+            .cloned()
+            .unwrap_or_else(|| self.default_cover.clone());
+        img(cover)
+            .size(px(size))
+            // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
+            .aspect_square()
+            .object_fit(ObjectFit::Cover)
+            .flex_none()
             .rounded_lg()
             .into_any_element()
     }
@@ -2435,25 +2506,26 @@ impl NavidromeApp {
         size: f32,
         rotation_phase: f32,
         tonearm_engaged: bool,
-        _cx: &Context<Self>,
-    ) -> gpui::AnyElement {
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let cover = cover_id
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
-        let label_size = size * 0.56;
+        let label_size = size * 0.5;
         let label_offset = (size - label_size) * 0.5;
-        let inner_cover_size = label_size - 16.0;
-        let hole_size = size * 0.05;
-        let tonearm_size = size * 0.82;
-        let tonearm_pivot_x = size * 0.94;
-        let tonearm_pivot_y = size * -0.02;
+        let inner_cover_size = label_size - size * 0.018;
+        let hole_size = size * 0.032;
+        // Each tonearm layer uses (110, 110) in a 220px viewBox as its pivot.
+        let tonearm_size = size * 0.94;
+        let tonearm_pivot_x = size * 0.91;
+        let tonearm_pivot_y = size * 0.015;
         let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
         let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
-        let tonearm_base_size = size * 0.14;
+        let tonearm_base_size = size * 0.105;
         let tonearm_engaged_turns = 28.0 / 360.0;
-        let metal_tint = self.now_playing_accent(_cx);
-        let metal_body = hsla(0.09, 0.05, 0.74, 1.0).blend(metal_tint.opacity(0.12));
+        let metal_tint = self.now_playing_accent(cx);
+        let metal_body = hsla(0.1, 0.025, 0.78, 1.0).blend(metal_tint.opacity(0.06));
         let cover_key = cover_id.unwrap_or("default");
         let tonearm_layer =
             |icon: AppIcon, layer: &'static str, offset_x: f32, offset_y: f32, color: Hsla| {
@@ -2474,15 +2546,7 @@ impl NavidromeApp {
                             } else {
                                 (1.0 - delta) * tonearm_engaged_turns
                             };
-                            let lift = if tonearm_engaged {
-                                -3.5 * (1.0 - delta)
-                            } else {
-                                -3.5 * delta
-                            };
-                            icon.transform(
-                                Transformation::rotate(percentage(rotation))
-                                    .with_translation(point(px(0.0), px(lift))),
-                            )
+                            icon.transform(Transformation::rotate(percentage(rotation)))
                         },
                     )
             };
@@ -2496,55 +2560,46 @@ impl NavidromeApp {
             .justify_center()
             .rounded_full()
             .border_1()
-            .border_color(hsla(0.1, 0.08, 0.42, 0.66))
+            .border_color(hsla(0.1, 0.025, 0.42, 0.5))
             .bg(linear_gradient(
                 132.0,
-                linear_color_stop(hsla(0.1, 0.08, 0.94, 1.0), 0.0),
+                linear_color_stop(hsla(0.1, 0.025, 0.86, 1.0), 0.0),
                 linear_color_stop(
-                    hsla(0.1, 0.05, 0.4, 1.0).blend(metal_tint.opacity(0.08)),
+                    hsla(0.1, 0.025, 0.48, 1.0).blend(metal_tint.opacity(0.06)),
                     1.0,
                 ),
             ))
-            .shadow(vec![
-                box_shadow(
-                    px(0.0),
-                    px(5.0),
-                    px(12.0),
-                    px(-2.0),
-                    hsla(0.0, 0.0, 0.0, 0.34),
-                ),
-                box_shadow(
-                    px(-2.0),
-                    px(-2.0),
-                    px(7.0),
-                    px(-2.0),
-                    hsla(0.0, 0.0, 1.0, 0.22),
-                ),
-            ])
+            .shadow(vec![box_shadow(
+                px(0.0),
+                px(size * 0.006),
+                px(size * 0.018),
+                px(-1.0),
+                hsla(0.0, 0.0, 0.0, 0.24),
+            )])
             .child(
                 div()
-                    .size(px(tonearm_base_size * 0.7))
+                    .size(px(tonearm_base_size * 0.72))
                     .flex()
                     .items_center()
                     .justify_center()
                     .rounded_full()
                     .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, 0.32))
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.24))
                     .bg(linear_gradient(
                         145.0,
-                        linear_color_stop(hsla(0.1, 0.04, 0.62, 1.0), 0.0),
-                        linear_color_stop(hsla(0.1, 0.04, 0.28, 1.0), 1.0),
+                        linear_color_stop(hsla(0.1, 0.025, 0.42, 1.0), 0.0),
+                        linear_color_stop(hsla(0.1, 0.025, 0.22, 1.0), 1.0),
                     ))
                     .child(
                         div()
-                            .size(px(tonearm_base_size * 0.34))
+                            .size(px(tonearm_base_size * 0.28))
                             .rounded_full()
                             .border_1()
-                            .border_color(metal_tint.opacity(0.28))
+                            .border_color(hsla(0.0, 0.0, 1.0, 0.2))
                             .bg(linear_gradient(
                                 135.0,
-                                linear_color_stop(hsla(0.1, 0.05, 0.9, 1.0), 0.0),
-                                linear_color_stop(hsla(0.1, 0.05, 0.5, 1.0), 1.0),
+                                linear_color_stop(hsla(0.1, 0.025, 0.82, 1.0), 0.0),
+                                linear_color_stop(hsla(0.1, 0.025, 0.56, 1.0), 1.0),
                             )),
                     ),
             );
@@ -2553,26 +2608,16 @@ impl NavidromeApp {
             .top_0()
             .left_0()
             .with_size(px(size))
-            .text_color(hsla(0.0, 0.0, 1.0, 0.13))
+            .text_color(hsla(0.0, 0.0, 1.0, 0.2))
             .transform(Transformation::rotate(percentage(rotation_phase)));
 
-        let grooves: Vec<gpui::AnyElement> = (0..9)
-            .map(|i| {
-                let radius = 0.24 + i as f32 * 0.028;
-                let inset = (0.5 - radius) * size;
-                let diameter = radius * 2.0 * size;
-                let opacity = 0.085 - i as f32 * 0.006;
-                div()
-                    .absolute()
-                    .top(px(inset))
-                    .left(px(inset))
-                    .size(px(diameter))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, opacity))
-                    .into_any_element()
-            })
-            .collect();
+        // GPUI caches the SVG mask at this size; denser grooves still use one sprite.
+        let grooves = Icon::new(AppIcon::VinylGrooves)
+            .absolute()
+            .top_0()
+            .left_0()
+            .with_size(px(size))
+            .text_color(hsla(0.0, 0.0, 1.0, 0.12));
 
         div()
             .relative()
@@ -2582,10 +2627,25 @@ impl NavidromeApp {
             .rounded_full()
             .bg(linear_gradient(
                 132.0,
-                linear_color_stop(hsla(0.0, 0.0, 0.155, 1.0), 0.0),
-                linear_color_stop(hsla(0.0, 0.0, 0.02, 1.0), 1.0),
+                linear_color_stop(hsla(0.0, 0.0, 0.115, 1.0), 0.0),
+                linear_color_stop(hsla(0.0, 0.0, 0.025, 1.0), 1.0),
             ))
-            .shadow_md()
+            .shadow(vec![
+                box_shadow(
+                    px(0.0),
+                    px(size * 0.008),
+                    px(size * 0.015),
+                    px(0.0),
+                    hsla(0.0, 0.0, 0.0, 0.32),
+                ),
+                box_shadow(
+                    px(0.0),
+                    px(size * 0.035),
+                    px(size * 0.08),
+                    px(-size * 0.015),
+                    hsla(0.0, 0.0, 0.0, 0.2),
+                ),
+            ])
             .child(
                 div()
                     .absolute()
@@ -2597,13 +2657,13 @@ impl NavidromeApp {
             .child(
                 div()
                     .absolute()
-                    .inset(px(1.5))
+                    .inset(px(size * 0.006))
                     .rounded_full()
                     .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, 0.05)),
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.09)),
             )
-            .children(grooves)
             .child(highlight)
+            .child(grooves)
             .child(
                 div()
                     .absolute()
@@ -2613,34 +2673,61 @@ impl NavidromeApp {
                     .rounded_full()
                     .border_1()
                     .border_color(hsla(0.0, 0.0, 1.0, 0.14))
-                    .bg(hsla(0.0, 0.0, 0.08, 1.0))
+                    .bg(linear_gradient(
+                        132.0,
+                        linear_color_stop(
+                            hsla(0.0, 0.0, 0.12, 1.0).blend(metal_tint.opacity(0.12)),
+                            0.0,
+                        ),
+                        linear_color_stop(hsla(0.0, 0.0, 0.035, 1.0), 1.0),
+                    ))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(img(cover).size(px(inner_cover_size)).rounded_full())
+                    .child(
+                        self.vinyl_cover
+                            .render(inner_cover_size, rotation_phase)
+                            .unwrap_or_else(|| {
+                                img(cover)
+                                    .size(px(inner_cover_size))
+                                    .aspect_square()
+                                    .object_fit(ObjectFit::Cover)
+                                    .flex_none()
+                                    .rounded_full()
+                                    .into_any_element()
+                            }),
+                    )
                     .child(
                         div()
                             .absolute()
+                            .top(px((label_size - hole_size) * 0.5))
+                            .left(px((label_size - hole_size) * 0.5))
                             .size(px(hole_size))
                             .rounded_full()
-                            .bg(hsla(0.0, 0.0, 0.02, 1.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(linear_gradient(
+                                132.0,
+                                linear_color_stop(hsla(0.0, 0.0, 0.62, 1.0), 0.0),
+                                linear_color_stop(hsla(0.0, 0.0, 0.14, 1.0), 1.0),
+                            ))
                             .border_1()
-                            .border_color(hsla(0.0, 0.0, 1.0, 0.06)),
+                            .border_color(hsla(0.0, 0.0, 0.0, 0.65))
+                            .child(
+                                div()
+                                    .size(px(size * 0.012))
+                                    .rounded_full()
+                                    .bg(hsla(0.0, 0.0, 0.025, 1.0)),
+                            ),
                     ),
             )
             .child(tonearm_layer(
                 AppIcon::Tonearm,
-                "shadow-soft",
-                6.0,
-                8.0,
-                hsla(0.0, 0.0, 0.0, 0.22),
-            ))
-            .child(tonearm_layer(
-                AppIcon::Tonearm,
                 "shadow-close",
-                3.0,
-                4.2,
-                hsla(0.0, 0.0, 0.0, 0.4),
+                size * 0.005,
+                size * 0.008,
+                hsla(0.0, 0.0, 0.0, 0.24),
             ))
             .child(tonearm_layer(
                 AppIcon::Tonearm,
@@ -2654,7 +2741,7 @@ impl NavidromeApp {
                 "shade",
                 0.0,
                 0.0,
-                hsla(0.1, 0.06, 0.25, 0.48),
+                hsla(0.1, 0.025, 0.12, 0.94),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmHighlight,
@@ -2666,9 +2753,9 @@ impl NavidromeApp {
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
                 "stylus-shadow",
-                1.2,
-                1.8,
-                hsla(0.0, 0.0, 0.0, 0.38),
+                size * 0.005,
+                size * 0.008,
+                hsla(0.0, 0.0, 0.0, 0.24),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
@@ -2686,7 +2773,7 @@ impl NavidromeApp {
         title: impl Into<SharedString>,
         subtitle: impl Into<SharedString>,
         cx: &Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         v_flex()
             .gap_1()
             .child(
@@ -2710,7 +2797,7 @@ impl NavidromeApp {
         viewport_width: f32,
         id: SharedString,
         window: &mut Window,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         self.render_scrolling_text(
             text,
             viewport_width,
@@ -2729,7 +2816,7 @@ impl NavidromeApp {
         weight: FontWeight,
         id: SharedString,
         window: &mut Window,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         let text_style = window.text_style().highlight(weight);
         let text_width = {
             let cache = self.title_width_cache.borrow();
@@ -2810,7 +2897,7 @@ impl NavidromeApp {
         albums: &[Album],
         cx: &Context<Self>,
         window: &mut Window,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         let grid_start = std::time::Instant::now();
         let grid =
             h_flex()
@@ -2934,7 +3021,7 @@ impl NavidromeApp {
     }
 
     /// 专辑网格骨架屏：数据加载期间占位，避免空页面跳动。
-    fn render_album_skeleton_grid(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_album_skeleton_grid(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let muted = cx.theme().muted_foreground;
         h_flex()
             .items_start()
@@ -2971,7 +3058,7 @@ impl NavidromeApp {
     }
 
     /// 列表行骨架屏：播放列表 / 歌曲列表加载期间占位。
-    fn render_list_skeleton(&self, rows: usize, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_list_skeleton(&self, rows: usize, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let muted = cx.theme().muted_foreground;
         v_flex()
             .gap_2()
@@ -3012,7 +3099,7 @@ impl NavidromeApp {
     }
 
     /// 艺术家封面网格骨架屏：与 artist 页的圆角方形封面一致。
-    fn render_artist_skeleton_grid(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_artist_skeleton_grid(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let muted = cx.theme().muted_foreground;
         h_flex()
             .items_start()
@@ -3046,7 +3133,7 @@ impl NavidromeApp {
         artists: &[Artist],
         cx: &Context<Self>,
         window: &mut Window,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         h_flex()
             .items_start()
             .flex_wrap()
@@ -3165,7 +3252,7 @@ impl NavidromeApp {
         current: bool,
         animated: bool,
         cx: &Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         if !current {
             if self.state.hovered_item.as_deref() == Some(song_id) {
                 return Icon::new(PlayerIcon::Play)
@@ -3216,7 +3303,7 @@ impl NavidromeApp {
         songs: &[Song],
         editable: bool,
         cx: &Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         // 增量渲染：只渲染前 song_rows_visible 行，滚动时逐批追加，避免长列表一次重建。
         let visible = self.state.song_rows_visible.min(songs.len());
         let songs = &songs[..visible];
@@ -3480,7 +3567,7 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_server_status_card(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let status_label = if self.state.loading {
             "Connecting..."
         } else if self.state.server.is_some() {
@@ -3669,7 +3756,7 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_settings(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let cache_dir = config::audio_cache_dir(&self.config);
         v_flex()
             .w_full()
@@ -3862,7 +3949,7 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn error_banner(&self, cx: &Context<Self>) -> Option<gpui::AnyElement> {
+    fn error_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
         self.state.error.as_ref().map(|message| {
             div()
                 .p_3()
@@ -3874,7 +3961,7 @@ impl NavidromeApp {
         })
     }
 
-    fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let Some(song) = &self.state.now_playing else {
             return v_flex()
                 .size_full()
@@ -4018,7 +4105,7 @@ impl NavidromeApp {
                 .into_any_element()
         };
 
-        let rotation_phase = vinyl_rotation_phase(playback.position);
+        let rotation_phase = self.vinyl_cover.phase();
         h_flex()
             .size_full()
             .min_h_0()
@@ -4099,9 +4186,9 @@ impl NavidromeApp {
         &self,
         id: &'static str,
         title: &str,
-        content: gpui::AnyElement,
+        content: gpui_kit::AnyElement,
         cx: &Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         let collapsed = self.state.collapsed_sections.contains(id);
         v_flex()
             .gap_3()
@@ -4142,7 +4229,7 @@ impl NavidromeApp {
         empty_text: &str,
         cx: &Context<Self>,
         window: &mut Window,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         if albums.is_empty() && loading {
             self.render_album_skeleton_grid(cx)
         } else if albums.is_empty() {
@@ -4165,7 +4252,7 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
         if self.state.settings_open {
             return self.render_settings(cx);
         }
@@ -4678,7 +4765,7 @@ impl NavidromeApp {
         }
     }
 
-    fn render_mini(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_mini(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let theme = cx.theme().clone();
         let song = self.state.now_playing.clone();
         let has_track = song.is_some();
@@ -4703,7 +4790,6 @@ impl NavidromeApp {
         let play_button_style = ButtonCustomVariant::new(cx)
             .color(accent)
             .foreground(accent_fg)
-            .border(accent)
             .hover(adjust_lightness(accent, 0.05))
             .active(adjust_lightness(accent, -0.05))
             .shadow(true);
@@ -4725,8 +4811,9 @@ impl NavidromeApp {
             .unwrap_or_else(|| "Choose a song from your library.".to_string());
 
         let cover_element = img(cover)
-            .w(px(26.0))
-            .h(px(26.0))
+            .size(px(26.0))
+            .aspect_square()
+            .object_fit(ObjectFit::Cover)
             .flex_none()
             .rounded_md()
             .cursor_pointer()
@@ -4907,14 +4994,13 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_player(&self, cx: &Context<Self>) -> gpui::AnyElement {
+    fn render_player(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let playback = self.audio.state();
         let accent = self.now_playing_accent(cx);
         let accent_foreground = accent_foreground(accent);
         let play_button_style = ButtonCustomVariant::new(cx)
             .color(accent)
             .foreground(accent_foreground)
-            .border(accent)
             .hover(adjust_lightness(accent, 0.05))
             .active(adjust_lightness(accent, -0.05))
             .shadow(true);
@@ -5321,6 +5407,23 @@ impl NavidromeApp {
 impl Render for NavidromeApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let playback = self.audio.state();
+        let cover = self
+            .state
+            .now_playing
+            .as_ref()
+            .and_then(|song| song.cover_art.as_ref())
+            .and_then(|id| self.state.covers.get(id))
+            .cloned()
+            .unwrap_or_else(|| self.default_cover.clone());
+        let animate_cover = self.state.view == View::NowPlaying
+            && !self.mini_mode
+            && !self.state.settings_open
+            && playback.active
+            && !playback.paused
+            && window.is_visible()
+            && window.is_window_active();
+        self.vinyl_cover
+            .prepare(cover, animate_cover, &self.runtime, window);
         let progress = playback
             .duration
             .filter(|duration| !duration.is_zero())
@@ -5420,7 +5523,9 @@ impl Render for NavidromeApp {
                 .theme()
                 .title_bar_border
                 .blend(cover_accent.opacity(0.34));
-            let background_animation = Animation::new(Duration::from_secs(22)).repeat();
+            // Reuse the playback tick instead of requesting display-rate frames
+            // for a page-wide gradient (including while paused).
+            let background_angle = 120.0 + (playback.position.as_secs_f32() / 22.0).fract() * 360.0;
 
             return v_flex()
                 .size_full()
@@ -5483,17 +5588,11 @@ impl Render for NavidromeApp {
                         .child(self.render_now_playing(window, cx)),
                 )
                 .child(self.render_player(cx))
-                .with_animation(
-                    "now-playing-background",
-                    background_animation,
-                    move |this, delta| {
-                        this.bg(linear_gradient(
-                            120.0 + delta * 360.0,
-                            linear_color_stop(background_start, 0.0),
-                            linear_color_stop(background_end, 1.0),
-                        ))
-                    },
-                )
+                .bg(linear_gradient(
+                    background_angle,
+                    linear_color_stop(background_start, 0.0),
+                    linear_color_stop(background_end, 1.0),
+                ))
                 .into_any_element();
         }
 
@@ -5717,7 +5816,7 @@ fn technical_info_chip(
     label: String,
     color: Hsla,
     cx: &Context<NavidromeApp>,
-) -> gpui::AnyElement {
+) -> gpui_kit::AnyElement {
     div()
         .id(id)
         .h(px(20.0))
@@ -5904,10 +6003,6 @@ pub(crate) fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
     color
 }
 
-fn vinyl_rotation_phase(position: Duration) -> f32 {
-    (position.as_secs_f32() / 18.0).fract()
-}
-
 fn rgb_to_hsla(red: f32, green: f32, blue: f32) -> Hsla {
     let max = red.max(green).max(blue);
     let min = red.min(green).min(blue);
@@ -6001,17 +6096,17 @@ fn gpui_image_format(format: image::ImageFormat) -> Option<GpuiImageFormat> {
 mod tests {
     use std::time::Duration;
 
-    use gpui::hsla;
+    use gpui_kit::hsla;
 
     use super::{
         accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
         extract_cover_palette, format_file_size, loudness_gain_factor, match_shortcut,
         normalize_volume, playback_technical_info, queue_index_after_move,
         queue_index_after_remove, readable_accent, replay_gain_factor, restored_volume,
-        seek_target, should_scrobble, vinyl_rotation_phase, Shortcut, ShuffleHistory,
+        seek_target, should_scrobble, Shortcut, ShuffleHistory,
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
-    use gpui::Modifiers;
+    use gpui_kit::Modifiers;
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
@@ -6028,13 +6123,6 @@ mod tests {
         let accent = hsla(0.12, 0.7, 0.72, 1.0);
         let foreground = accent_foreground(accent);
         assert!(contrast_ratio(foreground, accent) >= 4.5);
-    }
-
-    #[test]
-    fn vinyl_rotation_tracks_playback_position() {
-        assert!((vinyl_rotation_phase(Duration::from_millis(4_500)) - 0.25).abs() < f32::EPSILON);
-        assert!((vinyl_rotation_phase(Duration::from_millis(22_500)) - 0.25).abs() < f32::EPSILON);
-        assert!((vinyl_rotation_phase(Duration::from_millis(13_500)) - 0.75).abs() < f32::EPSILON);
     }
 
     #[test]

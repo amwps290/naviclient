@@ -34,7 +34,7 @@ const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 type SharedStreamError = Arc<Mutex<Option<String>>>;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlaybackState {
     pub active: bool,
     pub paused: bool,

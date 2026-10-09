@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="0.55">
+  <g opacity="0.55">
+    <circle cx="128" cy="128" r="70"/>
+    <circle cx="128" cy="128" r="72"/>
+    <circle cx="128" cy="128" r="74"/>
+    <circle cx="128" cy="128" r="76"/>
+    <circle cx="128" cy="128" r="78"/>
+    <circle cx="128" cy="128" r="80"/>
+  </g>
+  <g opacity="0.42">
+    <circle cx="128" cy="128" r="84"/>
+    <circle cx="128" cy="128" r="86"/>
+    <circle cx="128" cy="128" r="88"/>
+    <circle cx="128" cy="128" r="90"/>
+    <circle cx="128" cy="128" r="92"/>
+    <circle cx="128" cy="128" r="94"/>
+  </g>
+  <g opacity="0.55">
+    <circle cx="128" cy="128" r="98"/>
+    <circle cx="128" cy="128" r="100"/>
+    <circle cx="128" cy="128" r="102"/>
+    <circle cx="128" cy="128" r="104"/>
+    <circle cx="128" cy="128" r="106"/>
+    <circle cx="128" cy="128" r="108"/>
+  </g>
+  <g opacity="0.38">
+    <circle cx="128" cy="128" r="112"/>
+    <circle cx="128" cy="128" r="114"/>
+    <circle cx="128" cy="128" r="116"/>
+    <circle cx="128" cy="128" r="118"/>
+    <circle cx="128" cy="128" r="120"/>
+    <circle cx="128" cy="128" r="122"/>
+  </g>
+  <circle cx="128" cy="128" r="66.5" stroke-width="0.7" opacity="0.32"/>
+</svg>

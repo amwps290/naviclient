@@ -1,6 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-linecap="round">
-  <path d="M45 98A90 90 0 0 1 103 43" stroke-width="3" opacity="0.58"/>
-  <path d="M54 118A76 76 0 0 1 110 54" stroke-width="2" opacity="0.34"/>
-  <path d="M211 151A88 88 0 0 1 164 207" stroke-width="4" opacity="0.46"/>
-  <path d="M197 146A73 73 0 0 1 160 193" stroke-width="2" opacity="0.28"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="white" stop-opacity="0"/>
+      <stop offset="0.28" stop-color="white" stop-opacity="0.04"/>
+      <stop offset="0.46" stop-color="white" stop-opacity="0.24"/>
+      <stop offset="0.54" stop-color="white" stop-opacity="0.48"/>
+      <stop offset="0.65" stop-color="white" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="playing-surface">
+      <path clip-rule="evenodd" d="M128 5a123 123 0 1 0 0 246a123 123 0 1 0 0-246M128 61a67 67 0 1 1 0 134a67 67 0 1 1 0-134"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#playing-surface)">
+    <rect x="73" y="-52" width="110" height="360" fill="url(#sheen)" transform="rotate(-38 128 128)"/>
+  </g>
 </svg>

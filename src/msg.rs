@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gpui::{Hsla, Image as GpuiImage};
+use gpui_kit::{Hsla, Image as GpuiImage};
 
 use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Lyrics, Playlist, SearchResults, ServerInfo, Song,

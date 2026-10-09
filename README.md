@@ -1,7 +1,8 @@
 # Navidrome Client
 
 A native Rust GUI client for [Navidrome](https://www.navidrome.org) using the
-Subsonic API. It uses `GPUI` and `gpui-component` for the interface and
+Subsonic API. It uses the official [`gpui-kit`](https://github.com/longbridge/gpui-kit)
+framework for the interface and
 `rodio` for audio playback, so there is no Tauri, Flutter, WebView, or
 JavaScript runtime.
 
@@ -29,6 +30,13 @@ JavaScript runtime.
   locally measured loudness when the server provides no ReplayGain metadata
 - Double-click song playback with highlighted and animated now-playing rows
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
+- Rotating vinyl cover art while the lyrics page is playing in the foreground;
+  pauses at the current angle and reuses cached textures at up to 20 fps.
+  Only the current cover is cached (180 frames at 192×192, about 25 MiB of
+  pixels plus GPU atlas storage); preparation runs once in a throttled background
+  worker, delivering the next visible frames first so rotation starts without
+  waiting for the full cache. Its resolution is capped on high-DPI displays to
+  keep memory bounded.
 - Mini-player mode that shrinks the main window into a compact, always-on-top
   widget with cover art, song title, prev/next/play controls, a thin bottom
   progress line, and a dynamic cover-colored animated background
@@ -40,14 +48,18 @@ JavaScript runtime.
 
 ## Build and Run
 
+Use a recent stable Rust toolchain (verified with Rust 1.96.1). The UI depends
+on `gpui-kit` 0.7.1, which supplies matching GPUI, platform, component and icon
+crates. `Cargo.lock` pins the complete dependency set.
+
 ```bash
-cargo run
+cargo run --locked
 ```
 
 For a release build:
 
 ```bash
-cargo build --release
+cargo build --release --locked
 ```
 
 The first launch opens Server Settings automatically. Enter the Navidrome
@@ -79,9 +91,14 @@ commit whenever a milestone is finished.
 
 ## Architecture
 
+UI code imports GPUI through `gpui_kit` and styled components through
+`gpui_kit::component`. Kit initializes the platform and window root; the
+application asset source combines custom player icons with Kit's built-in icons.
+
 - `src/api.rs` - Subsonic API client, authentication, and JSON models parsing
 - `src/audio.rs` - background audio worker using `rodio`
 - `src/app.rs` - GPUI application state, navigation, library views, and player
+- `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
 - `src/models.rs` - shared API data structures
 - `src/config.rs` - persisted server settings
 - `src/msg.rs` - background task results delivered to the UI

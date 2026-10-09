@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
-  <path d="M113 103C126 107 137 124 147 149C153 166 159 180 168 189L162 196C154 188 147 172 140 152C133 129 124 111 110 108C108 107 109 101 113 103Z"/>
-  <path d="M168 189L179 195C181 196 181 198 179 199L165 197Z"/>
-  <path d="M179 195L169 207L165 200Z"/>
+  <path d="M110 110L128 174Q130 180 130 185" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+  <g transform="rotate(-28 130 187)">
+    <rect x="124" y="183" width="12" height="23" rx="2.4"/>
+  </g>
 </svg>
