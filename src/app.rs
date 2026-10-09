@@ -35,6 +35,7 @@ use crate::api::{format_duration, Api};
 use crate::assets::{AppIcon, PlayerIcon};
 use crate::audio::{format_playback, AudioHandle};
 use crate::config;
+use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode,
     PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
@@ -52,6 +53,10 @@ use crate::vinyl::VinylCover;
 const MINI_WINDOW_WIDTH: Pixels = px(200.0);
 const MINI_WINDOW_HEIGHT: Pixels = px(50.0);
 const ALBUM_PAGE_SIZE: usize = 100;
+
+fn item_instance_key(scope: &str, kind: &str, index: usize, id: &str) -> String {
+    format!("{scope}/{kind}/{index}/{id}")
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum View {
@@ -430,7 +435,7 @@ impl Default for AppState {
             view_before_now_playing: View::Home,
             playback_mode: PlaybackMode::default(),
             shuffle_history: ShuffleHistory::default(),
-            ended_handled: false,
+            ended_handled: true,
             now_playing_reported: None,
             scrobbled_song_id: None,
             loudness_cache: HashMap::new(),
@@ -445,6 +450,7 @@ pub struct NavidromeApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     audio: AudioHandle,
+    media_session: MediaSession,
     default_cover: Arc<GpuiImage>,
     vinyl_cover: VinylCover,
     state: AppState,
@@ -494,6 +500,7 @@ impl NavidromeApp {
         let api = Api::new(&config.server_url, &config.username, &config.password).ok();
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
+        let media_session = MediaSession::new(runtime.handle());
         let audio_cache_dir = config::audio_cache_dir(&config);
         let audio = AudioHandle::start(audio_cache_dir).expect("failed to start audio worker");
         let default_cover = Arc::new(GpuiImage::from_bytes(
@@ -544,6 +551,7 @@ impl NavidromeApp {
             tx,
             rx,
             audio,
+            media_session,
             default_cover,
             vinyl_cover: VinylCover::default(),
             state: AppState::default(),
@@ -711,6 +719,7 @@ impl NavidromeApp {
                 if this
                     .update_in(cx, |this, window, cx| {
                         let mut changed = this.poll_tray_commands();
+                        changed |= this.poll_media_commands(window, cx);
                         // 单实例激活信号：显示并置前窗口。
                         if single_instance::poll_activation() {
                             if let Some(hwnd) = this.main_hwnd {
@@ -725,6 +734,7 @@ impl NavidromeApp {
                         this.update_active_lyric();
                         changed |= this.vinyl_cover.poll_ready();
                         let playback = this.audio.state();
+                        this.sync_media_session(&playback);
                         let foreground = window.is_visible() && window.is_window_active();
                         changed |= this.vinyl_cover.tick(
                             std::time::Instant::now(),
@@ -1256,9 +1266,14 @@ impl NavidromeApp {
     }
 
     fn play_queue_index(&mut self, index: usize) {
+        self.play_queue_index_at(index, Duration::ZERO);
+    }
+
+    fn play_queue_index_at(&mut self, index: usize, start_position: Duration) {
         let Some(song) = self.state.queue.get(index).cloned() else {
             return;
         };
+        self.resume_position = None;
         log::info!(
             "queue playback selected; index={index} song_id={} title={:?} suffix={:?} declared_bytes={:?}",
             song.id,
@@ -1307,7 +1322,8 @@ impl NavidromeApp {
                     song.replay_gain_album_gain,
                     self.state.loudness_cache.get(&song.id).copied(),
                 );
-                self.audio.play(url, cache_key, duration, gain);
+                self.audio
+                    .play(url, cache_key, duration, gain, start_position);
                 self.report_now_playing(&song);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
@@ -1623,17 +1639,15 @@ impl NavidromeApp {
                 self.audio.pause()
             }
         } else if let Some(index) = self.state.queue_index {
-            self.play_queue_index(index);
-            // 会话恢复后首次播放：从上次保存的位置继续。
-            if let Some(position) = self.resume_position.take() {
-                self.audio.seek(position);
-            }
+            let position = self.resume_position.take().unwrap_or_default();
+            self.play_queue_index_at(index, position);
         }
     }
 
     #[allow(dead_code)]
     pub fn stop_playback(&mut self) {
         self.audio.stop();
+        self.resume_position = None;
         self.state.now_playing = None;
         self.state.now_playing_quality = None;
         self.state.lyrics = None;
@@ -1641,6 +1655,162 @@ impl NavidromeApp {
         self.state.lyrics_loading = false;
         self.state.lyrics_error = None;
         self.state.ended_handled = true;
+    }
+
+    fn media_capabilities(&self) -> (bool, bool, bool) {
+        let Some(index) = self
+            .state
+            .queue_index
+            .filter(|i| *i < self.state.queue.len())
+        else {
+            return (false, false, false);
+        };
+        let can_play = self.api.is_some();
+        let wraps = matches!(
+            self.state.playback_mode,
+            PlaybackMode::RepeatAll | PlaybackMode::RepeatOne
+        );
+        let (next, previous) = if self.state.playback_mode == PlaybackMode::Shuffle {
+            (true, self.state.shuffle_history.played.len() > 1)
+        } else {
+            (
+                advance_index(index, self.state.queue.len(), true, wraps).is_some(),
+                advance_index(index, self.state.queue.len(), false, wraps).is_some(),
+            )
+        };
+        (can_play, can_play && next, can_play && previous)
+    }
+
+    fn sync_media_session(&mut self, playback: &crate::audio::PlaybackState) {
+        let (can_play, can_next, can_previous) = self.media_capabilities();
+        let song = self.state.now_playing.as_ref();
+        let cover = song
+            .and_then(|song| song.cover_art.as_ref())
+            .and_then(|id| self.state.covers.get(id));
+        self.media_session.update(MediaUpdate {
+            server: self.api.as_ref().map_or("", |api| api.base_url()),
+            song,
+            cover,
+            playback,
+            position: self.resume_position.unwrap_or(playback.position),
+            volume: effective_volume(self.config.volume, self.muted),
+            can_play,
+            can_next,
+            can_previous,
+        });
+    }
+
+    fn media_seek(&mut self, position: Duration) {
+        if self.audio.state().active {
+            self.audio.seek(position);
+        } else if self.state.now_playing.is_some() {
+            // Seeking a restored, paused session must not start audio playback.
+            self.resume_position = Some(position);
+            self.media_session.restored_position_changed();
+        }
+    }
+
+    fn poll_media_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        // Maintain intent across a batch, even before the audio worker consumes
+        // it. Repeated Play/Pause commands are idempotent, unlike PlayPause.
+        let playback = self.audio.state();
+        let mut active = playback.active;
+        let mut paused = playback.paused;
+        for _ in 0..32 {
+            let Some(command) = self.media_session.next_command() else {
+                break;
+            };
+            changed = true;
+            match command {
+                MediaCommand::Play | MediaCommand::Pause | MediaCommand::PlayPause => {
+                    let play = match command {
+                        MediaCommand::Play => true,
+                        MediaCommand::Pause => false,
+                        _ => !active || paused,
+                    };
+                    if play && self.media_capabilities().0 {
+                        if active {
+                            if paused {
+                                self.audio.resume();
+                            }
+                        } else if let Some(index) = self.state.queue_index {
+                            let position = self.resume_position.take().unwrap_or_default();
+                            self.play_queue_index_at(index, position);
+                            active = true;
+                        }
+                        paused = false;
+                    } else if !play && active && !paused {
+                        self.audio.pause();
+                        paused = true;
+                    }
+                }
+                MediaCommand::Stop => {
+                    self.stop_playback();
+                    active = false;
+                    paused = false;
+                }
+                MediaCommand::Next | MediaCommand::Previous => {
+                    let next = matches!(command, MediaCommand::Next);
+                    let (_, can_next, can_previous) = self.media_capabilities();
+                    if (next && can_next) || (!next && can_previous) {
+                        self.skip(if next { 1 } else { -1 });
+                        active = true;
+                        paused = false;
+                    }
+                }
+                MediaCommand::Seek(offset) => {
+                    if self.state.now_playing.is_some() {
+                        let playback = self.audio.state();
+                        let position = self.resume_position.unwrap_or(playback.position);
+                        let duration = playback.duration.or_else(|| {
+                            self.state
+                                .now_playing
+                                .as_ref()
+                                .and_then(|song| song.duration)
+                                .map(|v| Duration::from_secs(v.max(0) as u64))
+                        });
+                        if offset > 0
+                            && duration.is_some_and(|limit| {
+                                position.saturating_add(Duration::from_micros(offset as u64))
+                                    > limit
+                            })
+                        {
+                            self.skip(1);
+                        } else {
+                            self.media_seek(media_session::seek_offset(position, offset, duration));
+                        }
+                    }
+                }
+                MediaCommand::SetPosition { track_id, position } => {
+                    if let Some(song) = self.state.now_playing.as_ref() {
+                        let server = self.api.as_ref().map_or("", |api| api.base_url());
+                        let duration = self.audio.state().duration.or_else(|| {
+                            song.duration.map(|v| Duration::from_secs(v.max(0) as u64))
+                        });
+                        if media_session::track_id(server, &song.id) == track_id
+                            && duration.is_none_or(|limit| position <= limit)
+                        {
+                            self.media_seek(position);
+                        }
+                    }
+                }
+                MediaCommand::Volume(volume) => {
+                    self.volume_slider.update(cx, |slider, cx| {
+                        slider.set_value(volume * 100.0, window, cx)
+                    });
+                    self.set_volume(volume, cx);
+                }
+                MediaCommand::Raise => window.activate_window(),
+                MediaCommand::Quit => {
+                    self.save_session();
+                    self.quitting.store(true, Ordering::Relaxed);
+                    cx.quit();
+                    break;
+                }
+            }
+        }
+        changed
     }
 
     fn enter_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1815,6 +1985,7 @@ impl NavidromeApp {
         }
         self.audio.stop();
         self.state = AppState::default();
+        self.resume_position = None;
         match Api::new(
             &self.config.server_url,
             &self.config.username,
@@ -1919,12 +2090,13 @@ impl NavidromeApp {
 
     /// 记录 hover 中的列表项 id，供 hover 时浮现的交互元素使用。
     fn set_hovered(&mut self, id: &str, hovering: bool, cx: &mut Context<Self>) {
-        if hovering {
+        if hovering && self.state.hovered_item.as_deref() != Some(id) {
             self.state.hovered_item = Some(id.to_string());
-        } else if self.state.hovered_item.as_deref() == Some(id) {
+            cx.notify();
+        } else if !hovering && self.state.hovered_item.as_deref() == Some(id) {
             self.state.hovered_item = None;
+            cx.notify();
         }
-        cx.notify();
     }
 
     /// 持久化当前播放会话（队列、索引、位置、模式、随机历史）。
@@ -2894,6 +3066,7 @@ impl NavidromeApp {
 
     fn render_album_grid(
         &self,
+        scope: &str,
         albums: &[Album],
         cx: &Context<Self>,
         window: &mut Window,
@@ -2904,12 +3077,14 @@ impl NavidromeApp {
                 .items_start()
                 .flex_wrap()
                 .gap_5()
-                .children(albums.iter().map(|album| {
+                .children(albums.iter().enumerate().map(|(index, album)| {
+                    let key = item_instance_key(scope, "album", index, &album.id);
                     let album_for_click = album.clone();
                     let album_for_play = album.clone();
                     let album_for_cover = album.clone();
-                    let album_id_for_hover = album.id.clone();
+                    let album_id_for_hover = key.clone();
                     v_flex()
+                        .id(SharedString::from(key.clone()))
                         .w(px(176.0))
                         .gap_2()
                         .child(
@@ -2931,7 +3106,7 @@ impl NavidromeApp {
                                     self.favorite_button(FavoriteKind::Album, &album.id, cx),
                                 ))
                                 .when(
-                                    self.state.hovered_item.as_deref() == Some(album.id.as_str()),
+                                    self.state.hovered_item.as_deref() == Some(key.as_str()),
                                     |this| {
                                         this.child(
                                             div()
@@ -3138,12 +3313,14 @@ impl NavidromeApp {
             .items_start()
             .flex_wrap()
             .gap_5()
-            .children(artists.iter().map(|artist| {
+            .children(artists.iter().enumerate().map(|(index, artist)| {
+                let key = item_instance_key("artists", "artist", index, &artist.id);
                 let artist_for_click = artist.clone();
                 let artist_for_play = artist.clone();
                 let artist_for_cover = artist.clone();
-                let artist_id_for_hover = artist.id.clone();
+                let artist_id_for_hover = key.clone();
                 v_flex()
+                    .id(SharedString::from(key.clone()))
                     .w(px(152.0))
                     .gap_2()
                     .child(
@@ -3173,7 +3350,7 @@ impl NavidromeApp {
                                     )),
                             )
                             .when(
-                                self.state.hovered_item.as_deref() == Some(artist.id.as_str()),
+                                self.state.hovered_item.as_deref() == Some(key.as_str()),
                                 |this| {
                                     this.child(
                                         div()
@@ -3300,6 +3477,7 @@ impl NavidromeApp {
 
     fn render_song_list(
         &self,
+        scope: &str,
         songs: &[Song],
         editable: bool,
         cx: &Context<Self>,
@@ -3330,21 +3508,23 @@ impl NavidromeApp {
                     .child(div().w(px(64.0)).text_right().child("Time")),
             )
             .children(songs.iter().enumerate().map(|(index, song)| {
+                let key = item_instance_key(scope, "song", index, &song.id);
                 let queue = queue_source.clone();
                 let current = self
                     .state
                     .now_playing
                     .as_ref()
-                    .is_some_and(|playing| playing.id == song.id);
+                    .is_some_and(|playing| playing.id == song.id)
+                    && (!editable || self.state.queue_index == Some(index));
                 let animated = current && playback.active && !playback.paused;
                 let album = if song.album.trim().is_empty() {
                     "Unknown album".to_string()
                 } else {
                     song.album.clone()
                 };
-                let song_id_for_hover = song.id.clone();
+                let song_id_for_hover = key.clone();
                 let row = h_flex()
-                    .id(SharedString::from(format!("song-row-{}", song.id)))
+                    .id(SharedString::from(key.clone()))
                     .h(px(60.0))
                     .px_3()
                     .gap_3()
@@ -3361,7 +3541,7 @@ impl NavidromeApp {
                 } else {
                     row
                 };
-                let hovered = self.state.hovered_item.as_deref() == Some(song.id.as_str());
+                let hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
 
                 row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
                     .child(
@@ -3388,7 +3568,7 @@ impl NavidromeApp {
                             } else {
                                 cx.theme().foreground
                             })
-                            .child(self.render_playing_indicator(&song.id, current, animated, cx))
+                            .child(self.render_playing_indicator(&key, current, animated, cx))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -4224,6 +4404,7 @@ impl NavidromeApp {
     /// Home 页专辑区块的通用内容：加载骨架 / 空状态提示 / 专辑网格。
     fn render_home_album_content(
         &self,
+        scope: &str,
         albums: &[Album],
         loading: bool,
         empty_text: &str,
@@ -4239,7 +4420,7 @@ impl NavidromeApp {
                 .child(empty_text.to_string())
                 .into_any_element()
         } else {
-            self.render_album_grid(albums, cx, window)
+            self.render_album_grid(scope, albums, cx, window)
         }
     }
 
@@ -4276,6 +4457,7 @@ impl NavidromeApp {
                     "recent",
                     "Recently played",
                     self.render_home_album_content(
+                        "recent",
                         &self.state.recent_albums,
                         self.state.recent_albums_loading,
                         "Nothing played yet — recently played albums will appear here.",
@@ -4288,6 +4470,7 @@ impl NavidromeApp {
                     "frequent",
                     "Frequently played",
                     self.render_home_album_content(
+                        "frequent",
                         &self.state.frequent_albums,
                         self.state.frequent_albums_loading,
                         "Nothing frequently played yet — your most-played albums will appear here.",
@@ -4300,6 +4483,7 @@ impl NavidromeApp {
                     "random",
                     "Random albums",
                     self.render_home_album_content(
+                        "random",
                         &self.state.random_albums,
                         self.state.random_albums_loading,
                         "No random albums to show — refresh the library for a fresh pick.",
@@ -4313,6 +4497,7 @@ impl NavidromeApp {
                         "newest",
                         "Newest albums",
                         self.render_home_album_content(
+                            "newest",
                             &self
                                 .state
                                 .albums
@@ -4368,7 +4553,7 @@ impl NavidromeApp {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Albums"),
                         )
-                        .child(self.render_album_grid(&favorites.albums, cx, window));
+                        .child(self.render_album_grid("favorites", &favorites.albums, cx, window));
                 }
                 if !favorites.songs.is_empty() {
                     content = content
@@ -4378,7 +4563,7 @@ impl NavidromeApp {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Songs"),
                         )
-                        .child(self.render_song_list(&favorites.songs, false, cx));
+                        .child(self.render_song_list("favorites", &favorites.songs, false, cx));
                 }
 
                 content.into_any_element()
@@ -4410,7 +4595,7 @@ impl NavidromeApp {
                     if self.state.albums.is_empty() && self.state.albums_loading {
                         self.render_album_skeleton_grid(cx)
                     } else {
-                        self.render_album_grid(&self.state.albums, cx, window)
+                        self.render_album_grid("albums", &self.state.albums, cx, window)
                     },
                 )
                 .into_any_element(),
@@ -4560,7 +4745,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Albums"),
                             )
-                            .child(self.render_album_grid(&results.albums, cx, window));
+                            .child(self.render_album_grid("search", &results.albums, cx, window));
                     }
                     if !results.songs.is_empty() {
                         content = content
@@ -4570,7 +4755,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Songs"),
                             )
-                            .child(self.render_song_list(&results.songs, false, cx));
+                            .child(self.render_song_list("search", &results.songs, false, cx));
                     }
                 }
                 content.into_any_element()
@@ -4587,7 +4772,12 @@ impl NavidromeApp {
                         cx,
                     ))
                     .children(self.error_banner(cx))
-                    .child(self.render_album_grid(&self.state.artist_albums, cx, window))
+                    .child(self.render_album_grid(
+                        "artist-detail",
+                        &self.state.artist_albums,
+                        cx,
+                        window,
+                    ))
                     .into_any_element()
             }
             View::AlbumDetail => {
@@ -4652,7 +4842,12 @@ impl NavidromeApp {
                             ),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(&self.state.current_songs, false, cx))
+                    .child(self.render_song_list(
+                        "album-detail",
+                        &self.state.current_songs,
+                        false,
+                        cx,
+                    ))
                     .into_any_element()
             }
             View::PlaylistDetail => {
@@ -4698,7 +4893,12 @@ impl NavidromeApp {
                             ),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(&self.state.playlist_songs, false, cx))
+                    .child(self.render_song_list(
+                        "playlist-detail",
+                        &self.state.playlist_songs,
+                        false,
+                        cx,
+                    ))
                     .into_any_element()
             }
             View::NowPlaying => self.render_now_playing(window, cx),
@@ -4759,7 +4959,12 @@ impl NavidromeApp {
                                     })),
                             ),
                     )
-                    .child(self.render_song_list(&self.state.queue, true, cx))
+                    .child(self.render_song_list(
+                        "queue",
+                        &self.state.queue,
+                        true,
+                        cx,
+                    ))
                 })
                 .into_any_element(),
         }
@@ -6107,6 +6312,27 @@ mod tests {
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
     use gpui_kit::Modifiers;
+
+    #[test]
+    fn duplicate_items_have_distinct_hover_and_element_keys() {
+        let first = super::item_instance_key("recent", "album", 0, "same-id");
+        assert_ne!(
+            first,
+            super::item_instance_key("frequent", "album", 0, "same-id")
+        );
+        assert_ne!(
+            first,
+            super::item_instance_key("recent", "album", 1, "same-id")
+        );
+        assert_ne!(
+            first,
+            super::item_instance_key("recent", "song", 0, "same-id")
+        );
+        assert_ne!(
+            super::item_instance_key("queue", "song", 0, "repeat"),
+            super::item_instance_key("queue", "song", 1, "repeat")
+        );
+    }
 
     #[test]
     fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {

@@ -43,6 +43,8 @@ pub struct PlaybackState {
     pub buffered: Duration,
     pub duration: Option<Duration>,
     pub error: Option<String>,
+    /// Incremented after a seek completes, for system media-session notifications.
+    pub seek_serial: u64,
     /// 当前歌曲已测响度（RMS，dB），未测时为 0.0。
     pub loudness_db: f32,
     /// 当前歌曲已测峰值（0..=1），未测时为 0.0。
@@ -55,6 +57,7 @@ enum Command {
         url: String,
         cache_key: String,
         duration_hint: Option<Duration>,
+        start_position: Duration,
         /// 该曲目的响度补偿增益系数（1.0 = 不变），与用户音量相乘。
         gain: f32,
     },
@@ -85,13 +88,21 @@ impl AudioHandle {
         Ok(Self { tx, state })
     }
 
-    pub fn play(&self, url: String, cache_key: String, duration_hint: Option<Duration>, gain: f32) {
+    pub fn play(
+        &self,
+        url: String,
+        cache_key: String,
+        duration_hint: Option<Duration>,
+        gain: f32,
+        start_position: Duration,
+    ) {
         if self
             .tx
             .send(Command::Play {
                 url,
                 cache_key,
                 duration_hint,
+                start_position,
                 gain,
             })
             .is_err()
@@ -134,6 +145,14 @@ impl AudioHandle {
     }
 }
 
+fn apply_playback_intent(player: &Player, paused: bool) {
+    if paused {
+        player.pause();
+    } else {
+        player.play();
+    }
+}
+
 fn coalesce_seek_commands(
     initial: Duration,
     rx: &Receiver<Command>,
@@ -150,7 +169,10 @@ fn coalesce_seek_commands(
                 coalesced += 1;
                 deadline = Instant::now() + SEEK_DEBOUNCE;
             }
-            Ok(command) => pending_commands.push_back(command),
+            Ok(command) => {
+                pending_commands.push_back(command);
+                break;
+            }
             Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -168,7 +190,6 @@ struct PreparationResult {
     generation: u64,
     kind: PreparationKind,
     start_position: Duration,
-    paused: bool,
     result: Result<PreparedStream>,
 }
 
@@ -183,7 +204,6 @@ fn spawn_preparation(
     cache_key: String,
     duration_hint: Option<Duration>,
     start_position: Duration,
-    paused: bool,
 ) {
     let endpoint = stream_endpoint(&url);
     let spawn_result = thread::Builder::new()
@@ -201,7 +221,6 @@ fn spawn_preparation(
                 generation,
                 kind,
                 start_position,
-                paused,
                 result,
             });
         });
@@ -296,6 +315,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     url,
                     cache_key,
                     duration_hint,
+                    start_position,
                     gain,
                 } => {
                     log::info!(
@@ -319,12 +339,14 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     startup_error = None;
                     current_url = Some(url.clone());
                     current_cache_key = Some(cache_key.clone());
-                    position_offset = Duration::ZERO;
+                    let start_position =
+                        duration_hint.map_or(start_position, |limit| start_position.min(limit));
+                    position_offset = start_position;
                     set_state(&state, |s| {
                         s.active = true;
                         s.paused = false;
                         s.ended = false;
-                        s.position = Duration::ZERO;
+                        s.position = start_position;
                         s.buffered = Duration::ZERO;
                         s.duration = duration_hint;
                         s.error = None;
@@ -338,8 +360,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                         cache_dir.clone(),
                         cache_key,
                         duration_hint,
-                        Duration::ZERO,
-                        false,
+                        start_position,
                     );
                 }
                 Command::Pause => {
@@ -415,7 +436,8 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     );
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
-                    desired_paused = player.is_paused() || desired_paused;
+                    // clear()/stop() can pause the sink during preparation. Only
+                    // explicit user commands determine the intended transport state.
                     terminal_state_logged = false;
                     player.stop();
                     player.clear();
@@ -440,7 +462,6 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                         cache_key,
                         duration,
                         target,
-                        desired_paused,
                     );
                 }
             }
@@ -461,17 +482,12 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                 Ok(stream) => {
                     player.set_volume(volume * current_gain);
                     let metered = LoudnessMeter::new(stream.source, loudness_shared.clone());
+                    apply_playback_intent(&player, desired_paused);
                     player.append(normalize_for_output(
                         metered,
                         output_channels,
                         output_sample_rate,
                     ));
-                    if prepared.paused {
-                        player.pause();
-                    } else {
-                        player.play();
-                    }
-                    desired_paused = prepared.paused;
                     duration = stream.duration;
                     stream_error = Some(stream.error);
                     buffer_progress = Some(stream.buffer_progress);
@@ -487,9 +503,12 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     }
                     set_state(&state, |s| {
                         s.active = true;
-                        s.paused = prepared.paused;
+                        s.paused = desired_paused;
                         s.ended = false;
                         s.position = prepared.start_position;
+                        if matches!(prepared.kind, PreparationKind::Seek) {
+                            s.seek_serial = s.seek_serial.wrapping_add(1);
+                        }
                         s.duration = duration;
                         s.error = None;
                     });
@@ -535,7 +554,9 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
         } else {
             None
         };
-        let ended = empty && !preparing && error.is_none();
+        // An idle sink after launch/Stop is not a track reaching its end. In
+        // particular, restoring a queue must not automatically skip and play it.
+        let ended = current_url.is_some() && empty && !preparing && error.is_none();
         if empty && !preparing && !terminal_state_logged {
             if let Some(error) = error.as_deref() {
                 log::error!("playback stopped with error: {error}");
@@ -1507,6 +1528,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn restoring_playback_sends_one_command_with_the_saved_position() {
+        let (tx, rx) = mpsc::channel();
+        let audio = AudioHandle {
+            tx,
+            state: Arc::new(Mutex::new(PlaybackState::default())),
+        };
+        audio.play(
+            "test".into(),
+            "song".into(),
+            Some(Duration::from_secs(180)),
+            1.0,
+            Duration::from_secs(42),
+        );
+        assert!(
+            matches!(rx.recv().unwrap(), Command::Play { start_position, .. } if start_position == Duration::from_secs(42))
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn prepared_audio_obeys_current_intent_instead_of_the_cleared_sink() {
+        let (player, _source) = Player::new();
+        player.stop();
+        player.clear();
+        assert!(player.is_paused());
+        apply_playback_intent(&player, false);
+        assert!(!player.is_paused());
+        // Pause/resume commands arriving during preparation must win when ready.
+        apply_playback_intent(&player, true);
+        assert!(player.is_paused());
+        apply_playback_intent(&player, false);
+        assert!(!player.is_paused());
+    }
+
+    #[test]
     fn coalesces_slider_seek_events_to_the_latest_position() {
         let (sender, receiver) = mpsc::channel();
         sender.send(Command::Seek(Duration::from_secs(20))).unwrap();
@@ -1523,6 +1579,20 @@ mod tests {
         assert_eq!(latest, Duration::from_secs(30));
         assert_eq!(count, 2);
         assert!(matches!(pending.pop_front(), Some(Command::Pause)));
+    }
+
+    #[test]
+    fn seek_coalescing_preserves_intervening_transport_commands() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Command::Pause).unwrap();
+        tx.send(Command::Seek(Duration::from_secs(30))).unwrap();
+        let mut pending = VecDeque::new();
+        let (position, count) = coalesce_seek_commands(Duration::from_secs(10), &rx, &mut pending);
+        assert_eq!((position, count), (Duration::from_secs(10), 1));
+        assert!(matches!(pending.pop_front(), Some(Command::Pause)));
+        assert!(
+            matches!(rx.recv().unwrap(), Command::Seek(position) if position == Duration::from_secs(30))
+        );
     }
 
     #[test]

@@ -30,6 +30,11 @@ JavaScript runtime.
   locally measured loudness when the server provides no ReplayGain metadata
 - Double-click song playback with highlighted and animated now-playing rows
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
+- Linux MPRIS media session for desktop media controls: track metadata, local cover
+  artwork, playback status, position, volume, play/pause, previous/next, and seek.
+  Controls work while minimized; a missing session bus does not prevent startup.
+- Repeated songs and albums have independent hover controls, including across
+  Home sections and within the playback queue
 - Rotating vinyl cover art while the lyrics page is playing in the foreground;
   pauses at the current angle and reuses cached textures at up to 20 fps.
   Only the current cover is cached (180 frames at 192×192, about 25 MiB of
@@ -99,6 +104,7 @@ application asset source combines custom player icons with Kit's built-in icons.
 - `src/audio.rs` - background audio worker using `rodio`
 - `src/app.rs` - GPUI application state, navigation, library views, and player
 - `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
+- `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
 - `src/models.rs` - shared API data structures
 - `src/config.rs` - persisted server settings
 - `src/msg.rs` - background task results delivered to the UI

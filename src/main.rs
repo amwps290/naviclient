@@ -5,6 +5,7 @@ mod app;
 mod assets;
 mod audio;
 mod config;
+mod media_session;
 mod models;
 mod msg;
 mod single_instance;
