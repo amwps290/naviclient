@@ -19,6 +19,9 @@ use rodio::{
 };
 use url::Url;
 
+mod preload;
+use preload::{Preloader, StreamControl};
+
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 const DECODED_CHUNK_FRAMES: usize = 4096;
 const DECODED_BUFFER_CHUNKS: usize = 512;
@@ -41,6 +44,8 @@ pub struct PlaybackState {
     pub ended: bool,
     pub position: Duration,
     pub buffered: Duration,
+    /// The remaining audio is decoded locally; no further network reads needed.
+    pub fully_buffered: bool,
     pub duration: Option<Duration>,
     pub error: Option<String>,
     /// Incremented after a seek completes, for system media-session notifications.
@@ -60,7 +65,15 @@ enum Command {
         start_position: Duration,
         /// 该曲目的响度补偿增益系数（1.0 = 不变），与用户音量相乘。
         gain: f32,
+        preload_id: Option<u64>,
     },
+    Preload {
+        id: u64,
+        url: String,
+        cache_key: String,
+        duration_hint: Option<Duration>,
+    },
+    CancelPreload,
     Pause,
     Resume,
     Stop,
@@ -95,6 +108,7 @@ impl AudioHandle {
         duration_hint: Option<Duration>,
         gain: f32,
         start_position: Duration,
+        preload_id: Option<u64>,
     ) {
         if self
             .tx
@@ -104,6 +118,7 @@ impl AudioHandle {
                 duration_hint,
                 start_position,
                 gain,
+                preload_id,
             })
             .is_err()
         {
@@ -113,6 +128,25 @@ impl AudioHandle {
 
     pub fn pause(&self) {
         let _ = self.tx.send(Command::Pause);
+    }
+
+    pub fn preload(
+        &self,
+        id: u64,
+        url: String,
+        cache_key: String,
+        duration_hint: Option<Duration>,
+    ) {
+        let _ = self.tx.send(Command::Preload {
+            id,
+            url,
+            cache_key,
+            duration_hint,
+        });
+    }
+
+    pub fn cancel_preload(&self) {
+        let _ = self.tx.send(Command::CancelPreload);
     }
 
     pub fn resume(&self) {
@@ -216,6 +250,7 @@ fn spawn_preparation(
                 &cache_key,
                 duration_hint,
                 start_position,
+                StreamControl::new(false),
             );
             let _ = tx.send(PreparationResult {
                 generation,
@@ -274,6 +309,12 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let (player, source) = Player::new();
     mixer.add(source);
     let (preparation_tx, preparation_rx) = mpsc::channel::<PreparationResult>();
+    let mut preloader = Preloader::new(client.clone())
+        .map_err(|error| {
+            log::warn!("next-track preloading unavailable: {error:#}");
+            error
+        })
+        .ok();
 
     let mut volume = 1.0;
     let mut current_gain = 1.0;
@@ -281,6 +322,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let mut duration: Option<Duration> = None;
     let mut stream_error: Option<SharedStreamError> = None;
     let mut buffer_progress: Option<Arc<BufferProgress>> = None;
+    let mut decode_progress: Option<Arc<StreamControl>> = None;
     let mut startup_error: Option<String> = None;
     let mut cache_dir = initial_cache_dir;
     if let Err(error) = prepare_cache_dir(&cache_dir) {
@@ -297,6 +339,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let mut preparation_generation = 0_u64;
     let mut preparing = false;
     let mut desired_paused = false;
+    let mut pending_preload = None;
 
     loop {
         let command = if let Some(command) = pending_commands.pop_front() {
@@ -317,7 +360,9 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     duration_hint,
                     start_position,
                     gain,
+                    preload_id,
                 } => {
+                    pending_preload = None;
                     log::info!(
                         "play requested; endpoint={} duration_hint_ms={:?} gain={gain}",
                         stream_endpoint(&url),
@@ -336,6 +381,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     duration = duration_hint;
                     stream_error = None;
                     buffer_progress = None;
+                    decode_progress = None;
                     startup_error = None;
                     current_url = Some(url.clone());
                     current_cache_key = Some(cache_key.clone());
@@ -348,20 +394,47 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                         s.ended = false;
                         s.position = start_position;
                         s.buffered = Duration::ZERO;
+                        s.fully_buffered = false;
                         s.duration = duration_hint;
                         s.error = None;
                     });
-                    spawn_preparation(
-                        preparation_tx.clone(),
-                        preparation_generation,
-                        PreparationKind::Play,
-                        client.clone(),
-                        url,
-                        cache_dir.clone(),
-                        cache_key,
-                        duration_hint,
-                        start_position,
-                    );
+                    let preloaded = preloader.as_mut().and_then(|preloader| {
+                        preloader.take(preload_id, &cache_key, start_position)
+                    });
+                    if let Some(stream) = preloaded {
+                        let _ = preparation_tx.send(PreparationResult {
+                            generation: preparation_generation,
+                            kind: PreparationKind::Play,
+                            start_position,
+                            result: Ok(stream),
+                        });
+                    } else {
+                        spawn_preparation(
+                            preparation_tx.clone(),
+                            preparation_generation,
+                            PreparationKind::Play,
+                            client.clone(),
+                            url,
+                            cache_dir.clone(),
+                            cache_key,
+                            duration_hint,
+                            start_position,
+                        );
+                    }
+                }
+                Command::Preload {
+                    id,
+                    url,
+                    cache_key,
+                    duration_hint,
+                } => {
+                    pending_preload = Some((id, url, cache_key, duration_hint));
+                }
+                Command::CancelPreload => {
+                    pending_preload = None;
+                    if let Some(preloader) = preloader.as_mut() {
+                        preloader.cancel();
+                    }
                 }
                 Command::Pause => {
                     log::debug!("playback pause requested");
@@ -376,6 +449,10 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     set_state(&state, |s| s.paused = false);
                 }
                 Command::Stop => {
+                    pending_preload = None;
+                    if let Some(preloader) = preloader.as_mut() {
+                        preloader.cancel();
+                    }
                     log::debug!("playback stop requested");
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = false;
@@ -386,6 +463,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     duration = None;
                     stream_error = None;
                     buffer_progress = None;
+                    decode_progress = None;
                     startup_error = None;
                     current_url = None;
                     current_cache_key = None;
@@ -405,6 +483,10 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     player.set_volume(volume * current_gain);
                 }
                 Command::SetCacheDirectory(new_cache_dir) => {
+                    pending_preload = None;
+                    if let Some(preloader) = preloader.as_mut() {
+                        preloader.cancel();
+                    }
                     match prepare_cache_dir(&new_cache_dir) {
                         Ok(()) => {
                             log::info!(
@@ -420,6 +502,10 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     }
                 }
                 Command::Seek(position) => {
+                    pending_preload = None;
+                    if let Some(preloader) = preloader.as_mut() {
+                        preloader.cancel();
+                    }
                     let (position, coalesced) =
                         coalesce_seek_commands(position, &rx, &mut pending_commands);
                     let (Some(url), Some(cache_key)) =
@@ -443,6 +529,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     player.clear();
                     stream_error = None;
                     buffer_progress = None;
+                    decode_progress = None;
                     startup_error = None;
                     position_offset = target;
                     set_state(&state, |s| {
@@ -480,6 +567,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             preparing = false;
             match prepared.result {
                 Ok(stream) => {
+                    decode_progress = Some(stream.source.control.clone());
                     player.set_volume(volume * current_gain);
                     let metered = LoudnessMeter::new(stream.source, loudness_shared.clone());
                     apply_playback_intent(&player, desired_paused);
@@ -538,7 +626,31 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             }
         }
 
+        if let Some(preloader) = preloader.as_mut() {
+            preloader.poll();
+        }
+
         let position = position_offset.saturating_add(player.get_pos());
+        let fully_buffered = decode_progress
+            .as_ref()
+            .is_some_and(|control| control.fully_decoded.load(Ordering::Acquire));
+        // A UI request may arrive while a seek is still preparing. Keep its
+        // reservation, but defer network I/O until the current audio is safe.
+        let can_preload = !preparing
+            && !player.empty()
+            && !desired_paused
+            && fully_buffered
+            && duration.is_some_and(|duration| {
+                let remaining = duration.saturating_sub(position);
+                !remaining.is_zero() && remaining <= Duration::from_secs(15)
+            });
+        if can_preload {
+            if let Some((id, url, cache_key, duration_hint)) = pending_preload.take() {
+                if let Some(preloader) = preloader.as_mut() {
+                    preloader.request(id, url, cache_key, duration_hint, cache_dir.clone());
+                }
+            }
+        }
         let paused = if preparing {
             desired_paused
         } else {
@@ -577,6 +689,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
         set_state(&state, |s| {
             s.position = position;
             s.buffered = buffered;
+            s.fully_buffered = fully_buffered;
             s.duration = duration;
             s.paused = paused;
             s.ended = ended;
@@ -688,13 +801,20 @@ fn play_url(
     cache_key: &str,
     duration_hint: Option<Duration>,
     start_position: Duration,
+    control: Arc<StreamControl>,
 ) -> Result<PreparedStream> {
     log::debug!(
         "preparing audio stream; endpoint={} start_ms={}",
         stream_endpoint(url),
         start_position.as_millis()
     );
-    let reader = HttpRangeReader::open(client, url.to_string(), cache_dir, cache_key)?;
+    let reader = HttpRangeReader::open_controlled(
+        client,
+        url.to_string(),
+        cache_dir,
+        cache_key,
+        control.clone(),
+    )?;
     let buffer_progress = Arc::clone(&reader.buffer_progress);
     let byte_len = reader.len();
     let seekable = reader.is_seekable();
@@ -734,7 +854,7 @@ fn play_url(
             .map_err(|error| anyhow!("audio seek failed: {error}"))?;
     }
     let remaining_duration = duration.map(|duration| duration.saturating_sub(start_position));
-    let (source, stream_error) = BufferedStreamSource::new(decoder, remaining_duration)?;
+    let (source, stream_error) = BufferedStreamSource::new(decoder, remaining_duration, control)?;
     Ok(PreparedStream {
         source,
         duration,
@@ -757,6 +877,7 @@ enum StreamMessage {
 }
 
 struct BufferedStreamSource {
+    control: Arc<StreamControl>,
     receiver: Receiver<StreamMessage>,
     queued: VecDeque<Vec<Sample>>,
     current: std::vec::IntoIter<Sample>,
@@ -774,15 +895,28 @@ impl BufferedStreamSource {
     fn new(
         decoder: Decoder<BufReader<HttpRangeReader>>,
         duration: Option<Duration>,
+        control: Arc<StreamControl>,
     ) -> Result<(Self, SharedStreamError)> {
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
         let (sender, receiver) = mpsc::sync_channel(DECODED_BUFFER_CHUNKS);
         let shared_error = Arc::new(Mutex::new(None));
 
+        let decoder_control = control.clone();
+        let decoder_guard = control.decoder_guard();
         thread::Builder::new()
             .name("audio-decoder".to_string())
-            .spawn(move || decode_stream(decoder, sender, duration, channels, sample_rate))
+            .spawn(move || {
+                let _guard = decoder_guard;
+                decode_stream(
+                    decoder,
+                    sender,
+                    duration,
+                    channels,
+                    sample_rate,
+                    decoder_control,
+                )
+            })
             .context("failed to start the audio decoder thread")?;
 
         let mut queued = VecDeque::new();
@@ -791,17 +925,18 @@ impl BufferedStreamSource {
         let deadline = Instant::now() + STARTUP_BUFFER_TIMEOUT;
 
         while queued.len() < STARTUP_BUFFER_CHUNKS && !producer_finished {
+            control.check()?;
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 break;
             };
-            match receiver.recv_timeout(remaining) {
+            match receiver.recv_timeout(remaining.min(Duration::from_millis(100))) {
                 Ok(StreamMessage::Samples(samples)) => queued.push_back(samples),
                 Ok(StreamMessage::End) => producer_finished = true,
                 Ok(StreamMessage::Error(error)) => {
                     terminal_error = Some(error);
                     producer_finished = true;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     terminal_error = Some("Audio decoder stopped unexpectedly".to_string());
                     producer_finished = true;
@@ -827,6 +962,7 @@ impl BufferedStreamSource {
         );
 
         let source = Self {
+            control,
             receiver,
             queued,
             current: Vec::new().into_iter(),
@@ -855,6 +991,12 @@ impl BufferedStreamSource {
         self.producer_finished = true;
         self.terminal_error = Some(error.into());
         self.finish()
+    }
+}
+
+impl Drop for BufferedStreamSource {
+    fn drop(&mut self) {
+        self.control.cancel();
     }
 }
 
@@ -935,6 +1077,7 @@ fn decode_stream(
     duration: Option<Duration>,
     channels: ChannelCount,
     sample_rate: SampleRate,
+    control: Arc<StreamControl>,
 ) {
     let samples_per_chunk = DECODED_CHUNK_FRAMES * usize::from(channels.get());
     let mut decoded_samples = 0_u64;
@@ -944,7 +1087,8 @@ fn decode_stream(
         sample_rate.get()
     );
 
-    loop {
+    let mut chunks = 0;
+    while control.wait_for_decode(chunks) {
         let samples: Vec<_> = decoder.by_ref().take(samples_per_chunk).collect();
         if samples.is_empty() {
             break;
@@ -954,6 +1098,7 @@ fn decode_stream(
             log::debug!("audio decoder stopped because playback source was dropped");
             return;
         }
+        chunks += 1;
     }
 
     log::debug!(
@@ -970,6 +1115,9 @@ fn decode_stream(
     } else {
         StreamMessage::End
     };
+    if matches!(message, StreamMessage::End) && control.check().is_ok() {
+        control.fully_decoded.store(true, Ordering::Release);
+    }
     let _ = sender.send(message);
 }
 
@@ -1089,6 +1237,7 @@ fn near_estimated_end(position: u64, estimated_len: u64) -> bool {
 }
 
 struct HttpRangeReader {
+    control: Arc<StreamControl>,
     client: Client,
     url: String,
     response: Option<Response>,
@@ -1109,8 +1258,20 @@ struct HttpRangeReader {
 }
 
 impl HttpRangeReader {
+    #[cfg(test)]
     fn open(client: Client, url: String, cache_dir: &Path, cache_key: &str) -> Result<Self> {
-        let (complete_path, partial_path) = cache_paths(cache_dir, cache_key);
+        Self::open_controlled(client, url, cache_dir, cache_key, StreamControl::new(false))
+    }
+
+    fn open_controlled(
+        client: Client,
+        url: String,
+        cache_dir: &Path,
+        cache_key: &str,
+        control: Arc<StreamControl>,
+    ) -> Result<Self> {
+        control.check()?;
+        let (complete_path, mut partial_path) = cache_paths(cache_dir, cache_key);
         if let Ok(file) = OpenOptions::new().read(true).open(&complete_path) {
             let len = file.metadata()?.len();
             log::info!(
@@ -1118,6 +1279,7 @@ impl HttpRangeReader {
                 complete_path.display()
             );
             return Ok(Self {
+                control,
                 client,
                 url,
                 response: None,
@@ -1139,6 +1301,14 @@ impl HttpRangeReader {
         }
 
         let response = request_range(&client, &url, 0).context("failed to request audio stream")?;
+        control.check()?;
+        // Repeat-one and duplicate queue entries can preload the current song.
+        // Never let a speculative reader modify its active reader's partial file.
+        if control.speculative {
+            static NEXT_PART: AtomicU64 = AtomicU64::new(0);
+            let serial = NEXT_PART.fetch_add(1, Ordering::Relaxed);
+            partial_path.set_extension(format!("preload-{}-{serial}.part", std::process::id()));
+        }
         let range_supported = response.status() == StatusCode::PARTIAL_CONTENT;
         let len = content_range_len(&response).or_else(|| response.content_length());
         let length_is_estimate = is_transcoded_stream(&url);
@@ -1189,6 +1359,7 @@ impl HttpRangeReader {
         );
 
         Ok(Self {
+            control,
             client,
             url,
             response: Some(response),
@@ -1225,6 +1396,7 @@ impl HttpRangeReader {
     }
 
     fn reopen_at(&mut self, position: u64) -> io::Result<()> {
+        self.control.check()?;
         if position != 0 && !self.range_supported {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -1327,6 +1499,7 @@ impl HttpRangeReader {
 
 impl Read for HttpRangeReader {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.control.check()?;
         if buffer.is_empty() {
             return Ok(0);
         }
@@ -1356,12 +1529,14 @@ impl Read for HttpRangeReader {
         }
 
         for attempt in 0..=HTTP_READ_RETRIES {
+            self.control.check()?;
             let start = self.position;
             let result = self
                 .response
                 .as_mut()
                 .ok_or_else(|| io::Error::other("audio HTTP response is unavailable"))?
                 .read(buffer);
+            self.control.check()?;
             match result {
                 Ok(0) if self.near_estimated_end() => {
                     self.finish_estimated_stream();
@@ -1414,6 +1589,7 @@ impl Read for HttpRangeReader {
 
 impl Seek for HttpRangeReader {
     fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        self.control.check()?;
         self.position = seek_target(self.position, self.len, from)?;
         Ok(self.position)
     }
@@ -1424,10 +1600,18 @@ impl Drop for HttpRangeReader {
         let fully_cached = self
             .len
             .is_some_and(|len| len > 0 && self.cached_len >= len);
-        if self.cache_complete || !fully_cached {
+        if self.cache_complete {
             return;
         }
         self.cache_file.take();
+        let unverified_preload =
+            self.control.speculative && !self.control.fully_decoded.load(Ordering::Acquire);
+        if !fully_cached || unverified_preload {
+            if self.control.speculative {
+                let _ = fs::remove_file(&self.partial_path);
+            }
+            return;
+        }
         if let Err(error) = fs::rename(&self.partial_path, &self.complete_path) {
             log::warn!("failed to finalize audio cache: {error}");
         } else {
@@ -1444,7 +1628,8 @@ fn request_range(client: &Client, url: &str, position: u64) -> reqwest::Result<R
     let response = client
         .get(url)
         .header(RANGE, format!("bytes={position}-"))
-        .send()?;
+        .send()
+        .map_err(reqwest::Error::without_url)?;
     log::debug!(
         "audio HTTP response; endpoint={} range_start={position} status={} content_length={:?} content_range={:?} content_type={:?}",
         stream_endpoint(url),
@@ -1459,7 +1644,9 @@ fn request_range(client: &Client, url: &str, position: u64) -> reqwest::Result<R
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
     );
-    response.error_for_status()
+    response
+        .error_for_status()
+        .map_err(reqwest::Error::without_url)
 }
 
 fn content_range_len(response: &Response) -> Option<u64> {
@@ -1540,6 +1727,7 @@ mod tests {
             Some(Duration::from_secs(180)),
             1.0,
             Duration::from_secs(42),
+            None,
         );
         assert!(
             matches!(rx.recv().unwrap(), Command::Play { start_position, .. } if start_position == Duration::from_secs(42))
@@ -1895,6 +2083,7 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(1);
         let shared_error = Arc::new(Mutex::new(None));
         let mut source = BufferedStreamSource {
+            control: StreamControl::new(false),
             receiver,
             queued: VecDeque::new(),
             current: Vec::new().into_iter(),

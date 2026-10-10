@@ -34,7 +34,7 @@ use tokio::runtime::Runtime;
 
 use crate::api::{format_duration, Api};
 use crate::assets::{AppIcon, PlayerIcon};
-use crate::audio::{format_playback, AudioHandle};
+use crate::audio::{format_playback, AudioHandle, PlaybackState};
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
@@ -117,6 +117,9 @@ impl ShuffleHistory {
 
     /// 回退到上一首：返回真正播放过的上一首；无可回退时返回 None。
     fn previous(&mut self) -> Option<usize> {
+        if self.played.len() < 2 {
+            return None;
+        }
         let current = self.played.pop()?;
         self.forward.push(current);
         self.played.last().copied()
@@ -142,6 +145,54 @@ impl ShuffleHistory {
     /// 导出快照用于持久化。
     fn snapshot(&self) -> (Vec<usize>, Vec<usize>) {
         (self.played.clone(), self.forward.clone())
+    }
+
+    fn remap(&mut self, mut map: impl FnMut(usize) -> Option<usize>) {
+        self.played = self.played.iter().copied().filter_map(&mut map).collect();
+        self.forward = self.forward.iter().copied().filter_map(map).collect();
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NextPreload {
+    id: u64,
+    index: usize,
+}
+
+fn should_preload_next(playback: &PlaybackState) -> bool {
+    playback.active
+        && !playback.paused
+        && !playback.ended
+        && playback.error.is_none()
+        && playback.fully_buffered
+        && playback.duration.is_some_and(|duration| {
+            let remaining = duration.saturating_sub(playback.position);
+            !remaining.is_zero() && remaining <= Duration::from_secs(15)
+        })
+}
+
+fn next_queue_index(
+    mode: PlaybackMode,
+    current: usize,
+    len: usize,
+    natural_end: bool,
+    shuffle_forward: Option<usize>,
+    reserved: Option<usize>,
+    random: impl FnOnce() -> usize,
+) -> Option<usize> {
+    if current >= len {
+        return None;
+    }
+    match mode {
+        PlaybackMode::Shuffle => shuffle_forward
+            .or(reserved)
+            .or_else(|| Some(random()))
+            .filter(|i| *i < len),
+        PlaybackMode::RepeatOne if natural_end => Some(current),
+        PlaybackMode::RepeatOne | PlaybackMode::RepeatAll => {
+            advance_index(current, len, true, true)
+        }
+        PlaybackMode::Sequential => advance_index(current, len, true, false),
     }
 }
 
@@ -454,6 +505,8 @@ pub struct NavidromeApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     audio: AudioHandle,
+    next_preload: Option<NextPreload>,
+    preload_serial: u64,
     media_session: MediaSession,
     default_cover: Arc<GpuiImage>,
     vinyl_cover: VinylCover,
@@ -556,6 +609,8 @@ impl NavidromeApp {
             tx,
             rx,
             audio,
+            next_preload: None,
+            preload_serial: 0,
             media_session,
             default_cover,
             vinyl_cover: VinylCover::default(),
@@ -682,8 +737,7 @@ impl NavidromeApp {
                 };
                 let duration = this.audio.state().duration.unwrap_or_default();
                 if !duration.is_zero() {
-                    this.audio
-                        .seek(duration.mul_f32((*value / 100.0).clamp(0.0, 1.0)));
+                    this.seek_playback(duration.mul_f32((*value / 100.0).clamp(0.0, 1.0)));
                 }
                 cx.notify();
             },
@@ -735,6 +789,7 @@ impl NavidromeApp {
                         this.maybe_save_session();
                         changed |= this.poll_messages(window, cx);
                         this.handle_playback_end();
+                        this.maybe_preload_next();
                         this.maybe_scrobble_current();
                         let scrolling = this.lyrics_scroll_target.is_some();
                         this.update_active_lyric();
@@ -1150,6 +1205,7 @@ impl NavidromeApp {
     }
 
     fn play_song_list(&mut self, songs: &[Song], index: usize) {
+        self.cancel_next_preload();
         self.state.queue = songs.to_vec();
         self.state.shuffle_history.start(index);
         self.state.song_rows_visible = songs.len().min(50);
@@ -1164,6 +1220,10 @@ impl NavidromeApp {
             None => 0,
         };
         self.state.queue.insert(insert_at, song);
+        self.state
+            .shuffle_history
+            .remap(|i| Some(if i >= insert_at { i + 1 } else { i }));
+        self.cancel_next_preload();
         self.save_session();
     }
 
@@ -1173,6 +1233,7 @@ impl NavidromeApp {
             self.state.queue_index = Some(0);
         }
         self.state.queue.push(song);
+        self.cancel_next_preload();
         self.save_session();
     }
 
@@ -1185,6 +1246,7 @@ impl NavidromeApp {
             self.state.queue_index = Some(0);
         }
         self.state.queue.extend(songs.iter().cloned());
+        self.cancel_next_preload();
         self.save_session();
     }
 
@@ -1194,13 +1256,22 @@ impl NavidromeApp {
             return;
         }
         let removed_current = self.state.queue_index == Some(index);
+        self.cancel_next_preload();
         self.state.queue.remove(index);
+        self.state.shuffle_history.remap(|i| {
+            if i == index {
+                None
+            } else {
+                Some(if i > index { i - 1 } else { i })
+            }
+        });
         self.state.queue_index =
             queue_index_after_remove(index, self.state.queue_index, self.state.queue.len());
         if removed_current {
             if self.state.queue.is_empty() {
                 self.stop_playback();
             } else if let Some(next) = self.state.queue_index {
+                self.state.shuffle_history.advance(next);
                 self.play_queue_index(next);
             }
         }
@@ -1213,6 +1284,10 @@ impl NavidromeApp {
             let keep = current + 1;
             if self.state.queue.len() > keep {
                 self.state.queue.truncate(keep);
+                self.state
+                    .shuffle_history
+                    .remap(|i| (i < keep).then_some(i));
+                self.cancel_next_preload();
                 self.save_session();
             }
         }
@@ -1235,6 +1310,10 @@ impl NavidromeApp {
         }
         let song = self.state.queue.remove(from);
         self.state.queue.insert(to, song);
+        self.state
+            .shuffle_history
+            .remap(|i| Some(queue_index_after_move(from, to, i)));
+        self.cancel_next_preload();
         if let Some(current) = self.state.queue_index {
             self.state.queue_index = Some(queue_index_after_move(from, to, current));
         }
@@ -1276,6 +1355,11 @@ impl NavidromeApp {
         let Some(song) = self.state.queue.get(index).cloned() else {
             return;
         };
+        let preload_id = self
+            .next_preload
+            .take()
+            .filter(|preload| preload.index == index && start_position.is_zero())
+            .map(|preload| preload.id);
         self.resume_position = None;
         log::info!(
             "queue playback selected; index={index} song_id={} title={:?} suffix={:?} declared_bytes={:?}",
@@ -1326,7 +1410,7 @@ impl NavidromeApp {
                     self.state.loudness_cache.get(&song.id).copied(),
                 );
                 self.audio
-                    .play(url, cache_key, duration, gain, start_position);
+                    .play(url, cache_key, duration, gain, start_position, preload_id);
                 self.report_now_playing(&song);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
@@ -1482,7 +1566,82 @@ impl NavidromeApp {
             .unwrap_or(current)
     }
 
+    fn cancel_next_preload(&mut self) {
+        if self.next_preload.take().is_some() {
+            self.audio.cancel_preload();
+        }
+    }
+
+    fn seek_playback(&mut self, position: Duration) {
+        self.cancel_next_preload();
+        self.audio.seek(position);
+    }
+
+    fn next_queue_index(&self, natural_end: bool) -> Option<usize> {
+        next_queue_index(
+            self.state.playback_mode,
+            self.state.queue_index?,
+            self.state.queue.len(),
+            natural_end,
+            self.state.shuffle_history.forward.last().copied(),
+            self.next_preload.map(|preload| preload.index),
+            || self.random_shuffle_next(),
+        )
+    }
+
+    fn maybe_preload_next(&mut self) {
+        if self.next_preload.is_some()
+            || self.state.ended_handled
+            || !should_preload_next(&self.audio.state())
+        {
+            return;
+        }
+        let Some(index) = self.next_queue_index(true) else {
+            return;
+        };
+        let Some(song) = self.state.queue.get(index) else {
+            return;
+        };
+        let Some(api) = self.api.as_ref() else { return };
+        let quality = self.config.transcoding_quality;
+        let Ok(url) = api.stream_url(&song.id, quality.max_bit_rate()) else {
+            return;
+        };
+        let cache_key = format!(
+            "{}:{}:profile={}",
+            api.base_url(),
+            song.id,
+            quality.cache_profile()
+        );
+        let duration = song
+            .duration
+            .and_then(|seconds| u64::try_from(seconds).ok())
+            .map(Duration::from_secs);
+        self.preload_serial = self.preload_serial.wrapping_add(1);
+        self.next_preload = Some(NextPreload {
+            id: self.preload_serial,
+            index,
+        });
+        self.audio
+            .preload(self.preload_serial, url, cache_key, duration);
+    }
+
+    fn play_next(&mut self, natural_end: bool) {
+        if let Some(next) = self.next_queue_index(natural_end) {
+            if self.state.playback_mode == PlaybackMode::Shuffle
+                && self.state.shuffle_history.restore_forward().is_none()
+            {
+                self.state.shuffle_history.advance(next);
+            }
+            self.play_queue_index(next);
+        }
+    }
+
     fn advance_queue(&mut self, forward: bool) {
+        if forward {
+            self.play_next(false);
+            return;
+        }
         let Some(index) = self.state.queue_index else {
             return;
         };
@@ -1492,15 +1651,7 @@ impl NavidromeApp {
         }
 
         if self.state.playback_mode == PlaybackMode::Shuffle {
-            if forward {
-                if let Some(index) = self.state.shuffle_history.restore_forward() {
-                    self.play_queue_index(index);
-                } else {
-                    let next = self.random_shuffle_next();
-                    self.state.shuffle_history.advance(next);
-                    self.play_queue_index(next);
-                }
-            } else if let Some(previous) = self.state.shuffle_history.previous() {
+            if let Some(previous) = self.state.shuffle_history.previous() {
                 self.play_queue_index(previous);
             }
             return;
@@ -1517,6 +1668,7 @@ impl NavidromeApp {
     }
 
     fn cycle_playback_mode(&mut self, cx: &mut Context<Self>) {
+        self.cancel_next_preload();
         self.state.playback_mode = self.state.playback_mode.next();
         self.config.playback_mode = self.state.playback_mode;
         if let Err(error) = config::save(&self.config) {
@@ -1539,7 +1691,7 @@ impl NavidromeApp {
         let playback = self.audio.state();
         let target = seek_target(playback.position, playback.duration, delta_secs);
         if target != playback.position {
-            self.audio.seek(target);
+            self.seek_playback(target);
         }
     }
 
@@ -1659,6 +1811,7 @@ impl NavidromeApp {
 
     #[allow(dead_code)]
     pub fn stop_playback(&mut self) {
+        self.cancel_next_preload();
         self.audio.stop();
         self.resume_position = None;
         self.state.now_playing = None;
@@ -1715,7 +1868,7 @@ impl NavidromeApp {
 
     fn media_seek(&mut self, position: Duration) {
         if self.audio.state().active {
-            self.audio.seek(position);
+            self.seek_playback(position);
         } else if self.state.now_playing.is_some() {
             // Seeking a restored, paused session must not start audio playback.
             self.resume_position = Some(position);
@@ -1996,6 +2149,7 @@ impl NavidromeApp {
         if let Err(error) = config::save(&self.config) {
             self.state.status = format!("Config save failed: {error:#}");
         }
+        self.cancel_next_preload();
         self.audio.stop();
         self.state = AppState::default();
         self.playlist_ui.reset();
@@ -2036,6 +2190,7 @@ impl NavidromeApp {
             return;
         }
         self.audio.set_cache_directory(effective_dir.clone());
+        self.cancel_next_preload();
         self.state.error = None;
         self.state.status = format!("Audio cache: {}", effective_dir.display());
     }
@@ -2066,6 +2221,7 @@ impl NavidromeApp {
     }
 
     fn set_transcoding_quality(&mut self, quality: TranscodingQuality, cx: &mut Context<Self>) {
+        self.cancel_next_preload();
         self.config.transcoding_quality = quality;
         if let Err(error) = config::save(&self.config) {
             self.state.error = Some(format!("Playback quality save failed: {error:#}"));
@@ -2518,6 +2674,7 @@ impl NavidromeApp {
             return;
         }
         if let Some(error) = playback.error {
+            self.cancel_next_preload();
             log::error!("playback error reported to UI: {error}");
             self.state.ended_handled = true;
             self.state.error = Some(error);
@@ -2525,24 +2682,7 @@ impl NavidromeApp {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
             self.cache_measured_loudness();
-            match self.state.playback_mode {
-                PlaybackMode::Sequential => self.advance_queue(true),
-                PlaybackMode::RepeatAll => self.advance_queue(true),
-                PlaybackMode::RepeatOne => {
-                    if let Some(index) = self.state.queue_index {
-                        self.play_queue_index(index);
-                    }
-                }
-                PlaybackMode::Shuffle => {
-                    if let Some(index) = self.state.shuffle_history.restore_forward() {
-                        self.play_queue_index(index);
-                    } else {
-                        let next = self.random_shuffle_next();
-                        self.state.shuffle_history.advance(next);
-                        self.play_queue_index(next);
-                    }
-                }
-            }
+            self.play_next(true);
         }
     }
 
@@ -4317,7 +4457,7 @@ impl NavidromeApp {
                         .when_some(start_ms, |this, start_ms| {
                             this.cursor_pointer()
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.audio.seek(Duration::from_millis(start_ms));
+                                    this.seek_playback(Duration::from_millis(start_ms));
                                     cx.notify();
                                 }))
                         })
@@ -6547,6 +6687,114 @@ mod tests {
     };
     use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
     use gpui_kit::Modifiers;
+
+    #[test]
+    fn preloading_waits_for_safe_current_audio_buffer_and_near_end() {
+        let mut playback = crate::audio::PlaybackState {
+            active: true,
+            duration: Some(Duration::from_secs(180)),
+            position: Duration::from_secs(165),
+            fully_buffered: true,
+            ..Default::default()
+        };
+        assert!(super::should_preload_next(&playback));
+        playback.fully_buffered = false;
+        assert!(!super::should_preload_next(&playback));
+        playback.fully_buffered = true;
+        playback.position = Duration::from_secs(164);
+        assert!(!super::should_preload_next(&playback));
+        playback.position = Duration::from_secs(165);
+        playback.paused = true;
+        assert!(!super::should_preload_next(&playback));
+        playback.paused = false;
+        playback.duration = None;
+        assert!(!super::should_preload_next(&playback));
+        playback.duration = Some(playback.position);
+        assert!(!super::should_preload_next(&playback));
+        playback.duration = Some(Duration::from_secs(180));
+        playback.error = Some("stream failed".into());
+        assert!(!super::should_preload_next(&playback));
+    }
+
+    #[test]
+    fn preload_target_matches_playback_modes_and_manual_repeat_one_skip() {
+        for (mode, current, natural, expected) in [
+            (PlaybackMode::Sequential, 0, true, Some(1)),
+            (PlaybackMode::Sequential, 2, true, None),
+            (PlaybackMode::RepeatAll, 2, true, Some(0)),
+            (PlaybackMode::RepeatOne, 1, true, Some(1)),
+            (PlaybackMode::RepeatOne, 1, false, Some(2)),
+            (PlaybackMode::RepeatOne, 2, false, Some(0)),
+        ] {
+            assert_eq!(
+                super::next_queue_index(mode, current, 3, natural, None, None, || panic!(
+                    "non-shuffle selected randomly"
+                )),
+                expected
+            );
+        }
+        assert_eq!(
+            super::next_queue_index(PlaybackMode::RepeatAll, 0, 0, true, None, None, || 0),
+            None
+        );
+        assert_eq!(
+            super::next_queue_index(PlaybackMode::RepeatOne, 0, 1, true, None, None, || 0),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn shuffle_reservation_and_forward_history_do_not_draw_a_second_random_song() {
+        let mut history = ShuffleHistory::default();
+        history.start(0);
+        assert_eq!(history.previous(), None);
+        assert_eq!(history.snapshot(), (vec![0], vec![]));
+        history.advance(2);
+        assert_eq!(history.previous(), Some(0));
+        let before = history.snapshot();
+        let next = super::next_queue_index(
+            PlaybackMode::Shuffle,
+            0,
+            4,
+            true,
+            history.forward.last().copied(),
+            Some(3),
+            || panic!("forward history has priority"),
+        );
+        assert_eq!(next, Some(2));
+        assert_eq!(history.snapshot(), before);
+        assert_eq!(history.restore_forward(), next);
+        assert_eq!(
+            super::next_queue_index(PlaybackMode::Shuffle, 2, 4, true, None, Some(3), || panic!(
+                "reserved choice must be reused"
+            )),
+            Some(3)
+        );
+        assert_eq!(
+            super::next_queue_index(
+                PlaybackMode::Shuffle,
+                2,
+                4,
+                false,
+                None,
+                Some(3),
+                || panic!("manual next uses the same reservation")
+            ),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn queue_edits_remap_shuffle_history_by_occurrence() {
+        // Positions 0 and 2 may have identical song IDs; their history is distinct.
+        let mut history = ShuffleHistory::restore(vec![0, 2, 1], vec![3]);
+        history.remap(|i| Some(if i >= 1 { i + 1 } else { i }));
+        assert_eq!(history.snapshot(), (vec![0, 3, 2], vec![4]));
+        history.remap(|i| Some(queue_index_after_move(3, 0, i)));
+        assert_eq!(history.snapshot(), (vec![1, 0, 3], vec![4]));
+        history.remap(|i| if i == 0 { None } else { Some(i - 1) });
+        assert_eq!(history.snapshot(), (vec![0, 2], vec![3]));
+    }
 
     #[test]
     fn duplicate_items_have_distinct_hover_and_element_keys() {

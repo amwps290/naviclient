@@ -15,6 +15,10 @@ JavaScript runtime.
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, seek, and queue
   progression
+- Next-track preloading near the end of a fully buffered track. Prepares a
+  bounded startup buffer, then sleeps until needed; supports shuffle and repeat,
+  cancels stale queue/quality/seek requests, and falls back to ordinary playback.
+  This reduces startup waits; sample-accurate gapless playback is still planned.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
 - Navidrome now-playing and scrobble sync: reports the current track and
@@ -107,6 +111,7 @@ application asset source combines custom player icons with Kit's built-in icons.
 
 - `src/api.rs` - Subsonic API client, authentication, and JSON models parsing
 - `src/audio.rs` - background audio worker using `rodio`
+- `src/audio/preload.rs` - cancellable next-track preparation and decoder suspension
 - `src/app.rs` - GPUI application state, navigation, library views, and player
 - `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
 - `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
@@ -125,3 +130,15 @@ has an isolated cache. The decoded audio queue absorbs longer network
 interruptions, while completed
 tracks play directly from local storage. MP3, FLAC, AAC, Vorbis, and other
 formats supported by `rodio` remain available.
+
+Preloading starts within the last 15 seconds only after the current track's
+remaining audio has been decoded, keeping its playback independent of network
+bandwidth. One speculative task prepares up to 16 chunks of 4096 frames
+(about 1.37 seconds / 512 KiB of stereo PCM at 48 kHz), with the existing 1 MiB
+HTTP read-ahead buffer. The decoder then waits on a condition variable. Queue
+edits, seeks, playback-mode changes, quality changes and cache-directory changes
+invalidate the preparation. A reserved shuffle choice is reused when advancing;
+gain, lyrics, scrobbling and media metadata still follow the normal track switch.
+Unfinished speculative cache files are discarded; validated complete files join
+the ordinary audio cache. A cancelled in-flight read can take up to the I/O
+timeout to return, while foreground playback can proceed independently.
