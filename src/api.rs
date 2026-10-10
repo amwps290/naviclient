@@ -6,6 +6,11 @@ use rand::Rng;
 use serde_json::Value;
 use url::Url;
 
+use crate::playlist::{can_edit, song_ids, PlaylistDetails, PlaylistEdit, PlaylistEdited};
+
+#[cfg(test)]
+mod playlist_tests;
+
 use crate::models::{
     Album, Artist, FavoriteKey, FavoriteKind, Favorites, LyricLine, Lyrics, Playlist,
     SearchResults, ServerInfo, Song,
@@ -79,12 +84,21 @@ impl Api {
     }
 
     async fn get_json(&self, view: &str, params: &[(&str, &str)]) -> Result<Value> {
-        let url = self.url_for(view, params)?;
-        let response = self
-            .client
-            .get(&url)
+        self.request_json(view, params, false).await
+    }
+
+    async fn request_json(&self, view: &str, params: &[(&str, &str)], post: bool) -> Result<Value> {
+        // Large playlists belong in a form body, not in a URL that a proxy may truncate.
+        let request = if post {
+            self.client.post(self.url_for(view, &[])?).form(params)
+        } else {
+            self.client.get(self.url_for(view, params)?)
+        };
+        let response = request
+            .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| format!("request to {view} failed"))?;
         let status = response.status();
         let text = response
@@ -283,13 +297,89 @@ impl Api {
         Ok(())
     }
 
-    pub async fn playlist_songs(&self, playlist_id: &str) -> Result<Vec<Song>> {
+    pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetails> {
         let body = self.get_json("getPlaylist", &[("id", playlist_id)]).await?;
-        let mut songs = Vec::new();
-        for song in body["playlist"]["entry"].as_array().into_iter().flatten() {
-            songs.push(serde_json::from_value(song.clone())?);
+        Ok(serde_json::from_value(body["playlist"].clone())?)
+    }
+
+    pub async fn edit_playlist(&self, edit: &PlaylistEdit) -> Result<PlaylistEdited> {
+        if let Some(id) = edit.id() {
+            let current = self.playlist(id).await?;
+            if !can_edit(&current.playlist, &self.username) {
+                return Err(anyhow!("Only the playlist owner can edit this playlist."));
+            }
+            edit.validate_entries(&song_ids(&current.songs))?;
         }
-        Ok(songs)
+        let mut params: Vec<(&str, String)> = Vec::new();
+        let endpoint = match edit {
+            PlaylistEdit::Create { name, songs } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(anyhow!("Enter a playlist name."));
+                }
+                params.push(("name", name.into()));
+                params.extend(songs.iter().cloned().map(|id| ("songId", id)));
+                "createPlaylist"
+            }
+            PlaylistEdit::Rename { id, name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(anyhow!("Enter a playlist name."));
+                }
+                params.extend([("playlistId", id.clone()), ("name", name.into())]);
+                "updatePlaylist"
+            }
+            PlaylistEdit::Delete { id } => {
+                params.push(("id", id.clone()));
+                "deletePlaylist"
+            }
+            PlaylistEdit::Append { id, songs } => {
+                if songs.is_empty() {
+                    return Err(anyhow!("Choose at least one song."));
+                }
+                params.push(("playlistId", id.clone()));
+                params.extend(songs.iter().cloned().map(|id| ("songIdToAdd", id)));
+                "updatePlaylist"
+            }
+            PlaylistEdit::Remove { id, index, .. } => {
+                params.extend([
+                    ("playlistId", id.clone()),
+                    ("songIndexToRemove", index.to_string()),
+                ]);
+                "updatePlaylist"
+            }
+            PlaylistEdit::Move {
+                id,
+                expected,
+                from,
+                to,
+            } => {
+                let mut songs = expected.clone();
+                let song = songs.remove(*from);
+                songs.insert(*to, song);
+                params.push(("playlistId", id.clone()));
+                params.extend(songs.into_iter().map(|id| ("songId", id)));
+                "createPlaylist"
+            }
+        };
+        let params: Vec<_> = params
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+        let body = self.request_json(endpoint, &params, true).await?;
+        let id = match edit.id() {
+            Some(id) => id.to_string(),
+            None => body["playlist"]["id"]
+                .as_str()
+                .context("Created playlist response is missing its ID")?
+                .to_string(),
+        };
+        // Read-after-write refreshes are separate: a failed refresh must never
+        // present a successful append as failed and encourage adding it twice.
+        Ok(PlaylistEdited {
+            id,
+            deleted: matches!(edit, PlaylistEdit::Delete { .. }),
+        })
     }
 
     pub async fn search(

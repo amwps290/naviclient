@@ -5,6 +5,7 @@ use gpui_kit::{Hsla, Image as GpuiImage};
 use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
+use crate::playlist::{PlaylistDetails, PlaylistEdited};
 
 /// 后台线程解码完成的封面结果，UI 线程只负责插入缓存。
 #[derive(Debug)]
@@ -29,7 +30,15 @@ pub enum Msg {
         album_id: String,
         result: Result<Vec<Song>, String>,
     },
-    Playlists(Result<Vec<Playlist>, String>),
+    Playlists {
+        generation: u64,
+        request: u64,
+        result: Result<Vec<Playlist>, String>,
+    },
+    PlaylistEdited {
+        generation: u64,
+        result: Result<PlaylistEdited, String>,
+    },
     Favorites(Result<Favorites, String>),
     FavoriteChanged {
         key: FavoriteKey,
@@ -37,8 +46,10 @@ pub enum Msg {
         result: Result<(), String>,
     },
     PlaylistSongs {
+        generation: u64,
+        request: u64,
         playlist_id: String,
-        result: Result<Vec<Song>, String>,
+        result: Result<PlaylistDetails, String>,
     },
     Search(Result<SearchResults, String>),
     PlayArtistSongs(Result<Vec<Song>, String>),

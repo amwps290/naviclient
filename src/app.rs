@@ -12,11 +12,12 @@ use gpui_kit::component::{
     button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{ContextMenuExt, DropdownMenu},
     scroll::ScrollableElement,
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, Selectable, Sizable, Theme, ThemeMode,
-    TitleBar,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Theme,
+    ThemeMode, TitleBar, WindowExt,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -45,6 +46,9 @@ use crate::msg::{error_message, DecodedCover, Msg};
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
 use crate::vinyl::VinylCover;
+
+mod playlists;
+use playlists::{PlaylistUi, SongMenuContext};
 
 // The mini player content target size. On Linux, the client-side window shadow
 // (gpui-component's WindowBorder) pads each edge of the window, so the actual
@@ -454,6 +458,7 @@ pub struct NavidromeApp {
     default_cover: Arc<GpuiImage>,
     vinyl_cover: VinylCover,
     state: AppState,
+    playlist_ui: PlaylistUi,
     search_input: Entity<InputState>,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
@@ -555,6 +560,7 @@ impl NavidromeApp {
             default_cover,
             vinyl_cover: VinylCover::default(),
             state: AppState::default(),
+            playlist_ui: PlaylistUi::default(),
             search_input: search_input.clone(),
             server_input,
             username_input,
@@ -727,7 +733,7 @@ impl NavidromeApp {
                             }
                         }
                         this.maybe_save_session();
-                        changed |= this.poll_messages();
+                        changed |= this.poll_messages(window, cx);
                         this.handle_playback_end();
                         this.maybe_scrobble_current();
                         let scrolling = this.lyrics_scroll_target.is_some();
@@ -968,10 +974,18 @@ impl NavidromeApp {
 
     fn load_playlists(&mut self) {
         let Some(api) = self.api.clone() else { return };
-        self.state.loading = true;
+        self.playlist_ui.list_loading = true;
+        self.playlist_ui.list_request = self.playlist_ui.list_request.wrapping_add(1);
+        let request = self.playlist_ui.list_request;
+        let generation = self.playlist_ui.generation;
         let tx = self.tx.clone();
         self.spawn_future(async move {
-            let _ = tx.send(Msg::Playlists(api.playlists().await.map_err(error_message)));
+            let result = api.playlists().await.map_err(error_message);
+            let _ = tx.send(Msg::Playlists {
+                generation,
+                request,
+                result,
+            });
         });
     }
 
@@ -1053,21 +1067,10 @@ impl NavidromeApp {
         self.state.current_playlist = Some(playlist.clone());
         self.state.playlist_songs.clear();
         self.state.view = View::PlaylistDetail;
+        self.state.error = None;
+        self.state.song_rows_visible = 50;
         self.ensure_cover(playlist.cover_art.as_deref(), true);
-        let Some(api) = self.api.clone() else { return };
-        let playlist_id = playlist.id.clone();
-        let tx = self.tx.clone();
-        self.state.loading = true;
-        self.spawn_future(async move {
-            let result = api
-                .playlist_songs(&playlist_id)
-                .await
-                .map_err(error_message);
-            let _ = tx.send(Msg::PlaylistSongs {
-                playlist_id,
-                result,
-            });
-        });
+        self.load_playlist_detail(playlist.id);
     }
 
     fn submit_search(&mut self, cx: &Context<Self>) {
@@ -1547,6 +1550,16 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if window.has_active_dialog(cx)
+            || window.has_focused_input(cx)
+            || self
+                .playlist_ui
+                .menu_focus
+                .as_ref()
+                .is_some_and(|focus| focus.contains_focused(window, cx))
+        {
+            return;
+        }
         let shortcut = match_shortcut(&keystroke.key, keystroke.modifiers);
         if shortcut == Shortcut::None {
             return;
@@ -1985,6 +1998,7 @@ impl NavidromeApp {
         }
         self.audio.stop();
         self.state = AppState::default();
+        self.playlist_ui.reset();
         self.resume_position = None;
         match Api::new(
             &self.config.server_url,
@@ -2158,7 +2172,7 @@ impl NavidromeApp {
         changed
     }
 
-    fn poll_messages(&mut self) -> bool {
+    fn poll_messages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
@@ -2324,15 +2338,27 @@ impl NavidromeApp {
                         }
                     }
                 }
-                Msg::Playlists(result) => {
-                    self.state.loading = false;
+                Msg::Playlists {
+                    generation,
+                    request,
+                    result,
+                } => {
+                    if generation != self.playlist_ui.generation
+                        || request != self.playlist_ui.list_request
+                    {
+                        continue;
+                    }
+                    self.playlist_ui.list_loading = false;
                     match result {
                         Ok(playlists) => {
                             self.state.playlists_visible = playlists.len().min(50);
                             self.state.playlists = playlists;
                         }
-                        Err(error) => self.state.error = Some(error),
+                        Err(error) => self.playlist_read_error(error),
                     }
+                }
+                Msg::PlaylistEdited { generation, result } => {
+                    self.finish_playlist_edit(generation, result, window, cx);
                 }
                 Msg::Favorites(result) => match result {
                     Ok(favorites) => {
@@ -2404,15 +2430,24 @@ impl NavidromeApp {
                     }
                 }
                 Msg::PlaylistSongs {
+                    generation,
+                    request,
                     playlist_id,
                     result,
                 } => {
-                    self.state.loading = false;
+                    if generation != self.playlist_ui.generation
+                        || request != self.playlist_ui.detail_request
+                    {
+                        continue;
+                    }
+                    self.playlist_ui.detail_loading = false;
                     if self.state.current_playlist.as_ref().map(|p| p.id.as_str())
                         == Some(playlist_id.as_str())
                     {
                         match result {
-                            Ok(songs) => {
+                            Ok(details) => {
+                                self.state.current_playlist = Some(details.playlist);
+                                let songs = details.songs;
                                 // 只预加载首屏封面，滚动时按需补齐。
                                 let covers = songs
                                     .iter()
@@ -3484,8 +3519,8 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         // 增量渲染：只渲染前 song_rows_visible 行，滚动时逐批追加，避免长列表一次重建。
         let visible = self.state.song_rows_visible.min(songs.len());
+        let queue_source = Arc::new(songs.to_vec());
         let songs = &songs[..visible];
-        let queue_source = songs.to_vec();
         let playback = self.audio.state();
         v_flex()
             .w_full()
@@ -3505,11 +3540,23 @@ impl NavidromeApp {
                     .child(div().w(px(42.0)))
                     .child(div().flex_1().child("Title"))
                     .child(div().w(px(180.0)).child("Artist"))
-                    .child(div().w(px(64.0)).text_right().child("Time")),
+                    .child(div().w(px(64.0)).text_right().child("Time"))
+                    .child(div().w(px(28.0))),
             )
             .children(songs.iter().enumerate().map(|(index, song)| {
                 let key = item_instance_key(scope, "song", index, &song.id);
                 let queue = queue_source.clone();
+                let menu_context = SongMenuContext {
+                    songs: queue.clone(),
+                    index,
+                    queue: editable,
+                    playlist: (scope == "playlist-detail")
+                        .then(|| self.state.current_playlist.clone())
+                        .flatten(),
+                };
+                let menu_app = cx.entity().downgrade();
+                let button_menu_app = menu_app.clone();
+                let button_menu_context = menu_context.clone();
                 let current = self
                     .state
                     .now_playing
@@ -3608,6 +3655,31 @@ impl NavidromeApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(format_duration(song.duration)),
                     )
+                    .child(
+                        div()
+                            .id("song-actions-trigger")
+                            .flex_none()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(|_, _, cx| cx.stop_propagation())
+                            .child(
+                                Button::new(SharedString::from(format!("song-menu-{key}")))
+                                    .icon(IconName::Ellipsis)
+                                    .tooltip("Song actions")
+                                    .ghost()
+                                    .small()
+                                    .dropdown_menu(move |menu, _, cx| {
+                                        button_menu_app
+                                            .update(cx, |this, cx| {
+                                                this.song_menu(
+                                                    menu,
+                                                    button_menu_context.clone(),
+                                                    cx,
+                                                )
+                                            })
+                                            .expect("app owns song menu")
+                                    }),
+                            ),
+                    )
                     .when(hovered, |row| {
                         let song_id = song.id.clone();
                         if editable {
@@ -3615,7 +3687,7 @@ impl NavidromeApp {
                             row.child(
                                 h_flex()
                                     .absolute()
-                                    .right_2()
+                                    .right(px(46.0))
                                     .top(px(12.0))
                                     .items_center()
                                     .gap_0p5()
@@ -3689,7 +3761,7 @@ impl NavidromeApp {
                             row.child(
                                 h_flex()
                                     .absolute()
-                                    .right_2()
+                                    .right(px(46.0))
                                     .top(px(12.0))
                                     .items_center()
                                     .gap_0p5()
@@ -3743,6 +3815,13 @@ impl NavidromeApp {
                         this.play_song_list(&queue, index);
                         cx.notify();
                     }))
+                    .context_menu(move |menu, _, cx| {
+                        menu_app
+                            .update(cx, |this, cx| {
+                                this.song_menu(menu, menu_context.clone(), cx)
+                            })
+                            .unwrap_or_else(|_| unreachable!("app outlives its rows"))
+                    })
             }))
             .into_any_element()
     }
@@ -4677,13 +4756,41 @@ impl NavidromeApp {
                         format!("{} playlists", self.state.playlists.len()),
                         cx,
                     ))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new("new-playlist")
+                                    .label("New playlist")
+                                    .primary()
+                                    .small()
+                                    .disabled(self.playlist_ui.busy || self.api.is_none())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.name_playlist(None, vec![], window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("refresh-playlists")
+                                    .icon(AppIcon::Refresh)
+                                    .label("Refresh")
+                                    .outline()
+                                    .small()
+                                    .disabled(
+                                        self.playlist_ui.busy || self.playlist_ui.list_loading,
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.load_playlists();
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
                     .children(self.error_banner(cx))
                     .when(
-                        self.state.playlists.is_empty() && self.state.loading,
+                        self.state.playlists.is_empty() && self.playlist_ui.list_loading,
                         |this| this.child(self.render_list_skeleton(8, cx)),
                     )
                     .when(
-                        self.state.playlists.is_empty() && !self.state.loading,
+                        self.state.playlists.is_empty() && !self.playlist_ui.list_loading,
                         |this| {
                             this.child(
                                 div()
@@ -4813,6 +4920,7 @@ impl NavidromeApp {
                                     .child(
                                         h_flex()
                                             .gap_2()
+                                            .flex_wrap()
                                             .child(
                                                 Button::new("play-album")
                                                     .label("Play album")
@@ -4837,6 +4945,26 @@ impl NavidromeApp {
                                                         this.append_all(&songs);
                                                         cx.notify();
                                                     })),
+                                            )
+                                            .child(
+                                                Button::new("album-add-to-playlist")
+                                                    .label("Add to playlist…")
+                                                    .outline()
+                                                    .disabled(
+                                                        self.playlist_ui.busy
+                                                            || self.state.current_songs.is_empty(),
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.choose_playlist(
+                                                                crate::playlist::song_ids(
+                                                                    &this.state.current_songs,
+                                                                ),
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        },
+                                                    )),
                                             ),
                                     ),
                             ),
@@ -4854,6 +4982,11 @@ impl NavidromeApp {
                 let Some(playlist) = &self.state.current_playlist else {
                     return div().child("Playlist not found").into_any_element();
                 };
+                let rename = playlist.clone();
+                let delete = playlist.clone();
+                let read_only = !crate::playlist::can_edit(playlist, &self.config.username);
+                let edit_disabled =
+                    read_only || self.playlist_ui.busy || self.playlist_ui.detail_loading;
                 v_flex()
                     .gap_5()
                     .child(self.page_header(
@@ -4864,6 +4997,7 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .gap_2()
+                            .flex_wrap()
                             .child(
                                 Button::new("play-playlist")
                                     .icon(PlayerIcon::Play)
@@ -4871,6 +5005,10 @@ impl NavidromeApp {
                                     .small()
                                     .info()
                                     .outline()
+                                    .disabled(
+                                        self.state.playlist_songs.is_empty()
+                                            || self.playlist_ui.detail_loading,
+                                    )
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let songs = this.state.playlist_songs.clone();
                                         if !songs.is_empty() {
@@ -4885,12 +5023,68 @@ impl NavidromeApp {
                                     .label("Append all")
                                     .small()
                                     .outline()
+                                    .disabled(
+                                        self.state.playlist_songs.is_empty()
+                                            || self.playlist_ui.detail_loading,
+                                    )
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let songs = this.state.playlist_songs.clone();
                                         this.append_all(&songs);
                                         cx.notify();
                                     })),
+                            )
+                            .child(
+                                Button::new("rename-playlist")
+                                    .label("Rename")
+                                    .small()
+                                    .outline()
+                                    .disabled(edit_disabled)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.name_playlist(Some(rename.clone()), vec![], window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("delete-playlist")
+                                    .label("Delete")
+                                    .small()
+                                    .ghost()
+                                    .disabled(edit_disabled)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.delete_playlist(delete.clone(), window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("refresh-playlist")
+                                    .icon(AppIcon::Refresh)
+                                    .tooltip("Refresh playlist")
+                                    .small()
+                                    .ghost()
+                                    .disabled(
+                                        self.playlist_ui.busy || self.playlist_ui.detail_loading,
+                                    )
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(p) = &this.state.current_playlist {
+                                            this.load_playlist_detail(p.id.clone());
+                                        }
+                                        cx.notify();
+                                    })),
                             ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if self.playlist_ui.busy {
+                                "Saving playlist…"
+                            } else if self.playlist_ui.detail_loading {
+                                "Loading playlist…"
+                            } else if read_only {
+                                "Shared playlist · Only the owner can edit it."
+                            } else if self.state.playlist_songs.is_empty() {
+                                "This playlist is empty. Use a song’s actions menu to add tracks."
+                            } else {
+                                "Use a song’s actions menu to move or remove it."
+                            }),
                     )
                     .children(self.error_banner(cx))
                     .child(self.render_song_list(
@@ -4921,6 +5115,7 @@ impl NavidromeApp {
                     this.child(
                         h_flex()
                             .gap_2()
+                            .flex_wrap()
                             .child(
                                 Button::new("queue-play-all")
                                     .icon(PlayerIcon::Play)
@@ -4945,6 +5140,21 @@ impl NavidromeApp {
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.clear_queue_after_current();
                                         cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("save-queue-playlist")
+                                    .label("Save as playlist")
+                                    .small()
+                                    .outline()
+                                    .disabled(self.playlist_ui.busy || self.api.is_none())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.name_playlist(
+                                            None,
+                                            crate::playlist::song_ids(&this.state.queue),
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             )
                             .child(
