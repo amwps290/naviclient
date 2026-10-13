@@ -79,6 +79,10 @@ fn init_logging() -> anyhow::Result<std::path::PathBuf> {
     Ok(path)
 }
 
+/// 渲染函数在 Debug 构建下会占用大量栈空间（`render_content` 单帧约 700 KB），
+/// 默认 1 MB 的主线程栈会在首次渲染时溢出。把应用跑在带大栈的专用线程上。
+const APP_STACK_BYTES: usize = 32 * 1024 * 1024;
+
 fn main() {
     match init_logging() {
         Ok(path) => log::info!("application starting; log_file={}", path.display()),
@@ -86,11 +90,22 @@ fn main() {
     }
 
     // 单实例：若已有实例在运行，通知其激活窗口后退出。
-    if single_instance::acquire() {
+    if std::env::var("NAVI_TEST_MULTI").is_err() && single_instance::acquire() {
         log::info!("another instance is already running; activating it and exiting");
         return;
     }
 
+    let app_thread = std::thread::Builder::new()
+        .name("navidrome-ui".to_string())
+        .stack_size(APP_STACK_BYTES)
+        .spawn(run_app)
+        .expect("failed to spawn UI thread");
+    if let Err(error) = app_thread.join() {
+        log::error!("UI thread panicked: {error:?}");
+    }
+}
+
+fn run_app() {
     gpui_kit::application()
         .with_assets(assets::Assets)
         .run(|cx| {

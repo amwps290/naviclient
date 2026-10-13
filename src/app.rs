@@ -5226,6 +5226,9 @@ impl NavidromeApp {
             .unwrap_or_else(|| "Choose a song from your library.".to_string());
 
         let cover_element = img(cover)
+            // `on_click` only fires for elements with an id: it needs element state
+            // to track the press/release pair.
+            .id("mini-cover")
             .size(px(26.0))
             .aspect_square()
             .object_fit(ObjectFit::Cover)
@@ -5360,6 +5363,15 @@ impl NavidromeApp {
             .on_click(cx.listener(|this, _, window, cx| {
                 this.exit_mini_mode(window, cx);
             }));
+
+        // The mini player root is a window drag area, so the expand button needs to
+        // block the drag behind it (like the `controls` row) or its clicks would be
+        // turned into window moves.
+        let expand_button = h_flex()
+            .flex_none()
+            .items_center()
+            .occlude()
+            .child(expand_button);
 
         v_flex()
             .relative()
@@ -5889,15 +5901,19 @@ impl Render for NavidromeApp {
                                     .child("Settings"),
                             )
                             .child(
-                                Button::new("close-settings")
-                                    .icon(AppIcon::Close)
-                                    .tooltip("Close settings")
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.state.settings_open = false;
-                                        cx.notify();
-                                    })),
+                                // See `toggle-mini-player`: the title bar drag area
+                                // must not cover clickable elements.
+                                div().occlude().child(
+                                    Button::new("close-settings")
+                                        .icon(AppIcon::Close)
+                                        .tooltip("Close settings")
+                                        .ghost()
+                                        .small()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.state.settings_open = false;
+                                            cx.notify();
+                                        })),
+                                ),
                             ),
                     ),
                 )
@@ -5964,6 +5980,9 @@ impl Render for NavidromeApp {
                                     h_flex()
                                         .items_center()
                                         .gap_2()
+                                        // See `toggle-mini-player`: keep the clickable
+                                        // part out of the title bar's drag area.
+                                        .occlude()
                                         .child(
                                             Button::new("leave-now-playing")
                                                 .icon(AppIcon::ArrowLeft)
@@ -5983,15 +6002,17 @@ impl Render for NavidromeApp {
                                         ),
                                 )
                                 .child(
-                                    Button::new("now-playing-settings")
-                                        .icon(AppIcon::Settings)
-                                        .tooltip("Settings")
-                                        .ghost()
-                                        .small()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.state.settings_open = true;
-                                            cx.notify();
-                                        })),
+                                    div().occlude().child(
+                                        Button::new("now-playing-settings")
+                                            .icon(AppIcon::Settings)
+                                            .tooltip("Settings")
+                                            .ghost()
+                                            .small()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.state.settings_open = true;
+                                                cx.notify();
+                                            })),
+                                    ),
                                 ),
                         ),
                 )
@@ -6033,6 +6054,10 @@ impl Render for NavidromeApp {
                             h_flex()
                                 .items_center()
                                 .gap_1()
+                                // On Windows the title bar is a window drag area
+                                // (`WindowControlArea::Drag`). Without this the drag
+                                // area swallows the clicks on the buttons below it.
+                                .occlude()
                                 .child(
                                     Button::new("toggle-mini-player")
                                         .icon(AppIcon::MiniPlayer)
