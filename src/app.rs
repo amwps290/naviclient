@@ -18,10 +18,11 @@ use gpui_kit::component::{
     scroll::{Scrollbar, ScrollableElement},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Theme,
-    ThemeMode, TitleBar, WindowExt,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconNamed, IconName, Selectable,
+    Sizable, Theme, ThemeMode, TitleBar, WindowExt,
 };
 use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::assets::IconName as KitIcon;
 use gpui_kit::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
     relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
@@ -2264,6 +2265,7 @@ impl NavidromeApp {
             volume: self.config.volume,
             playback_mode: self.config.playback_mode,
             volume_normalization: self.config.volume_normalization,
+            sidebar_collapsed: self.config.sidebar_collapsed,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -2843,7 +2845,50 @@ impl NavidromeApp {
         }
     }
 
-    fn nav_button(&self, view: View, label: &'static str, cx: &Context<Self>) -> Button {
+    /// 侧边栏底部的折叠/展开按钮；状态持久化到配置。
+    fn sidebar_collapse_toggle(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let collapsed = self.config.sidebar_collapsed;
+        let button = Button::new("sidebar-collapse-toggle")
+            .icon(if collapsed {
+                KitIcon::PanelLeftOpen
+            } else {
+                KitIcon::PanelLeftClose
+            })
+            .tooltip(if collapsed {
+                "Expand sidebar"
+            } else {
+                "Collapse sidebar"
+            })
+            .ghost()
+            .small()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.config.sidebar_collapsed = !this.config.sidebar_collapsed;
+                if let Err(error) = config::save(&this.config) {
+                    this.notify_error(format!("Settings save failed: {error:#}"));
+                }
+                cx.notify();
+            }));
+        if collapsed {
+            div()
+                .mt_auto()
+                .w_full()
+                .flex()
+                .justify_center()
+                .pt_2()
+                .child(button)
+                .into_any_element()
+        } else {
+            div().mt_auto().w_full().pt_2().child(button).into_any_element()
+        }
+    }
+
+    fn nav_button(
+        &self,
+        view: View,
+        label: &'static str,
+        icon: impl IconNamed,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let selected = self.state.view == view
             || matches!(
                 (view, self.state.view),
@@ -2851,10 +2896,9 @@ impl NavidromeApp {
                     | (View::Albums, View::AlbumDetail)
                     | (View::Playlists, View::PlaylistDetail)
             );
+        let collapsed = self.config.sidebar_collapsed;
         let button = Button::new(SharedString::from(format!("nav-{label}")))
-            .label(label)
-            .w_full()
-            .justify_start()
+            .icon(icon)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.state.settings_open = false;
                 this.state.view = view;
@@ -2867,7 +2911,30 @@ impl NavidromeApp {
                 }
                 cx.notify();
             }));
-        button.ghost().selected(selected)
+        if collapsed {
+            // 折叠态：图标按钮居中、拉高加大点击区，标签退化为 tooltip。
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
+                    button
+                        .tooltip(label)
+                        .ghost()
+                        .selected(selected)
+                        .w_full()
+                        .h(px(32.0)),
+                )
+                .into_any_element()
+        } else {
+            button
+                .label(label)
+                .justify_start()
+                .ghost()
+                .selected(selected)
+                .w_full()
+                .into_any_element()
+        }
     }
 
     fn favorite_button(&self, kind: FavoriteKind, id: &str, cx: &Context<Self>) -> Button {
@@ -6352,28 +6419,39 @@ impl Render for NavidromeApp {
                     .min_h_0()
                     .child(
                         v_flex()
-                            .w(px(216.0))
+                            .w(px(if self.config.sidebar_collapsed {
+                                56.0
+                            } else {
+                                216.0
+                            }))
                             .h_full()
                             .p_3()
                             .gap_1()
                             .border_r_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().sidebar)
+                            .when(!self.config.sidebar_collapsed, |this| {
+                                this.child(
+                                    div()
+                                        .px_2()
+                                        .py_2()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("LIBRARY"),
+                                )
+                            })
+                            .child(self.nav_button(View::Home, "Home", AppIcon::Home, cx))
+                            .child(self.nav_button(View::Favorites, "Favorites", AppIcon::Heart, cx))
                             .child(
-                                div()
-                                    .px_2()
-                                    .py_2()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("LIBRARY"),
+                                self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx),
                             )
-                            .child(self.nav_button(View::Home, "Home", cx))
-                            .child(self.nav_button(View::Favorites, "Favorites", cx))
-                            .child(self.nav_button(View::Artists, "Artists", cx))
-                            .child(self.nav_button(View::Albums, "Albums", cx))
-                            .child(self.nav_button(View::Playlists, "Playlists", cx))
-                            .child(self.nav_button(View::Search, "Search", cx)),
+                            .child(self.nav_button(View::Albums, "Albums", AppIcon::Albums, cx))
+                            .child(
+                                self.nav_button(View::Playlists, "Playlists", AppIcon::Playlists, cx),
+                            )
+                            .child(self.nav_button(View::Search, "Search", KitIcon::Search, cx))
+                            .child(self.sidebar_collapse_toggle(cx)),
                     )
                     .child(
                         div()

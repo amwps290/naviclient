@@ -301,6 +301,9 @@ pub struct Config {
     pub playback_mode: PlaybackMode,
     #[serde(default)]
     pub volume_normalization: VolumeNormalization,
+    /// 侧边栏是否折叠为图标栏。
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 impl Default for Config {
@@ -315,6 +318,7 @@ impl Default for Config {
             volume: default_volume(),
             playback_mode: PlaybackMode::Sequential,
             volume_normalization: VolumeNormalization::Track,
+            sidebar_collapsed: false,
         }
     }
 }

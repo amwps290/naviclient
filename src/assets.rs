@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 33] = [
+const ICON_FILES: [&str; 37] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -38,6 +38,10 @@ const ICON_FILES: [&str; 33] = [
     "play-sequential.svg",
     "chevron-up.svg",
     "chevron-down.svg",
+    "house.svg",
+    "mic-vocal.svg",
+    "disc-album.svg",
+    "list-music.svg",
 ];
 
 pub struct Assets;
@@ -70,6 +74,10 @@ pub enum AppIcon {
     MiniPlayer,
     Maximize,
     PlaySequential,
+    Home,
+    Artists,
+    Albums,
+    Playlists,
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +119,10 @@ impl IconNamed for AppIcon {
             Self::MiniPlayer => "icons/mini-player.svg",
             Self::Maximize => "icons/window-maximize.svg",
             Self::PlaySequential => "icons/play-sequential.svg",
+            Self::Home => "icons/house.svg",
+            Self::Artists => "icons/mic-vocal.svg",
+            Self::Albums => "icons/disc-album.svg",
+            Self::Playlists => "icons/list-music.svg",
         }
         .into()
     }
@@ -181,6 +193,10 @@ impl AssetSource for Assets {
             "icons/play-sequential.svg" => {
                 Some(include_bytes!("../assets/icons/play-sequential.svg"))
             }
+            "icons/house.svg" => Some(include_bytes!("../assets/icons/house.svg")),
+            "icons/mic-vocal.svg" => Some(include_bytes!("../assets/icons/mic-vocal.svg")),
+            "icons/disc-album.svg" => Some(include_bytes!("../assets/icons/disc-album.svg")),
+            "icons/list-music.svg" => Some(include_bytes!("../assets/icons/list-music.svg")),
             _ => None,
         };
 
