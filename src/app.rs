@@ -329,6 +329,9 @@ enum Shortcut {
     ToggleQueue,
     CloseOverlays,
     FocusSearch,
+    SelectPrevious,
+    SelectNext,
+    PlaySelected,
     None,
 }
 
@@ -339,6 +342,14 @@ fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
             "f" => return Shortcut::FocusSearch,
             "left" => return Shortcut::Previous,
             "right" => return Shortcut::Next,
+            _ => {}
+        }
+    }
+    // Shift+↑/↓：歌曲列表键盘导航（与音量键让开）。
+    if mods.shift && !mods.control && !mods.alt && !mods.platform {
+        match key {
+            "up" => return Shortcut::SelectPrevious,
+            "down" => return Shortcut::SelectNext,
             _ => {}
         }
     }
@@ -354,6 +365,7 @@ fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
         "m" => Shortcut::ToggleMute,
         "l" => Shortcut::ToggleNowPlaying,
         "q" => Shortcut::ToggleQueue,
+        "enter" => Shortcut::PlaySelected,
         "escape" => Shortcut::CloseOverlays,
         _ => Shortcut::None,
     }
@@ -434,6 +446,8 @@ struct AppState {
     requested_covers: HashSet<String>,
     status: String,
     settings_open: bool,
+    /// 键盘导航选中的歌曲行：作用域 + 行号。
+    song_list_selected: Option<(&'static str, usize)>,
     view_before_now_playing: View,
     playback_mode: PlaybackMode,
     shuffle_history: ShuffleHistory,
@@ -490,6 +504,7 @@ impl Default for AppState {
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
             settings_open: false,
+            song_list_selected: None,
             view_before_now_playing: View::Home,
             playback_mode: PlaybackMode::default(),
             shuffle_history: ShuffleHistory::default(),
@@ -1058,14 +1073,70 @@ impl NavidromeApp {
     }
 
     /// 歌曲列表滚动时按需加载可见行的封面。
+    /// 当前页面主歌曲列表对应的作用域；无列表页面返回 None。
+    fn active_song_list_scope(&self) -> Option<&'static str> {
+        match self.state.view {
+            View::AlbumDetail => Some("album-detail"),
+            View::PlaylistDetail => Some("playlist-detail"),
+            View::Queue => Some("queue"),
+            View::Favorites => Some("favorites"),
+            View::Search => Some("search"),
+            _ => None,
+        }
+    }
+
+    /// Shift+↑/↓ 移动键盘选中行；无选中时从首行/末行开始。
+    /// 自动滚动到选中行。
+    fn move_song_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.state.settings_open {
+            return;
+        }
+        let Some(scope) = self.active_song_list_scope() else {
+            return;
+        };
+        let len = self.songs_for_scope(scope).map_or(0, <[Song]>::len);
+        if len == 0 {
+            return;
+        }
+        let next = match self.state.song_list_selected {
+            Some((selected_scope, index)) if selected_scope == scope => index
+                .saturating_add_signed(delta)
+                .min(len - 1),
+            _ => {
+                if delta > 0 {
+                    0
+                } else {
+                    len - 1
+                }
+            }
+        };
+        self.state.song_list_selected = Some((scope, next));
+        self.song_list_scroll(scope)
+            .scroll_to_item(next, gpui_kit::ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    /// Enter 播放键盘选中的行。
+    fn play_selected_song(&mut self, cx: &mut Context<Self>) {
+        if self.state.settings_open {
+            return;
+        }
+        let Some((scope, index)) = self.state.song_list_selected else {
+            return;
+        };
+        if self.active_song_list_scope() != Some(scope) {
+            return;
+        }
+        let len = self.songs_for_scope(scope).map_or(0, <[Song]>::len);
+        if index < len {
+            self.play_song_at_scope(scope, index);
+        }
+        cx.notify();
+    }
+
     fn maybe_load_visible_song_covers(&mut self) {
-        let scope = match self.state.view {
-            View::AlbumDetail => "album-detail",
-            View::PlaylistDetail => "playlist-detail",
-            View::Queue => "queue",
-            View::Favorites => "favorites",
-            View::Search => "search",
-            _ => return,
+        let Some(scope) = self.active_song_list_scope() else {
+            return;
         };
         let Some(songs) = self.songs_for_scope(scope) else {
             return;
@@ -1843,10 +1914,20 @@ impl NavidromeApp {
             && now.duration_since(self.last_shortcut_at) < Duration::from_millis(250);
         self.last_shortcut_key = keystroke.key.clone();
         self.last_shortcut_at = now;
-        if repeated {
+        // 选择移动豁免重复保护：按住 Shift+↑/↓ 可连续移动。
+        if repeated && !matches!(shortcut, Shortcut::SelectPrevious | Shortcut::SelectNext) {
             return;
         }
         match shortcut {
+            Shortcut::SelectPrevious => {
+                self.move_song_selection(-1, cx);
+            }
+            Shortcut::SelectNext => {
+                self.move_song_selection(1, cx);
+            }
+            Shortcut::PlaySelected => {
+                self.play_selected_song(cx);
+            }
             Shortcut::TogglePlayback => {
                 self.toggle_playback();
                 cx.notify();
@@ -3961,7 +4042,15 @@ impl NavidromeApp {
             .border_color(cx.theme().border.opacity(0.6))
             .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
             .cursor_pointer();
-        let row = if current {
+        let keyboard_selected = self
+            .state
+            .song_list_selected
+            .is_some_and(|(selected_scope, selected_index)| {
+                selected_scope == scope && selected_index == index
+            });
+        let row = if keyboard_selected {
+            row.bg(cx.theme().accent.opacity(0.16))
+        } else if current {
             row.bg(cx.theme().info.opacity(0.1))
         } else {
             row
@@ -7361,6 +7450,22 @@ mod tests {
         assert_eq!(match_shortcut("left", ctrl), Shortcut::Previous);
         assert_eq!(match_shortcut("right", ctrl), Shortcut::Next);
         assert_eq!(match_shortcut("space", ctrl), Shortcut::None);
+    }
+
+    #[test]
+    fn shortcut_mapping_selects_list_rows_with_shift_and_plays_with_enter() {
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        let none = Modifiers::default();
+        assert_eq!(match_shortcut("up", shift), Shortcut::SelectPrevious);
+        assert_eq!(match_shortcut("down", shift), Shortcut::SelectNext);
+        // 裸方向键仍是音量控制，不被 Shift 导航占用。
+        assert_eq!(match_shortcut("up", none), Shortcut::VolumeUp);
+        assert_eq!(match_shortcut("down", none), Shortcut::VolumeDown);
+        assert_eq!(match_shortcut("enter", none), Shortcut::PlaySelected);
+        assert_eq!(match_shortcut("enter", shift), Shortcut::None);
     }
 
     #[test]
