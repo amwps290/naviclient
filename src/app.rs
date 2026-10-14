@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -13,7 +14,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, DropdownMenu},
-    scroll::ScrollableElement,
+    scroll::{Scrollbar, ScrollableElement},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
     v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Theme,
@@ -26,7 +27,8 @@ use gpui_kit::{
     Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, Keystroke,
     Modifiers, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
     ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
-    StyledImage, Subscription, Transformation, Window, WindowControlArea,
+    StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
+    ListSizingBehavior, uniform_list,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -412,7 +414,6 @@ struct AppState {
     current_playlist: Option<Playlist>,
     playlist_songs: Vec<Song>,
     search_results: Option<SearchResults>,
-    song_rows_visible: usize,
     playlists_visible: usize,
     hovered_item: Option<String>,
     pending_play_album: bool,
@@ -470,7 +471,6 @@ impl Default for AppState {
             current_playlist: None,
             playlist_songs: Vec::new(),
             search_results: None,
-            song_rows_visible: 50,
             playlists_visible: 50,
             hovered_item: None,
             pending_play_album: false,
@@ -528,6 +528,8 @@ pub struct NavidromeApp {
     lyrics_scroll_handle: ScrollHandle,
     lyrics_scroll_target: Option<Pixels>,
     content_scroll_handle: ScrollHandle,
+    /// 每个歌曲列表作用域的 uniform_list 滚动句柄：视口虚拟化 + 按需预取封面。
+    song_list_scrolls: RefCell<HashMap<&'static str, UniformListScrollHandle>>,
     cover_slots: Arc<tokio::sync::Semaphore>,
     title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
     tray_rx: Receiver<TrayCommand>,
@@ -636,6 +638,7 @@ impl NavidromeApp {
             lyrics_scroll_handle: ScrollHandle::new(),
             lyrics_scroll_target: None,
             content_scroll_handle: ScrollHandle::new(),
+            song_list_scrolls: RefCell::new(HashMap::new()),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             title_width_cache: RefCell::new(HashMap::new()),
             tray_rx: mpsc::channel().1,
@@ -674,7 +677,6 @@ impl NavidromeApp {
                 app.config.playback_mode = session.playback_mode;
                 app.state.shuffle_history =
                     ShuffleHistory::restore(session.shuffle_played, session.shuffle_forward);
-                app.state.song_rows_visible = app.state.queue.len().min(50);
                 if let Some(index) = restored_index {
                     let song = app.state.queue.get(index).cloned();
                     if let Some(song) = song {
@@ -962,10 +964,8 @@ impl NavidromeApp {
     }
 
     fn maybe_load_more_content(&mut self) {
-        // 歌曲列表封面按需加载（滚动即触发，不依赖接近底部）。
-        self.maybe_load_visible_song_covers();
-
         // 长列表增量渲染 / 分页：接近底部时追加。
+        // 歌曲列表已改为 uniform_list 视口虚拟化，不再需要逐批追加行。
         let max = self.content_scroll_handle.max_offset().y;
         // GPUI stores the translated content position as a negative offset.
         let offset = -self.content_scroll_handle.offset().y;
@@ -982,37 +982,86 @@ impl NavidromeApp {
                 self.state.playlists_visible =
                     (self.state.playlists_visible + 100).min(self.state.playlists.len());
             }
-            View::AlbumDetail | View::PlaylistDetail | View::Queue | View::Favorites => {
-                let songs_len = match self.state.view {
-                    View::AlbumDetail => self.state.current_songs.len(),
-                    View::PlaylistDetail => self.state.playlist_songs.len(),
-                    View::Queue => self.state.queue.len(),
-                    _ => self.state.favorites.songs.len(),
-                };
-                if self.state.song_rows_visible < songs_len {
-                    self.state.song_rows_visible =
-                        (self.state.song_rows_visible + 50).min(songs_len);
-                }
-            }
             _ => {}
         }
     }
 
-    /// 歌曲列表（专辑详情 / 播放列表详情）滚动时按需加载可见行的封面。
+    /// 歌曲列表作用域对应的歌曲切片；列表滚动 / 事件处理时重新解析，
+    /// 避免在每次渲染时克隆整个列表。
+    fn songs_for_scope(&self, scope: &str) -> Option<&[Song]> {
+        match scope {
+            "album-detail" => Some(&self.state.current_songs),
+            "playlist-detail" => Some(&self.state.playlist_songs),
+            "favorites" => Some(&self.state.favorites.songs),
+            "search" => Some(&self.state.search_results.as_ref()?.songs),
+            "queue" => Some(&self.state.queue),
+            _ => None,
+        }
+    }
+
+    fn song_for_scope(&self, scope: &str, index: usize) -> Option<&Song> {
+        self.songs_for_scope(scope)?.get(index)
+    }
+
+    /// 点击作用域列表的第 index 行：从当前列表重建队列并从该行开始播放。
+    /// 队列作用域只定位到该队列位置，不重建队列。
+    fn play_song_at_scope(&mut self, scope: &str, index: usize) {
+        let Some(songs) = self.songs_for_scope(scope) else {
+            return;
+        };
+        if index >= songs.len() {
+            return;
+        }
+        let replacement = if scope == "queue" {
+            None
+        } else {
+            Some(songs.to_vec())
+        };
+        self.cancel_next_preload();
+        if let Some(songs) = replacement {
+            self.state.queue = songs;
+        }
+        self.state.shuffle_history.start(index);
+        self.play_queue_index(index);
+        self.save_session();
+    }
+
+    /// 取得（或首次创建）某作用域歌曲列表的滚动句柄。
+    fn song_list_scroll(&self, scope: &'static str) -> UniformListScrollHandle {
+        self.song_list_scrolls
+            .borrow_mut()
+            .entry(scope)
+            .or_default()
+            .clone()
+    }
+
+    /// 歌曲列表滚动时按需加载可见行的封面。
     fn maybe_load_visible_song_covers(&mut self) {
-        let songs = match self.state.view {
-            View::AlbumDetail => &self.state.current_songs,
-            View::PlaylistDetail => &self.state.playlist_songs,
+        let scope = match self.state.view {
+            View::AlbumDetail => "album-detail",
+            View::PlaylistDetail => "playlist-detail",
+            View::Queue => "queue",
+            View::Favorites => "favorites",
+            View::Search => "search",
             _ => return,
+        };
+        let Some(songs) = self.songs_for_scope(scope) else {
+            return;
         };
         if songs.is_empty() {
             return;
         }
-        let offset = f32::from(-self.content_scroll_handle.offset().y);
-        // 内容区 padding 24 + 表头 36 + 行高 60 + 1px 边框
+        let Some(handle) = self.song_list_scrolls.borrow().get(scope).cloned() else {
+            return;
+        };
+        let base = handle.0.borrow().base_handle.clone();
+        let offset = f32::from(-base.offset().y).max(0.0);
+        let viewport = f32::from(base.bounds().size.height).max(0.0);
+        // 行高 60 + 1px 边框；额外预取约两个视口的封面。
         let row_height = 61.0_f32;
-        let first = (((offset - 60.0) / row_height).max(0.0) as usize).min(songs.len());
-        let last = (first + 40).min(songs.len());
+        let first = ((offset / row_height) as usize).min(songs.len());
+        let lookahead = ((viewport / row_height) as usize).saturating_mul(2).max(40);
+        let last = first.saturating_add(lookahead).min(songs.len());
         // 先收集需要加载的封面 id，避免在借用期间修改 self。
         let pending: Vec<String> = songs[first..last]
             .iter()
@@ -1127,7 +1176,6 @@ impl NavidromeApp {
         self.state.playlist_songs.clear();
         self.state.view = View::PlaylistDetail;
         self.state.error = None;
-        self.state.song_rows_visible = 50;
         self.ensure_cover(playlist.cover_art.as_deref(), true);
         self.load_playlist_detail(playlist.id);
     }
@@ -1212,7 +1260,6 @@ impl NavidromeApp {
         self.cancel_next_preload();
         self.state.queue = songs.to_vec();
         self.state.shuffle_history.start(index);
-        self.state.song_rows_visible = songs.len().min(50);
         self.play_queue_index(index);
         self.save_session();
     }
@@ -2531,7 +2578,6 @@ impl NavidromeApp {
                                     .filter_map(|song| song.cover_art.clone())
                                     .take(40)
                                     .collect();
-                                self.state.song_rows_visible = songs.len().min(50);
                                 self.state.current_songs = songs;
                                 self.preload_covers(covers);
                                 if self.state.pending_play_album {
@@ -2613,7 +2659,6 @@ impl NavidromeApp {
                             .collect();
                         self.state.favorites = favorites;
                         self.state.favorite_ids = favorite_ids;
-                        self.state.song_rows_visible = 50;
                         self.preload_covers(covers);
                     }
                     Err(error) => self.state.error = Some(error),
@@ -2660,7 +2705,6 @@ impl NavidromeApp {
                                     .filter_map(|song| song.cover_art.clone())
                                     .take(40)
                                     .collect();
-                                self.state.song_rows_visible = songs.len().min(50);
                                 self.state.playlist_songs = songs;
                                 self.preload_covers(covers);
                             }
@@ -2672,7 +2716,6 @@ impl NavidromeApp {
                     self.state.loading = false;
                     match result {
                         Ok(results) => {
-                            self.state.song_rows_visible = 50;
                             self.state.search_results = Some(results);
                         }
                         Err(error) => self.state.error = Some(error),
@@ -2680,7 +2723,6 @@ impl NavidromeApp {
                 }
                 Msg::PlayArtistSongs(result) => match result {
                     Ok(songs) => {
-                        self.state.song_rows_visible = songs.len().min(50);
                         self.play_song_list(&songs, 0);
                     }
                     Err(error) => self.state.error = Some(error),
@@ -3703,25 +3745,57 @@ impl NavidromeApp {
 
     fn render_song_list(
         &self,
-        scope: &str,
-        songs: &[Song],
+        scope: &'static str,
         editable: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        // 增量渲染：只渲染前 song_rows_visible 行，滚动时逐批追加，避免长列表一次重建。
-        let visible = self.state.song_rows_visible.min(songs.len());
-        let queue_source = Arc::new(songs.to_vec());
-        let songs = &songs[..visible];
-        let playback = self.audio.state();
+        // uniform_list 视口虚拟化：只构建可见行，长列表不再一次性挂载全部元素，
+        // 滚动多久元素树就只有多大，与列表总长度无关。
+        let Some(songs) = self.songs_for_scope(scope) else {
+            return div().into_any_element();
+        };
+        if songs.is_empty() {
+            return div().into_any_element();
+        }
+        let handle = self.song_list_scroll(scope);
+        // 专辑 / 播放列表详情和队列页中表格占满剩余高度（表头固定，列表内部滚动）；
+        // 收藏与搜索页的歌曲表格与其他分区共存，限制高度独立滚动。
+        let fill = matches!(scope, "album-detail" | "playlist-detail" | "queue");
+        let rows = cx.processor(
+            move |this, range: Range<usize>, _window, cx| {
+                let playback = this.audio.state();
+                range
+                    .map(|index| this.render_song_row(scope, index, editable, &playback, cx))
+                    .collect::<Vec<_>>()
+            },
+        );
+        let list = uniform_list(
+            SharedString::from(format!("song-list-{scope}")),
+            songs.len(),
+            rows,
+        )
+        .track_scroll(&handle)
+        .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, _| {
+            this.maybe_load_visible_song_covers();
+        }))
+        .when(fill, |list| list.flex_1().min_h_0())
+        // 限高模式下没有 flex 约束，改用 Infer 让列表按内容计算高度，再由 max_h 截断。
+        .when(!fill, |list| {
+            list.with_sizing_behavior(ListSizingBehavior::Infer)
+                .max_h(px(600.0))
+        });
         v_flex()
+            .relative()
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
             .rounded_lg()
             .overflow_hidden()
+            .when(fill, |this| this.flex_1().min_h_0())
             .child(
                 h_flex()
                     .h(px(36.0))
+                    .flex_none()
                     .px_3()
                     .gap_3()
                     .bg(cx.theme().secondary)
@@ -3734,289 +3808,311 @@ impl NavidromeApp {
                     .child(div().w(px(64.0)).text_right().child("Time"))
                     .child(div().w(px(28.0))),
             )
-            .children(songs.iter().enumerate().map(|(index, song)| {
-                let key = item_instance_key(scope, "song", index, &song.id);
-                let queue = queue_source.clone();
-                let menu_context = SongMenuContext {
-                    songs: queue.clone(),
-                    index,
-                    queue: editable,
-                    playlist: (scope == "playlist-detail")
-                        .then(|| self.state.current_playlist.clone())
-                        .flatten(),
-                };
-                let menu_app = cx.entity().downgrade();
-                let button_menu_app = menu_app.clone();
-                let button_menu_context = menu_context.clone();
-                let current = self
-                    .state
-                    .now_playing
-                    .as_ref()
-                    .is_some_and(|playing| playing.id == song.id)
-                    && (!editable || self.state.queue_index == Some(index));
-                let animated = current && playback.active && !playback.paused;
-                let album = if song.album.trim().is_empty() {
-                    "Unknown album".to_string()
-                } else {
-                    song.album.clone()
-                };
-                let song_id_for_hover = key.clone();
-                let row = h_flex()
-                    .id(SharedString::from(key.clone()))
-                    .h(px(60.0))
-                    .px_3()
-                    .gap_3()
-                    .relative()
-                    .border_t_1()
-                    .border_color(cx.theme().border.opacity(0.6))
-                    .on_hover(cx.listener(move |this, hovering, _, cx| {
-                        this.set_hovered(&song_id_for_hover, *hovering, cx);
-                    }))
-                    .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
-                    .cursor_pointer();
-                let row = if current {
-                    row.bg(cx.theme().info.opacity(0.1))
-                } else {
-                    row
-                };
-                let hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
-
-                row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
-                    .child(
-                        div()
-                            .w(px(42.0))
-                            .h(px(42.0))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border.opacity(0.7))
-                            .bg(cx.theme().background)
-                            .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_2()
-                            .text_color(if current {
-                                cx.theme().info
-                            } else {
-                                cx.theme().foreground
-                            })
-                            .child(self.render_playing_indicator(&key, current, animated, cx))
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .line_height(rems(1.25))
-                                            .truncate()
-                                            .child(song.title.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .line_height(rems(1.2))
-                                            .truncate()
-                                            .child(album),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w(px(180.0))
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .truncate()
-                            .child(song.artist.clone()),
-                    )
-                    .child(
-                        div()
-                            .w(px(64.0))
-                            .text_sm()
-                            .text_right()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format_duration(song.duration)),
-                    )
-                    .child(
-                        div()
-                            .id("song-actions-trigger")
-                            .flex_none()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(|_, _, cx| cx.stop_propagation())
-                            .child(
-                                Button::new(SharedString::from(format!("song-menu-{key}")))
-                                    .icon(IconName::Ellipsis)
-                                    .tooltip("Song actions")
-                                    .ghost()
-                                    .small()
-                                    .dropdown_menu(move |menu, _, cx| {
-                                        button_menu_app
-                                            .update(cx, |this, cx| {
-                                                this.song_menu(
-                                                    menu,
-                                                    button_menu_context.clone(),
-                                                    cx,
-                                                )
-                                            })
-                                            .expect("app owns song menu")
-                                    }),
-                            ),
-                    )
-                    .when(hovered, |row| {
-                        let song_id = song.id.clone();
-                        if editable {
-                            let queue_len = queue.len();
-                            row.child(
-                                h_flex()
-                                    .absolute()
-                                    .right(px(46.0))
-                                    .top(px(12.0))
-                                    .items_center()
-                                    .gap_0p5()
-                                    .px_1p5()
-                                    .py_0p5()
-                                    .rounded_lg()
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.opacity(0.96))
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "queue-up-{song_id}"
-                                        )))
-                                        .icon(AppIcon::ChevronUp)
-                                        .tooltip("Move up")
-                                        .ghost()
-                                        .small()
-                                        .disabled(index == 0)
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.move_queue_item(index, index - 1);
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "queue-down-{song_id}"
-                                        )))
-                                        .icon(AppIcon::ChevronDown)
-                                        .tooltip("Move down")
-                                        .ghost()
-                                        .small()
-                                        .disabled(index + 1 >= queue_len)
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.move_queue_item(index, index + 1);
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "queue-remove-{song_id}"
-                                        )))
-                                        .icon(AppIcon::Close)
-                                        .tooltip("Remove from queue")
-                                        .ghost()
-                                        .small()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.remove_from_queue(index);
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    ),
-                            )
-                        } else {
-                            let play_next_song = song.clone();
-                            let add_queue_song = song.clone();
-                            row.child(
-                                h_flex()
-                                    .absolute()
-                                    .right(px(46.0))
-                                    .top(px(12.0))
-                                    .items_center()
-                                    .gap_0p5()
-                                    .px_1p5()
-                                    .py_0p5()
-                                    .rounded_lg()
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background.opacity(0.96))
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "play-next-{song_id}"
-                                        )))
-                                        .icon(PlayerIcon::Next)
-                                        .tooltip("Play next")
-                                        .ghost()
-                                        .small()
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.insert_next(play_next_song.clone());
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new(SharedString::from(format!(
-                                            "add-to-queue-{song_id}"
-                                        )))
-                                        .icon(AppIcon::Queue)
-                                        .tooltip("Add to queue")
-                                        .ghost()
-                                        .small()
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.add_to_queue(add_queue_song.clone());
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    ),
-                            )
-                        }
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        // 单击立即播放该歌曲
-                        this.play_song_list(&queue, index);
-                        cx.notify();
-                    }))
-                    .context_menu(move |menu, _, cx| {
-                        menu_app
-                            .update(cx, |this, cx| {
-                                this.song_menu(menu, menu_context.clone(), cx)
-                            })
-                            .unwrap_or_else(|_| unreachable!("app outlives its rows"))
-                    })
-            }))
+            .child(list)
+            .child(Scrollbar::vertical(&handle))
             .into_any_element()
     }
 
+    /// 渲染歌曲列表中的一行。行内事件只捕获 (scope, index)，
+    /// 触发时再从当前状态解析列表与歌曲，避免每次渲染克隆整个列表。
+    fn render_song_row(
+        &self,
+        scope: &'static str,
+        index: usize,
+        editable: bool,
+        playback: &PlaybackState,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let Some(song) = self.song_for_scope(scope, index) else {
+            return div().into_any_element();
+        };
+        let total = self.songs_for_scope(scope).map_or(0, <[Song]>::len);
+        let key = item_instance_key(scope, "song", index, &song.id);
+        let menu_app = cx.entity().downgrade();
+        let button_menu_app = menu_app.clone();
+        let current = self
+            .state
+            .now_playing
+            .as_ref()
+            .is_some_and(|playing| playing.id == song.id)
+            && (!editable || self.state.queue_index == Some(index));
+        let animated = current && playback.active && !playback.paused;
+        let album = if song.album.trim().is_empty() {
+            "Unknown album".to_string()
+        } else {
+            song.album.clone()
+        };
+        let song_id_for_hover = key.clone();
+        let row = h_flex()
+            .id(SharedString::from(key.clone()))
+            .h(px(60.0))
+            .px_3()
+            .gap_3()
+            .relative()
+            .border_t_1()
+            .border_color(cx.theme().border.opacity(0.6))
+            .on_hover(cx.listener(move |this, hovering, _, cx| {
+                this.set_hovered(&song_id_for_hover, *hovering, cx);
+            }))
+            .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
+            .cursor_pointer();
+        let row = if current {
+            row.bg(cx.theme().info.opacity(0.1))
+        } else {
+            row
+        };
+        let hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
+
+        row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
+            .child(
+                div()
+                    .w(px(42.0))
+                    .h(px(42.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(0.7))
+                    .bg(cx.theme().background)
+                    .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .text_color(if current {
+                        cx.theme().info
+                    } else {
+                        cx.theme().foreground
+                    })
+                    .child(self.render_playing_indicator(&key, current, animated, cx))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .line_height(rems(1.25))
+                                    .truncate()
+                                    .child(song.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .line_height(rems(1.2))
+                                    .truncate()
+                                    .child(album),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(180.0))
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .truncate()
+                    .child(song.artist.clone()),
+            )
+            .child(
+                div()
+                    .w(px(64.0))
+                    .text_sm()
+                    .text_right()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format_duration(song.duration)),
+            )
+            .child(
+                div()
+                    .id("song-actions-trigger")
+                    .flex_none()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        Button::new(SharedString::from(format!("song-menu-{key}")))
+                            .icon(IconName::Ellipsis)
+                            .tooltip("Song actions")
+                            .ghost()
+                            .small()
+                            .dropdown_menu(move |menu, _, cx| {
+                                button_menu_app
+                                    .update(cx, |this, cx| {
+                                        let Some(context) =
+                                            this.song_menu_context(scope, index, editable)
+                                        else {
+                                            return menu;
+                                        };
+                                        this.song_menu(menu, context, cx)
+                                    })
+                                    .expect("app owns song menu")
+                            }),
+                    ),
+            )
+            .when(hovered, |row| {
+                if editable {
+                    row.child(
+                        h_flex()
+                            .absolute()
+                            .right(px(46.0))
+                            .top(px(12.0))
+                            .items_center()
+                            .gap_0p5()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().background.opacity(0.96))
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "queue-up-{key}"
+                                )))
+                                .icon(AppIcon::ChevronUp)
+                                .tooltip("Move up")
+                                .ghost()
+                                .small()
+                                .disabled(index == 0)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_queue_item(index, index - 1);
+                                    cx.notify();
+                                })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "queue-down-{key}"
+                                )))
+                                .icon(AppIcon::ChevronDown)
+                                .tooltip("Move down")
+                                .ghost()
+                                .small()
+                                .disabled(index + 1 >= total)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_queue_item(index, index + 1);
+                                    cx.notify();
+                                })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "queue-remove-{key}"
+                                )))
+                                .icon(AppIcon::Close)
+                                .tooltip("Remove from queue")
+                                .ghost()
+                                .small()
+                                .text_color(cx.theme().muted_foreground)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.remove_from_queue(index);
+                                    cx.notify();
+                                })),
+                            ),
+                    )
+                } else {
+                    row.child(
+                        h_flex()
+                            .absolute()
+                            .right(px(46.0))
+                            .top(px(12.0))
+                            .items_center()
+                            .gap_0p5()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().background.opacity(0.96))
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "play-next-{key}"
+                                )))
+                                .icon(PlayerIcon::Next)
+                                .tooltip("Play next")
+                                .ghost()
+                                .small()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(song) = this.song_for_scope(scope, index) {
+                                        this.insert_next(song.clone());
+                                    }
+                                    cx.notify();
+                                })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "add-to-queue-{key}"
+                                )))
+                                .icon(AppIcon::Queue)
+                                .tooltip("Add to queue")
+                                .ghost()
+                                .small()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Some(song) = this.song_for_scope(scope, index) {
+                                        this.add_to_queue(song.clone());
+                                    }
+                                    cx.notify();
+                                })),
+                            ),
+                    )
+                }
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                // 单击立即播放该歌曲
+                this.play_song_at_scope(scope, index);
+                cx.notify();
+            }))
+            .context_menu(move |menu, _, cx| {
+                menu_app
+                    .update(cx, |this, cx| {
+                        let context = this.song_menu_context(scope, index, editable);
+                        let Some(context) = context else {
+                            return menu;
+                        };
+                        this.song_menu(menu, context, cx)
+                    })
+                    .unwrap_or_else(|_| unreachable!("app outlives its rows"))
+            })
+            .into_any_element()
+    }
+
+    /// 打开歌曲菜单时从当前状态构建菜单上下文；列表已变化时返回 None。
+    fn song_menu_context(
+        &self,
+        scope: &str,
+        index: usize,
+        editable: bool,
+    ) -> Option<SongMenuContext> {
+        let songs = self.songs_for_scope(scope)?;
+        if index >= songs.len() {
+            return None;
+        }
+        Some(SongMenuContext {
+            songs: Arc::new(songs.to_vec()),
+            index,
+            queue: editable,
+            playlist: (scope == "playlist-detail")
+                .then(|| self.state.current_playlist.clone())
+                .flatten(),
+        })
+    }
     fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let status_label = if self.state.loading {
             "Connecting..."
@@ -4833,7 +4929,7 @@ impl NavidromeApp {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Songs"),
                         )
-                        .child(self.render_song_list("favorites", &favorites.songs, false, cx));
+                        .child(self.render_song_list("favorites", false, cx));
                 }
 
                 content.into_any_element()
@@ -5053,7 +5149,7 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Songs"),
                             )
-                            .child(self.render_song_list("search", &results.songs, false, cx));
+                            .child(self.render_song_list("search", false, cx));
                     }
                 }
                 content.into_any_element()
@@ -5083,11 +5179,14 @@ impl NavidromeApp {
                     return div().child("Album not found").into_any_element();
                 };
                 v_flex()
+                    .h_full()
+                    .min_h_0()
                     .gap_5()
                     .child(
                         h_flex()
                             .gap_5()
                             .items_end()
+                            .flex_none()
                             .child(self.render_cover(album.cover_art.as_deref(), 180.0, cx))
                             .child(
                                 v_flex()
@@ -5161,12 +5260,7 @@ impl NavidromeApp {
                             ),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(
-                        "album-detail",
-                        &self.state.current_songs,
-                        false,
-                        cx,
-                    ))
+                    .child(self.render_song_list("album-detail", false, cx))
                     .into_any_element()
             }
             View::PlaylistDetail => {
@@ -5179,6 +5273,8 @@ impl NavidromeApp {
                 let edit_disabled =
                     read_only || self.playlist_ui.busy || self.playlist_ui.detail_loading;
                 v_flex()
+                    .h_full()
+                    .min_h_0()
                     .gap_5()
                     .child(self.page_header(
                         playlist.name.clone(),
@@ -5278,16 +5374,13 @@ impl NavidromeApp {
                             }),
                     )
                     .children(self.error_banner(cx))
-                    .child(self.render_song_list(
-                        "playlist-detail",
-                        &self.state.playlist_songs,
-                        false,
-                        cx,
-                    ))
+                    .child(self.render_song_list("playlist-detail", false, cx))
                     .into_any_element()
             }
             View::NowPlaying => self.render_now_playing(window, cx),
             View::Queue => v_flex()
+                .h_full()
+                .min_h_0()
                 .gap_5()
                 .child(self.page_header(
                     "Queue",
@@ -5360,12 +5453,7 @@ impl NavidromeApp {
                                     })),
                             ),
                     )
-                    .child(self.render_song_list(
-                        "queue",
-                        &self.state.queue,
-                        true,
-                        cx,
-                    ))
+                    .child(self.render_song_list("queue", true, cx))
                 })
                 .into_any_element(),
         }
