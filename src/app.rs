@@ -530,6 +530,8 @@ pub struct NavidromeApp {
     lyrics_scroll_handle: ScrollHandle,
     lyrics_scroll_target: Option<Pixels>,
     content_scroll_handle: ScrollHandle,
+    /// 设置卡片内容区的滚动句柄。
+    settings_scroll: ScrollHandle,
     /// 每个歌曲列表作用域的 uniform_list 滚动句柄：视口虚拟化 + 按需预取封面。
     song_list_scrolls: RefCell<HashMap<&'static str, UniformListScrollHandle>>,
     /// 待发出的 Toast 通知：错误站点大多拿不到 Window，先入队，
@@ -643,6 +645,7 @@ impl NavidromeApp {
             lyrics_scroll_handle: ScrollHandle::new(),
             lyrics_scroll_target: None,
             content_scroll_handle: ScrollHandle::new(),
+            settings_scroll: ScrollHandle::new(),
             song_list_scrolls: RefCell::new(HashMap::new()),
             pending_notifications: Vec::new(),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -4374,6 +4377,84 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// 设置覆盖层：盖住侧边栏与内容区，点击背景或 Esc 关闭；
+    /// 标题栏和底部播放条不被遮挡，改设置时也能控制播放。
+    fn render_settings_overlay(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        div()
+            .id("settings-backdrop")
+            .absolute()
+            .inset_0()
+            .occlude() // 遮罩挡住背后所有命中框：后方页面不再响应滚轮/悬停
+            .flex()
+            .justify_center()
+            .items_start()
+            // 固定黑色半透明背景：亮/暗主题下都是压暗效果。
+            .bg(hsla(0.0, 0.0, 0.0, 0.35))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.state.settings_open = false;
+                cx.notify();
+            }))
+            .child(
+                v_flex()
+                    .id("settings-card")
+                    .w(px(760.0))
+                    .max_w(relative(0.92))
+                    .max_h(relative(0.88))
+                    .mt(px(48.0))
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded_xl()
+                    .shadow_xl()
+                    .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        // 点击卡片内部不触发背景关闭。
+                        cx.stop_propagation()
+                    })
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .px_5()
+                            .py_3()
+                            .justify_between()
+                            .items_center()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Settings"),
+                            )
+                            .child(
+                                Button::new("close-settings")
+                                    .icon(AppIcon::Close)
+                                    .tooltip("Close settings")
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.state.settings_open = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        // 原生 overflow_y_scroll + 手动滚动条图层：
+                        // overflow_y_scrollbar 的包装器根节点是 size_full，
+                        // 在自动高度的卡片里百分比解析为 0 会整体塌缩。
+                        div()
+                            .id("settings-body")
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.settings_scroll)
+                            .vertical_scrollbar(&self.settings_scroll)
+                            .p_6()
+                            .child(self.render_settings(cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let cache_dir = config::audio_cache_dir(&self.config);
         v_flex()
@@ -4861,10 +4942,6 @@ impl NavidromeApp {
     }
 
     fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        if self.state.settings_open {
-            return self.render_settings(cx);
-        }
-
         match self.state.view {
             View::Home => v_flex()
                 .gap_5()
@@ -6206,52 +6283,7 @@ impl Render for NavidromeApp {
             return self.render_mini(window, cx);
         }
 
-        if self.state.settings_open {
-            return v_flex()
-                .size_full()
-                .bg(cx.theme().background)
-                .text_color(cx.theme().foreground)
-                .child(
-                    TitleBar::new().child(
-                        h_flex()
-                            .h_full()
-                            .w_full()
-                            .items_center()
-                            .justify_between()
-                            .pr_2()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Settings"),
-                            )
-                            .child(
-                                // See `toggle-mini-player`: the title bar drag area
-                                // must not cover clickable elements.
-                                div().occlude().child(
-                                    Button::new("close-settings")
-                                        .icon(AppIcon::Close)
-                                        .tooltip("Close settings")
-                                        .ghost()
-                                        .small()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.state.settings_open = false;
-                                            cx.notify();
-                                        })),
-                                ),
-                            ),
-                    ),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scrollbar()
-                        .p_6()
-                        .child(self.render_settings(cx)),
-                )
-                .into_any_element();
-        }
+        let settings_open = self.state.settings_open;
 
         if self.state.view == View::NowPlaying {
             let (cover_base, cover_accent) = self.now_playing_palette(cx);
@@ -6343,10 +6375,14 @@ impl Render for NavidromeApp {
                 )
                 .child(
                     div()
+                        .relative()
                         .flex_1()
                         .min_h_0()
                         .overflow_hidden()
-                        .child(self.render_now_playing(window, cx)),
+                        .child(self.render_now_playing(window, cx))
+                        .when(settings_open, |this| {
+                            this.child(self.render_settings_overlay(cx))
+                        }),
                 )
                 .child(self.render_player(cx))
                 .bg(linear_gradient(
@@ -6415,6 +6451,7 @@ impl Render for NavidromeApp {
             )
             .child(
                 h_flex()
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .child(
@@ -6465,7 +6502,11 @@ impl Render for NavidromeApp {
                             }))
                             .p_6()
                             .child(self.render_content(window, cx)),
-                    ),
+                    )
+                    // 设置为内容区覆盖层：点击背景关闭，标题栏与播放条保持可操作。
+                    .when(settings_open, |row| {
+                        row.child(self.render_settings_overlay(cx))
+                    }),
             )
             .child(self.render_player(cx))
             .into_any_element()
