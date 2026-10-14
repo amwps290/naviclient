@@ -3856,8 +3856,12 @@ impl NavidromeApp {
         } else {
             song.album.clone()
         };
+        // uniform_list 把每行当作独立根元素布局（Definite 可用宽度），
+        // 不会像普通容器那样横向拉伸，必须显式 w_full：否则行宽收缩为
+        // 内容宽度，行尾按钮、悬停/正在播放高亮都无法纵向对齐。
         let row = h_flex()
             .id(SharedString::from(key.clone()))
+            .w_full()
             .h(px(60.0))
             .px_3()
             .gap_3()
