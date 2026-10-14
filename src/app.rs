@@ -3803,8 +3803,14 @@ impl NavidromeApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(34.0)))
                     .child(div().w(px(42.0)))
-                    .child(div().flex_1().child("Title"))
-                    .child(div().w(px(180.0)).child("Artist"))
+                    .child(div().flex_1().flex_grow(3.0).child("Title"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex_grow(2.0)
+                            .max_w(px(180.0))
+                            .child("Artist"),
+                    )
                     .child(div().w(px(64.0)).text_right().child("Time"))
                     .child(div().w(px(28.0))),
             )
@@ -3881,6 +3887,7 @@ impl NavidromeApp {
             .child(
                 h_flex()
                     .flex_1()
+                    .flex_grow(3.0)
                     .min_w_0()
                     .gap_2()
                     .text_color(if current {
@@ -3914,7 +3921,8 @@ impl NavidromeApp {
             )
             .child(
                 div()
-                    .w(px(180.0))
+                    .flex_1()
+                    .flex_grow(3.0)
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .truncate()
@@ -4864,13 +4872,7 @@ impl NavidromeApp {
                         "Newest albums",
                         self.render_home_album_content(
                             "newest",
-                            &self
-                                .state
-                                .albums
-                                .iter()
-                                .take(30)
-                                .cloned()
-                                .collect::<Vec<_>>(),
+                            &self.state.albums[..self.state.albums.len().min(30)],
                             self.state.albums_loading,
                             "No albums in your library yet.",
                             cx,
