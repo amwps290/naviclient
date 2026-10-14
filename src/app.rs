@@ -28,7 +28,7 @@ use gpui_kit::{
     Modifiers, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
     ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
     StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
-    ListSizingBehavior, uniform_list,
+    uniform_list,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -59,6 +59,8 @@ use playlists::{PlaylistUi, SongMenuContext};
 const MINI_WINDOW_WIDTH: Pixels = px(200.0);
 const MINI_WINDOW_HEIGHT: Pixels = px(50.0);
 const ALBUM_PAGE_SIZE: usize = 100;
+/// 歌曲行高：60px 内容 + 1px 顶部边框。uniform_list 限高模式和封面预取都依赖它。
+const SONG_ROW_HEIGHT: f32 = 61.0;
 
 fn item_instance_key(scope: &str, kind: &str, index: usize, id: &str) -> String {
     format!("{scope}/{kind}/{index}/{id}")
@@ -1057,8 +1059,8 @@ impl NavidromeApp {
         let base = handle.0.borrow().base_handle.clone();
         let offset = f32::from(-base.offset().y).max(0.0);
         let viewport = f32::from(base.bounds().size.height).max(0.0);
-        // 行高 60 + 1px 边框；额外预取约两个视口的封面。
-        let row_height = 61.0_f32;
+        // 额外预取约两个视口的封面。
+        let row_height = SONG_ROW_HEIGHT;
         let first = ((offset / row_height) as usize).min(songs.len());
         let lookahead = ((viewport / row_height) as usize).saturating_mul(2).max(40);
         let last = first.saturating_add(lookahead).min(songs.len());
@@ -3769,14 +3771,16 @@ impl NavidromeApp {
                     .collect::<Vec<_>>()
             },
         );
-        // 限高模式下没有 flex 约束，改用 Infer 让列表按内容计算高度，再由 max_h 截断。
-        // 上限取内容区视口高度：滚动到歌曲区时表格正好占满一屏，避免下方留白。
+        // 限高模式：显式给出列表高度 min(行数×行高, 视口)，不依赖 max_h。
+        // taffy 计算自动高度父容器的内容尺寸时会忽略 max 约束（ContentSize
+        // 模式不套用 min/max），Infer+max_h 会让列表按全部内容高度参与布局。
         let viewport = self.content_scroll_handle.bounds().size.height;
         let cap = if viewport > px(0.0) {
             (viewport - px(36.0)).max(px(300.0))
         } else {
             px(600.0)
         };
+        let capped_height = px((songs.len() as f32 * SONG_ROW_HEIGHT).min(f32::from(cap)));
         let list = uniform_list(
             SharedString::from(format!("song-list-{scope}")),
             songs.len(),
@@ -3787,10 +3791,7 @@ impl NavidromeApp {
             this.maybe_load_visible_song_covers();
         }))
         .when(fill, |list| list.flex_1().min_h_0())
-        .when(!fill, |list| {
-            list.with_sizing_behavior(ListSizingBehavior::Infer)
-                .max_h(cap)
-        });
+        .when(!fill, |list| list.h(capped_height));
         v_flex()
             .relative()
             .w_full()
@@ -3819,7 +3820,7 @@ impl NavidromeApp {
                             .child("Artist"),
                     )
                     .child(div().w(px(64.0)).text_right().child("Time"))
-                    .child(div().w(px(28.0))),
+                    .child(div().w(px(if editable { 124.0 } else { 92.0 }))),
             )
             .child(list)
             .child(Scrollbar::vertical(&handle))
@@ -3944,50 +3945,18 @@ impl NavidromeApp {
                     .child(format_duration(song.duration)),
             )
             .child(
-                div()
-                    .id("song-actions-trigger")
+                // 行尾操作列：固定宽度、常规布局，不再用悬浮层盖住行内容。
+                // 未悬停时降低透明度保持安静，悬停时完全显示。
+                h_flex()
                     .flex_none()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        Button::new(SharedString::from(format!("song-menu-{key}")))
-                            .icon(IconName::Ellipsis)
-                            .tooltip("Song actions")
-                            .ghost()
-                            .small()
-                            .dropdown_menu(move |menu, _, cx| {
-                                button_menu_app
-                                    .update(cx, |this, cx| {
-                                        let Some(context) =
-                                            this.song_menu_context(scope, index, editable)
-                                        else {
-                                            return menu;
-                                        };
-                                        this.song_menu(menu, context, cx)
-                                    })
-                                    .expect("app owns song menu")
-                            }),
-                    ),
-            )
-            .when(hovered, |row| {
-                if editable {
-                    row.child(
-                        h_flex()
-                            .absolute()
-                            .right(px(46.0))
-                            .top(px(12.0))
-                            .items_center()
-                            .gap_0p5()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().background.opacity(0.96))
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "queue-up-{key}"
-                                )))
+                    .w(px(if editable { 124.0 } else { 92.0 }))
+                    .items_center()
+                    .justify_end()
+                    .gap_0p5()
+                    .opacity(if hovered { 1.0 } else { 0.45 })
+                    .when(editable, |slot| {
+                        slot.child(
+                            Button::new(SharedString::from(format!("queue-up-{key}")))
                                 .icon(AppIcon::ChevronUp)
                                 .tooltip("Move up")
                                 .ghost()
@@ -4000,11 +3969,9 @@ impl NavidromeApp {
                                     this.move_queue_item(index, index - 1);
                                     cx.notify();
                                 })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "queue-down-{key}"
-                                )))
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("queue-down-{key}")))
                                 .icon(AppIcon::ChevronDown)
                                 .tooltip("Move down")
                                 .ghost()
@@ -4017,11 +3984,9 @@ impl NavidromeApp {
                                     this.move_queue_item(index, index + 1);
                                     cx.notify();
                                 })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "queue-remove-{key}"
-                                )))
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("queue-remove-{key}")))
                                 .icon(AppIcon::Close)
                                 .tooltip("Remove from queue")
                                 .ghost()
@@ -4034,26 +3999,11 @@ impl NavidromeApp {
                                     this.remove_from_queue(index);
                                     cx.notify();
                                 })),
-                            ),
-                    )
-                } else {
-                    row.child(
-                        h_flex()
-                            .absolute()
-                            .right(px(46.0))
-                            .top(px(12.0))
-                            .items_center()
-                            .gap_0p5()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().background.opacity(0.96))
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "play-next-{key}"
-                                )))
+                        )
+                    })
+                    .when(!editable, |slot| {
+                        slot.child(
+                            Button::new(SharedString::from(format!("play-next-{key}")))
                                 .icon(PlayerIcon::Next)
                                 .tooltip("Play next")
                                 .ghost()
@@ -4067,11 +4017,9 @@ impl NavidromeApp {
                                     }
                                     cx.notify();
                                 })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "add-to-queue-{key}"
-                                )))
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("add-to-queue-{key}")))
                                 .icon(AppIcon::Queue)
                                 .tooltip("Add to queue")
                                 .ghost()
@@ -4085,10 +4033,36 @@ impl NavidromeApp {
                                     }
                                     cx.notify();
                                 })),
+                        )
+                    })
+                    .child(
+                        div()
+                            .id("song-actions-trigger")
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .on_click(|_, _, cx| cx.stop_propagation())
+                            .child(
+                                Button::new(SharedString::from(format!("song-menu-{key}")))
+                                    .icon(IconName::Ellipsis)
+                                    .tooltip("Song actions")
+                                    .ghost()
+                                    .small()
+                                    .dropdown_menu(move |menu, _, cx| {
+                                        button_menu_app
+                                            .update(cx, |this, cx| {
+                                                let Some(context) = this
+                                                    .song_menu_context(scope, index, editable)
+                                                else {
+                                                    return menu;
+                                                };
+                                                this.song_menu(menu, context, cx)
+                                            })
+                                            .expect("app owns song menu")
+                                    }),
                             ),
-                    )
-                }
-            })
+                    ),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 // 单击立即播放该歌曲
                 this.play_song_at_scope(scope, index);
