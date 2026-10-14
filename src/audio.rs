@@ -21,6 +21,9 @@ use url::Url;
 
 mod preload;
 use preload::{Preloader, StreamControl};
+mod gapless;
+pub use gapless::TrackTransition;
+use gapless::{ArmedTrack, AutoTrack, GaplessSource, OutputTrack, Transition};
 
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 const DECODED_CHUNK_FRAMES: usize = 4096;
@@ -46,6 +49,7 @@ pub struct PlaybackState {
     pub buffered: Duration,
     /// The remaining audio is decoded locally; no further network reads needed.
     pub fully_buffered: bool,
+    pub transition_id: Option<u64>,
     pub duration: Option<Duration>,
     pub error: Option<String>,
     /// Incremented after a seek completes, for system media-session notifications.
@@ -72,6 +76,8 @@ enum Command {
         url: String,
         cache_key: String,
         duration_hint: Option<Duration>,
+        gain: f32,
+        transition: Arc<Transition>,
     },
     CancelPreload,
     Pause,
@@ -86,6 +92,7 @@ enum Command {
 pub struct AudioHandle {
     tx: Sender<Command>,
     state: Arc<Mutex<PlaybackState>>,
+    transition: Arc<Mutex<Option<Arc<Transition>>>>,
 }
 
 impl AudioHandle {
@@ -93,12 +100,17 @@ impl AudioHandle {
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let worker_state = Arc::clone(&state);
+        let transition = Arc::new(Mutex::new(None));
         thread::Builder::new()
             .name("audio-worker".to_string())
             .spawn(move || run_worker(rx, worker_state, cache_dir))
             .context("failed to start audio worker")?;
         log::debug!("audio worker thread started");
-        Ok(Self { tx, state })
+        Ok(Self {
+            tx,
+            state,
+            transition,
+        })
     }
 
     pub fn play(
@@ -110,6 +122,8 @@ impl AudioHandle {
         start_position: Duration,
         preload_id: Option<u64>,
     ) {
+        self.cancel_transition();
+        self.transition.lock().unwrap().take();
         if self
             .tx
             .send(Command::Play {
@@ -136,17 +150,39 @@ impl AudioHandle {
         url: String,
         cache_key: String,
         duration_hint: Option<Duration>,
+        gain: f32,
     ) {
+        let transition = Transition::new(id, duration_hint);
+        *self.transition.lock().unwrap() = Some(transition.clone());
         let _ = self.tx.send(Command::Preload {
             id,
             url,
             cache_key,
             duration_hint,
+            gain,
+            transition,
         });
     }
 
-    pub fn cancel_preload(&self) {
+    pub fn cancel_preload(&self) -> Option<TrackTransition> {
+        let event = self.freeze_preload();
         let _ = self.tx.send(Command::CancelPreload);
+        event
+    }
+
+    pub fn freeze_preload(&self) -> Option<TrackTransition> {
+        self.cancel_transition();
+        self.take_transition()
+    }
+
+    fn cancel_transition(&self) {
+        if let Some(transition) = self.transition.lock().unwrap().as_ref() {
+            transition.cancel();
+        }
+    }
+
+    pub fn take_transition(&self) -> Option<TrackTransition> {
+        self.transition.lock().unwrap().as_ref()?.take_event()
     }
 
     pub fn resume(&self) {
@@ -154,6 +190,8 @@ impl AudioHandle {
     }
 
     pub fn stop(&self) {
+        self.cancel_transition();
+        self.transition.lock().unwrap().take();
         let _ = self.tx.send(Command::Stop);
     }
 
@@ -162,20 +200,38 @@ impl AudioHandle {
     }
 
     pub fn set_cache_directory(&self, cache_dir: PathBuf) {
+        self.cancel_transition();
         if self.tx.send(Command::SetCacheDirectory(cache_dir)).is_err() {
             log::error!("failed to update cache directory: audio worker is unavailable");
         }
     }
 
     pub fn seek(&self, position: Duration) {
+        self.cancel_transition();
         let _ = self.tx.send(Command::Seek(position));
     }
 
     pub fn state(&self) -> PlaybackState {
-        self.state
+        let mut state = self
+            .state
             .lock()
             .map(|state| state.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // The output callback can lead the worker by one poll. Never expose the
+        // previous song's end/position/loudness as the newly started song.
+        if let Some(transition) = self.transition.lock().unwrap().as_ref() {
+            if transition.event().is_some() && state.transition_id != Some(transition.id) {
+                state = PlaybackState {
+                    active: true,
+                    paused: state.paused,
+                    duration: transition.duration,
+                    transition_id: Some(transition.id),
+                    seek_serial: state.seek_serial,
+                    ..Default::default()
+                };
+            }
+        }
+        state
     }
 }
 
@@ -308,6 +364,35 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let mixer = device_sink.mixer().clone();
     let (player, source) = Player::new();
     mixer.add(source);
+    let output = AudioOutput {
+        player,
+        channels: output_channels,
+        sample_rate: output_sample_rate,
+        handoff: Arc::new(Mutex::new(None)),
+    };
+    run_playback(rx, state, initial_cache_dir, client, output);
+}
+
+struct AudioOutput {
+    player: Player,
+    channels: ChannelCount,
+    sample_rate: SampleRate,
+    handoff: gapless::Slot,
+}
+
+fn run_playback(
+    rx: Receiver<Command>,
+    state: Arc<Mutex<PlaybackState>>,
+    initial_cache_dir: PathBuf,
+    client: Client,
+    output: AudioOutput,
+) {
+    let AudioOutput {
+        player,
+        channels: output_channels,
+        sample_rate: output_sample_rate,
+        handoff,
+    } = output;
     let (preparation_tx, preparation_rx) = mpsc::channel::<PreparationResult>();
     let mut preloader = Preloader::new(client.clone())
         .map_err(|error| {
@@ -318,7 +403,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
 
     let mut volume = 1.0;
     let mut current_gain = 1.0;
-    let loudness_shared = Arc::new(Mutex::new(None::<(f32, f32)>));
+    let mut loudness_shared = Arc::new(Mutex::new(None::<(f32, f32)>));
     let mut duration: Option<Duration> = None;
     let mut stream_error: Option<SharedStreamError> = None;
     let mut buffer_progress: Option<Arc<BufferProgress>> = None;
@@ -340,6 +425,10 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     let mut preparing = false;
     let mut desired_paused = false;
     let mut pending_preload = None;
+    let mut next_request = None;
+    let mut armed: Option<AutoTrack> = None;
+    let mut track_boundary = Duration::ZERO;
+    let mut transition_id = None;
 
     loop {
         let command = if let Some(command) = pending_commands.pop_front() {
@@ -352,6 +441,25 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             }
         };
 
+        if let Some(event) = armed.as_ref().and_then(|next| next.transition.event()) {
+            let next = armed.take().unwrap();
+            duration = next.info.duration;
+            stream_error = Some(next.info.error);
+            buffer_progress = Some(next.info.buffer);
+            decode_progress = Some(next.info.control);
+            loudness_shared = next.info.loudness;
+            current_url = Some(next.url);
+            current_cache_key = Some(next.cache_key);
+            current_gain = next.gain;
+            track_boundary = event.boundary;
+            position_offset = Duration::ZERO;
+            transition_id = Some(event.id);
+            terminal_state_logged = false;
+            next_request = None;
+            log::info!("gapless track started; ticket={}", event.id);
+        }
+
+        let mut ready_output = None;
         if let Some(command) = command {
             match command {
                 Command::Play {
@@ -363,15 +471,21 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     preload_id,
                 } => {
                     pending_preload = None;
+                    next_request = None;
+                    armed = None;
+                    track_boundary = Duration::ZERO;
+                    transition_id = None;
+                    let queued = handoff.lock().unwrap().take().filter(|next| {
+                        preload_id == Some(next.transition.id)
+                            && next.cache_key == cache_key
+                            && start_position.is_zero()
+                    });
                     log::info!(
                         "play requested; endpoint={} duration_hint_ms={:?} gain={gain}",
                         stream_endpoint(&url),
                         duration_hint.map(|duration| duration.as_millis())
                     );
                     current_gain = gain.clamp(0.1, 4.0);
-                    if let Ok(mut shared) = loudness_shared.lock() {
-                        *shared = None;
-                    }
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
                     desired_paused = false;
@@ -395,13 +509,17 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                         s.position = start_position;
                         s.buffered = Duration::ZERO;
                         s.fully_buffered = false;
+                        s.transition_id = None;
                         s.duration = duration_hint;
                         s.error = None;
                     });
                     let preloaded = preloader.as_mut().and_then(|preloader| {
                         preloader.take(preload_id, &cache_key, start_position)
                     });
-                    if let Some(stream) = preloaded {
+                    if let Some(queued) = queued {
+                        queued.track.info.control.promote();
+                        ready_output = Some((PreparationKind::Play, start_position, queued.track));
+                    } else if let Some(stream) = preloaded {
                         let _ = preparation_tx.send(PreparationResult {
                             generation: preparation_generation,
                             kind: PreparationKind::Play,
@@ -427,10 +545,15 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     url,
                     cache_key,
                     duration_hint,
+                    gain,
+                    transition,
                 } => {
-                    pending_preload = Some((id, url, cache_key, duration_hint));
+                    pending_preload = Some((id, url, cache_key, duration_hint, gain, transition));
                 }
                 Command::CancelPreload => {
+                    handoff.lock().unwrap().take();
+                    next_request = None;
+                    armed = None;
                     pending_preload = None;
                     if let Some(preloader) = preloader.as_mut() {
                         preloader.cancel();
@@ -449,6 +572,11 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     set_state(&state, |s| s.paused = false);
                 }
                 Command::Stop => {
+                    handoff.lock().unwrap().take();
+                    next_request = None;
+                    armed = None;
+                    track_boundary = Duration::ZERO;
+                    transition_id = None;
                     pending_preload = None;
                     if let Some(preloader) = preloader.as_mut() {
                         preloader.cancel();
@@ -480,9 +608,12 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                 }
                 Command::SetVolume(new_volume) => {
                     volume = new_volume.clamp(0.0, 1.0);
-                    player.set_volume(volume * current_gain);
+                    player.set_volume(volume);
                 }
                 Command::SetCacheDirectory(new_cache_dir) => {
+                    handoff.lock().unwrap().take();
+                    next_request = None;
+                    armed = None;
                     pending_preload = None;
                     if let Some(preloader) = preloader.as_mut() {
                         preloader.cancel();
@@ -502,6 +633,10 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                     }
                 }
                 Command::Seek(position) => {
+                    handoff.lock().unwrap().take();
+                    next_request = None;
+                    armed = None;
+                    track_boundary = Duration::ZERO;
                     pending_preload = None;
                     if let Some(preloader) = preloader.as_mut() {
                         preloader.cancel();
@@ -567,39 +702,11 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             preparing = false;
             match prepared.result {
                 Ok(stream) => {
-                    decode_progress = Some(stream.source.control.clone());
-                    player.set_volume(volume * current_gain);
-                    let metered = LoudnessMeter::new(stream.source, loudness_shared.clone());
-                    apply_playback_intent(&player, desired_paused);
-                    player.append(normalize_for_output(
-                        metered,
-                        output_channels,
-                        output_sample_rate,
+                    ready_output = Some((
+                        prepared.kind,
+                        prepared.start_position,
+                        OutputTrack::new(stream, current_gain, output_channels, output_sample_rate),
                     ));
-                    duration = stream.duration;
-                    stream_error = Some(stream.error);
-                    buffer_progress = Some(stream.buffer_progress);
-                    match prepared.kind {
-                        PreparationKind::Play => log::info!(
-                            "playback started; duration_ms={:?}",
-                            duration.map(|duration| duration.as_millis())
-                        ),
-                        PreparationKind::Seek => log::info!(
-                            "playback seek completed; target_ms={}",
-                            prepared.start_position.as_millis()
-                        ),
-                    }
-                    set_state(&state, |s| {
-                        s.active = true;
-                        s.paused = desired_paused;
-                        s.ended = false;
-                        s.position = prepared.start_position;
-                        if matches!(prepared.kind, PreparationKind::Seek) {
-                            s.seek_serial = s.seek_serial.wrapping_add(1);
-                        }
-                        s.duration = duration;
-                        s.error = None;
-                    });
                 }
                 Err(error) => {
                     stream_error = None;
@@ -626,11 +733,44 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             }
         }
 
+        if let Some((kind, start_position, track)) = ready_output {
+            preparing = false;
+            duration = track.info.duration;
+            stream_error = Some(track.info.error.clone());
+            buffer_progress = Some(track.info.buffer.clone());
+            decode_progress = Some(track.info.control.clone());
+            loudness_shared = track.info.loudness.clone();
+            player.set_volume(volume);
+            apply_playback_intent(&player, desired_paused);
+            player.append(GaplessSource::new(
+                track,
+                handoff.clone(),
+                output_channels,
+                output_sample_rate,
+            ));
+            log::info!(
+                "playback prepared; kind={kind:?} start_ms={}",
+                start_position.as_millis()
+            );
+            set_state(&state, |s| {
+                s.active = true;
+                s.paused = desired_paused;
+                s.ended = false;
+                s.position = start_position;
+                if matches!(kind, PreparationKind::Seek) {
+                    s.seek_serial = s.seek_serial.wrapping_add(1);
+                }
+                s.duration = duration;
+                s.error = None;
+            });
+        }
+
         if let Some(preloader) = preloader.as_mut() {
             preloader.poll();
         }
 
-        let position = position_offset.saturating_add(player.get_pos());
+        let position =
+            position_offset.saturating_add(player.get_pos().saturating_sub(track_boundary));
         let fully_buffered = decode_progress
             .as_ref()
             .is_some_and(|control| control.fully_decoded.load(Ordering::Acquire));
@@ -645,9 +785,40 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
                 !remaining.is_zero() && remaining <= Duration::from_secs(15)
             });
         if can_preload {
-            if let Some((id, url, cache_key, duration_hint)) = pending_preload.take() {
-                if let Some(preloader) = preloader.as_mut() {
-                    preloader.request(id, url, cache_key, duration_hint, cache_dir.clone());
+            if let Some((id, url, cache_key, duration_hint, gain, transition)) =
+                pending_preload.take()
+            {
+                if let Some(preloader) = preloader.as_mut().filter(|_| transition.pending()) {
+                    preloader.request(
+                        id,
+                        url.clone(),
+                        cache_key.clone(),
+                        duration_hint,
+                        cache_dir.clone(),
+                    );
+                    next_request = Some((url, cache_key, gain, transition));
+                }
+            }
+        }
+        if armed.is_none() {
+            if let Some((url, cache_key, gain, transition)) = next_request.as_ref() {
+                if transition.pending() {
+                    if let Some(stream) = preloader.as_mut().and_then(Preloader::take_ready) {
+                        let track =
+                            OutputTrack::new(stream, *gain, output_channels, output_sample_rate);
+                        armed = Some(AutoTrack {
+                            transition: transition.clone(),
+                            url: url.clone(),
+                            cache_key: cache_key.clone(),
+                            gain: *gain,
+                            info: track.info.clone(),
+                        });
+                        *handoff.lock().unwrap() = Some(ArmedTrack {
+                            transition: transition.clone(),
+                            cache_key: cache_key.clone(),
+                            track,
+                        });
+                    }
                 }
             }
         }
@@ -690,6 +861,7 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
             s.position = position;
             s.buffered = buffered;
             s.fully_buffered = fully_buffered;
+            s.transition_id = transition_id;
             s.duration = duration;
             s.paused = paused;
             s.ended = ended;
@@ -824,7 +996,8 @@ fn play_url(
 
     let mut builder = Decoder::builder()
         .with_data(buffered)
-        .with_seekable(seekable);
+        .with_seekable(seekable)
+        .with_gapless(true);
     if let Some(byte_len) = byte_len {
         builder = builder.with_byte_len(byte_len).with_seekable(seekable);
     }
@@ -1009,6 +1182,7 @@ impl Iterator for BufferedStreamSource {
                 return Some(sample);
             }
             if let Some(samples) = self.queued.pop_front() {
+                self.last_data = Instant::now();
                 self.current = samples.into_iter();
                 continue;
             }
@@ -1720,6 +1894,7 @@ mod tests {
         let audio = AudioHandle {
             tx,
             state: Arc::new(Mutex::new(PlaybackState::default())),
+            transition: Arc::new(Mutex::new(None)),
         };
         audio.play(
             "test".into(),

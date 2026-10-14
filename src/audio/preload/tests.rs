@@ -1,10 +1,10 @@
 use super::*;
 use std::net::{TcpListener, TcpStream};
 
-struct TestCache(PathBuf);
+pub(in crate::audio) struct TestCache(pub(in crate::audio) PathBuf);
 
 impl TestCache {
-    fn new() -> Self {
+    pub(in crate::audio) fn new() -> Self {
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "navidrome-preload-test-{}-{}-{}",
@@ -26,7 +26,7 @@ impl Drop for TestCache {
     }
 }
 
-fn wait_for(mut condition: impl FnMut() -> bool) {
+pub(in crate::audio) fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !condition() {
         assert!(
@@ -37,7 +37,7 @@ fn wait_for(mut condition: impl FnMut() -> bool) {
     }
 }
 
-fn wav() -> Vec<u8> {
+pub(in crate::audio) fn wav() -> Vec<u8> {
     // Twelve seconds of stereo 48 kHz PCM, larger than the HTTP read-ahead.
     let samples = 12 * 48_000 * 2;
     let size = samples * 2;
@@ -87,7 +87,7 @@ fn send_bytes(stream: &mut TcpStream, data: &[u8]) {
     let _ = stream.write_all(data);
 }
 
-fn client() -> Client {
+pub(in crate::audio) fn client() -> Client {
     Client::builder()
         .no_proxy()
         .timeout(Duration::from_millis(250))

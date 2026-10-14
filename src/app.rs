@@ -34,7 +34,7 @@ use tokio::runtime::Runtime;
 
 use crate::api::{format_duration, Api};
 use crate::assets::{AppIcon, PlayerIcon};
-use crate::audio::{format_playback, AudioHandle, PlaybackState};
+use crate::audio::{format_playback, AudioHandle, PlaybackState, TrackTransition};
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
@@ -157,6 +157,7 @@ impl ShuffleHistory {
 struct NextPreload {
     id: u64,
     index: usize,
+    quality: TranscodingQuality,
 }
 
 fn should_preload_next(playback: &PlaybackState) -> bool {
@@ -735,6 +736,7 @@ impl NavidromeApp {
                 let SliderEvent::Change(SliderValue::Single(value)) = event else {
                     return;
                 };
+                this.cancel_next_preload();
                 let duration = this.audio.state().duration.unwrap_or_default();
                 if !duration.is_zero() {
                     this.seek_playback(duration.mul_f32((*value / 100.0).clamp(0.0, 1.0)));
@@ -778,6 +780,7 @@ impl NavidromeApp {
                 Timer::after(Duration::from_millis(50)).await;
                 if this
                     .update_in(cx, |this, window, cx| {
+                        this.sync_gapless_transition();
                         let mut changed = this.poll_tray_commands();
                         changed |= this.poll_media_commands(window, cx);
                         // 单实例激活信号：显示并置前窗口。
@@ -814,6 +817,7 @@ impl NavidromeApp {
                                     || last.ended != playback.ended
                                     || last.error != playback.error
                                     || last.duration != playback.duration
+                                    || last.transition_id != playback.transition_id
                             },
                         );
                         previous_playback = Some(playback);
@@ -1215,6 +1219,7 @@ impl NavidromeApp {
 
     /// 将单首歌曲插入到当前播放歌曲之后；未在播放时插入队首（不自动播放）。
     fn insert_next(&mut self, song: Song) {
+        self.cancel_next_preload();
         let insert_at = match self.state.queue_index {
             Some(index) => (index + 1).min(self.state.queue.len()),
             None => 0,
@@ -1223,17 +1228,16 @@ impl NavidromeApp {
         self.state
             .shuffle_history
             .remap(|i| Some(if i >= insert_at { i + 1 } else { i }));
-        self.cancel_next_preload();
         self.save_session();
     }
 
     /// 将单首歌曲追加到队列末尾（不自动播放；空队列时设为队首索引以便播放键可用）。
     fn add_to_queue(&mut self, song: Song) {
+        self.cancel_next_preload();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
         self.state.queue.push(song);
-        self.cancel_next_preload();
         self.save_session();
     }
 
@@ -1242,11 +1246,11 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
+        self.cancel_next_preload();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
         self.state.queue.extend(songs.iter().cloned());
-        self.cancel_next_preload();
         self.save_session();
     }
 
@@ -1255,8 +1259,8 @@ impl NavidromeApp {
         if index >= self.state.queue.len() {
             return;
         }
-        let removed_current = self.state.queue_index == Some(index);
         self.cancel_next_preload();
+        let removed_current = self.state.queue_index == Some(index);
         self.state.queue.remove(index);
         self.state.shuffle_history.remap(|i| {
             if i == index {
@@ -1280,6 +1284,7 @@ impl NavidromeApp {
 
     /// 清空当前播放歌曲之后的所有队列项。
     fn clear_queue_after_current(&mut self) {
+        self.cancel_next_preload();
         if let Some(current) = self.state.queue_index {
             let keep = current + 1;
             if self.state.queue.len() > keep {
@@ -1287,7 +1292,6 @@ impl NavidromeApp {
                 self.state
                     .shuffle_history
                     .remap(|i| (i < keep).then_some(i));
-                self.cancel_next_preload();
                 self.save_session();
             }
         }
@@ -1295,6 +1299,7 @@ impl NavidromeApp {
 
     /// 清空整个队列并停止播放。
     fn clear_queue(&mut self) {
+        self.cancel_next_preload();
         self.state.queue.clear();
         self.state.queue_index = None;
         self.state.shuffle_history = ShuffleHistory::default();
@@ -1304,6 +1309,7 @@ impl NavidromeApp {
 
     /// 将队列项从 `from` 移动到 `to`，并修正当前索引。
     fn move_queue_item(&mut self, from: usize, to: usize) {
+        self.cancel_next_preload();
         let len = self.state.queue.len();
         if from >= len || to >= len || from == to {
             return;
@@ -1313,7 +1319,6 @@ impl NavidromeApp {
         self.state
             .shuffle_history
             .remap(|i| Some(queue_index_after_move(from, to, i)));
-        self.cancel_next_preload();
         if let Some(current) = self.state.queue_index {
             self.state.queue_index = Some(queue_index_after_move(from, to, current));
         }
@@ -1352,6 +1357,7 @@ impl NavidromeApp {
     }
 
     fn play_queue_index_at(&mut self, index: usize, start_position: Duration) {
+        self.freeze_next_preload();
         let Some(song) = self.state.queue.get(index).cloned() else {
             return;
         };
@@ -1368,14 +1374,7 @@ impl NavidromeApp {
             song.suffix,
             song.size
         );
-        self.state.queue_index = Some(index);
-        self.state.now_playing = Some(song.clone());
-        self.state.now_playing_quality = None;
-        self.state.ended_handled = false;
-        self.state.now_playing_reported = None;
-        self.state.scrobbled_song_id = None;
-        self.ensure_cover(song.cover_art.as_deref(), true);
-        self.load_lyrics(&song);
+        self.select_playing(index, &song, self.config.transcoding_quality);
         let Some(api) = self.api.clone() else {
             self.state.error = Some("Configure a server before playing".to_string());
             return;
@@ -1411,21 +1410,21 @@ impl NavidromeApp {
                 );
                 self.audio
                     .play(url, cache_key, duration, gain, start_position, preload_id);
-                self.report_now_playing(&song);
+                self.report_now_playing(&song, start_position);
             }
             Err(error) => self.state.error = Some(format!("{error:#}")),
         }
     }
 
     /// 通知 Navidrome 当前正在播放的歌曲（每首最多发送一次，不阻塞播放）。
-    fn report_now_playing(&mut self, song: &Song) {
+    fn report_now_playing(&mut self, song: &Song, position: Duration) {
         if self.state.now_playing_reported.as_deref() == Some(song.id.as_str()) {
             return;
         }
         self.state.now_playing_reported = Some(song.id.clone());
         let Some(api) = self.api.clone() else { return };
         let song_id = song.id.clone();
-        let time_secs = self.audio.state().position.as_secs() as u32;
+        let time_secs = position.as_secs() as u32;
         self.spawn_future(async move {
             if let Err(error) = api.update_now_playing(&song_id, time_secs).await {
                 log::warn!("updateNowPlaying failed (non-fatal): {error:#}");
@@ -1519,29 +1518,27 @@ impl NavidromeApp {
     }
 
     /// 自然结束时把本地测量的歌曲响度写入缓存并持久化，供后续播放做音量补偿。
-    fn cache_measured_loudness(&mut self) {
+    fn cache_measured_loudness(&mut self, loudness_db: f32, loudness_peak: f32) {
         if self.config.volume_normalization == VolumeNormalization::Off {
             return;
         }
         let Some(song_id) = self.state.now_playing.as_ref().map(|song| song.id.clone()) else {
             return;
         };
-        let playback = self.audio.state();
-        if playback.loudness_db == 0.0 || !playback.loudness_db.is_finite() {
+        if loudness_db == 0.0 || !loudness_db.is_finite() {
             return;
         }
-        self.state.loudness_cache.insert(
-            song_id.clone(),
-            (playback.loudness_db, playback.loudness_peak),
-        );
+        self.state
+            .loudness_cache
+            .insert(song_id.clone(), (loudness_db, loudness_peak));
         if let Err(error) = config::save_loudness(&self.state.loudness_cache) {
             log::warn!("loudness cache save failed: {error:#}");
         }
         log::debug!(
             "measured loudness cached song={} rms_db={:.1} peak={:.3}",
             song_id,
-            playback.loudness_db,
-            playback.loudness_peak,
+            loudness_db,
+            loudness_peak,
         );
     }
 
@@ -1567,9 +1564,53 @@ impl NavidromeApp {
     }
 
     fn cancel_next_preload(&mut self) {
-        if self.next_preload.take().is_some() {
-            self.audio.cancel_preload();
+        if let Some(event) = self.audio.cancel_preload() {
+            self.accept_gapless_transition(event);
         }
+        self.next_preload = None;
+    }
+
+    fn freeze_next_preload(&mut self) {
+        if let Some(event) = self.audio.freeze_preload() {
+            self.accept_gapless_transition(event);
+        }
+    }
+
+    fn sync_gapless_transition(&mut self) {
+        if let Some(event) = self.audio.take_transition() {
+            self.accept_gapless_transition(event);
+        }
+    }
+
+    fn select_playing(&mut self, index: usize, song: &Song, quality: TranscodingQuality) {
+        self.resume_position = None;
+        self.state.queue_index = Some(index);
+        self.state.now_playing = Some(song.clone());
+        self.state.now_playing_quality = Some(quality);
+        self.state.ended_handled = false;
+        self.state.now_playing_reported = None;
+        self.state.scrobbled_song_id = None;
+        self.ensure_cover(song.cover_art.as_deref(), true);
+        self.load_lyrics(song);
+    }
+
+    fn accept_gapless_transition(&mut self, event: TrackTransition) {
+        let Some(next) = self.next_preload.take().filter(|next| next.id == event.id) else {
+            log::error!("missing UI reservation for gapless transition {}", event.id);
+            return;
+        };
+        let Some(song) = self.state.queue.get(next.index).cloned() else {
+            return;
+        };
+        self.ensure_scrobble_on_end();
+        self.cache_measured_loudness(event.loudness_db, event.loudness_peak);
+        if self.state.playback_mode == PlaybackMode::Shuffle
+            && self.state.shuffle_history.restore_forward().is_none()
+        {
+            self.state.shuffle_history.advance(next.index);
+        }
+        self.select_playing(next.index, &song, next.quality);
+        self.report_now_playing(&song, Duration::ZERO);
     }
 
     fn seek_playback(&mut self, position: Duration) {
@@ -1621,12 +1662,15 @@ impl NavidromeApp {
         self.next_preload = Some(NextPreload {
             id: self.preload_serial,
             index,
+            quality,
         });
+        let gain = self.song_gain(song);
         self.audio
-            .preload(self.preload_serial, url, cache_key, duration);
+            .preload(self.preload_serial, url, cache_key, duration, gain);
     }
 
     fn play_next(&mut self, natural_end: bool) {
+        self.freeze_next_preload();
         if let Some(next) = self.next_queue_index(natural_end) {
             if self.state.playback_mode == PlaybackMode::Shuffle
                 && self.state.shuffle_history.restore_forward().is_none()
@@ -1638,6 +1682,7 @@ impl NavidromeApp {
     }
 
     fn advance_queue(&mut self, forward: bool) {
+        self.freeze_next_preload();
         if forward {
             self.play_next(false);
             return;
@@ -1688,6 +1733,7 @@ impl NavidromeApp {
 
     /// 相对当前进度快进/快退（秒），不越过歌曲起点与终点。
     fn seek_by(&mut self, delta_secs: i64) {
+        self.cancel_next_preload();
         let playback = self.audio.state();
         let target = seek_target(playback.position, playback.duration, delta_secs);
         if target != playback.position {
@@ -1796,6 +1842,7 @@ impl NavidromeApp {
     }
 
     pub fn toggle_playback(&mut self) {
+        self.sync_gapless_transition();
         let playback = self.audio.state();
         if playback.active {
             if playback.paused {
@@ -1926,6 +1973,7 @@ impl NavidromeApp {
                     }
                 }
                 MediaCommand::Seek(offset) => {
+                    self.cancel_next_preload();
                     if self.state.now_playing.is_some() {
                         let playback = self.audio.state();
                         let position = self.resume_position.unwrap_or(playback.position);
@@ -1949,6 +1997,7 @@ impl NavidromeApp {
                     }
                 }
                 MediaCommand::SetPosition { track_id, position } => {
+                    self.cancel_next_preload();
                     if let Some(song) = self.state.now_playing.as_ref() {
                         let server = self.api.as_ref().map_or("", |api| api.base_url());
                         let duration = self.audio.state().duration.or_else(|| {
@@ -2189,8 +2238,8 @@ impl NavidromeApp {
             self.state.error = Some(format!("Cache directory save failed: {error:#}"));
             return;
         }
-        self.audio.set_cache_directory(effective_dir.clone());
         self.cancel_next_preload();
+        self.audio.set_cache_directory(effective_dir.clone());
         self.state.error = None;
         self.state.status = format!("Audio cache: {}", effective_dir.display());
     }
@@ -2233,6 +2282,7 @@ impl NavidromeApp {
     }
 
     fn set_volume_normalization(&mut self, mode: VolumeNormalization, cx: &mut Context<Self>) {
+        self.cancel_next_preload();
         self.config.volume_normalization = mode;
         if let Err(error) = config::save(&self.config) {
             self.state.error = Some(format!("Volume normalization save failed: {error:#}"));
@@ -2669,6 +2719,7 @@ impl NavidromeApp {
     }
 
     fn handle_playback_end(&mut self) {
+        self.sync_gapless_transition();
         let playback = self.audio.state();
         if self.state.ended_handled || self.state.now_playing.is_none() {
             return;
@@ -2681,7 +2732,7 @@ impl NavidromeApp {
         } else if playback.ended {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
-            self.cache_measured_loudness();
+            self.cache_measured_loudness(playback.loudness_db, playback.loudness_peak);
             self.play_next(true);
         }
     }

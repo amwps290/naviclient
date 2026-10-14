@@ -54,7 +54,7 @@ impl StreamControl {
         self.wake.notify_all();
     }
 
-    fn promote(&self) {
+    pub(super) fn promote(&self) {
         self.state.lock().unwrap().active = true;
         self.wake.notify_all();
     }
@@ -229,6 +229,12 @@ impl Preloader {
         None
     }
 
+    pub(super) fn take_ready(&mut self) -> Option<PreparedStream> {
+        self.poll();
+        self.entry.as_ref()?.ready.as_ref()?;
+        self.entry.take()?.ready
+    }
+
     pub(super) fn cancel(&mut self) {
         if let Some(entry) = self.entry.take() {
             entry.control.cancel();
@@ -248,4 +254,4 @@ impl Drop for Preloader {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

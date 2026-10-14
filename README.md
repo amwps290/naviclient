@@ -18,7 +18,8 @@ JavaScript runtime.
 - Next-track preloading near the end of a fully buffered track. Prepares a
   bounded startup buffer, then sleeps until needed; supports shuffle and repeat,
   cancels stale queue/quality/seek requests, and falls back to ordinary playback.
-  This reduces startup waits; sample-accurate gapless playback is still planned.
+  Prepared tracks join the current output stream at the sample boundary without
+  waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
 - Navidrome now-playing and scrobble sync: reports the current track and
@@ -112,6 +113,7 @@ application asset source combines custom player icons with Kit's built-in icons.
 - `src/api.rs` - Subsonic API client, authentication, and JSON models parsing
 - `src/audio.rs` - background audio worker using `rodio`
 - `src/audio/preload.rs` - cancellable next-track preparation and decoder suspension
+- `src/audio/gapless.rs` - continuous output, track-boundary events and atomic cancellation
 - `src/app.rs` - GPUI application state, navigation, library views, and player
 - `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
 - `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
@@ -137,8 +139,15 @@ bandwidth. One speculative task prepares up to 16 chunks of 4096 frames
 (about 1.37 seconds / 512 KiB of stereo PCM at 48 kHz), with the existing 1 MiB
 HTTP read-ahead buffer. The decoder then waits on a condition variable. Queue
 edits, seeks, playback-mode changes, quality changes and cache-directory changes
-invalidate the preparation. A reserved shuffle choice is reused when advancing;
-gain, lyrics, scrobbling and media metadata still follow the normal track switch.
+invalidate the preparation. A reserved shuffle choice is reused when advancing.
+Each track is normalized to the output device format with its own ReplayGain
+and loudness meter. At a natural end, the output callback starts the prepared
+track in the same sample request; the UI consumes a single transition event to
+update the queue, lyrics, scrobbling and media metadata without restarting audio.
+Cancelling and starting a prepared track share one decision, so queue edits also
+work at the boundary. Codec delay/padding is trimmed when supported by the
+decoder and file metadata; silence recorded in the file is preserved. If the
+next track is not ready, playback uses the ordinary switching path.
 Unfinished speculative cache files are discarded; validated complete files join
 the ordinary audio cache. A cancelled in-flight read can take up to the I/O
 timeout to return, while foreground playback can proceed independently.
