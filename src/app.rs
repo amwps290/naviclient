@@ -3769,6 +3769,14 @@ impl NavidromeApp {
                     .collect::<Vec<_>>()
             },
         );
+        // 限高模式下没有 flex 约束，改用 Infer 让列表按内容计算高度，再由 max_h 截断。
+        // 上限取内容区视口高度：滚动到歌曲区时表格正好占满一屏，避免下方留白。
+        let viewport = self.content_scroll_handle.bounds().size.height;
+        let cap = if viewport > px(0.0) {
+            (viewport - px(36.0)).max(px(300.0))
+        } else {
+            px(600.0)
+        };
         let list = uniform_list(
             SharedString::from(format!("song-list-{scope}")),
             songs.len(),
@@ -3779,10 +3787,9 @@ impl NavidromeApp {
             this.maybe_load_visible_song_covers();
         }))
         .when(fill, |list| list.flex_1().min_h_0())
-        // 限高模式下没有 flex 约束，改用 Infer 让列表按内容计算高度，再由 max_h 截断。
         .when(!fill, |list| {
             list.with_sizing_behavior(ListSizingBehavior::Infer)
-                .max_h(px(600.0))
+                .max_h(cap)
         });
         v_flex()
             .relative()
