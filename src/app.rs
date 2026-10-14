@@ -3856,7 +3856,6 @@ impl NavidromeApp {
         } else {
             song.album.clone()
         };
-        let song_id_for_hover = key.clone();
         let row = h_flex()
             .id(SharedString::from(key.clone()))
             .h(px(60.0))
@@ -3865,9 +3864,6 @@ impl NavidromeApp {
             .relative()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
-            .on_hover(cx.listener(move |this, hovering, _, cx| {
-                this.set_hovered(&song_id_for_hover, *hovering, cx);
-            }))
             .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
             .cursor_pointer();
         let row = if current {
@@ -3875,9 +3871,15 @@ impl NavidromeApp {
         } else {
             row
         };
-        let hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
-
-        row.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
+        row.child(
+            div()
+                .w(px(34.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.favorite_button(FavoriteKind::Song, &song.id, cx)),
+        )
             .child(
                 div()
                     .w(px(42.0))
@@ -3946,14 +3948,13 @@ impl NavidromeApp {
             )
             .child(
                 // 行尾操作列：固定宽度、常规布局，不再用悬浮层盖住行内容。
-                // 未悬停时降低透明度保持安静，悬停时完全显示。
                 h_flex()
                     .flex_none()
+                    .h_full()
                     .w(px(if editable { 124.0 } else { 92.0 }))
                     .items_center()
                     .justify_end()
                     .gap_0p5()
-                    .opacity(if hovered { 1.0 } else { 0.45 })
                     .when(editable, |slot| {
                         slot.child(
                             Button::new(SharedString::from(format!("queue-up-{key}")))
