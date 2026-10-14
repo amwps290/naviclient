@@ -59,7 +59,7 @@ impl NavidromeApp {
         if self.playlist_ui.dialog.is_some() {
             self.playlist_ui.error = Some(error.clone());
         }
-        self.state.error = Some(error);
+        self.notify_error(error);
     }
 
     pub(super) fn load_playlist_detail(&mut self, playlist_id: String) {
@@ -87,7 +87,6 @@ impl NavidromeApp {
         let Some(api) = self.api.clone() else { return };
         self.playlist_ui.busy = true;
         self.playlist_ui.error = None;
-        self.state.error = None;
         self.playlist_ui.generation = self.playlist_ui.generation.wrapping_add(1);
         let generation = self.playlist_ui.generation;
         let tx = self.tx.clone();
@@ -140,7 +139,7 @@ impl NavidromeApp {
                 if self.playlist_ui.dialog.is_some() {
                     self.playlist_ui.error = Some(error.clone());
                 }
-                self.state.error = Some(error);
+                self.notify_error(error);
             }
         }
         self.load_playlists();

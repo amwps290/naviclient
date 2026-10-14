@@ -14,6 +14,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, DropdownMenu},
+    notification::{Notification, NotificationType},
     scroll::{Scrollbar, ScrollableElement},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
@@ -23,9 +24,9 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight, Hsla,
-    Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement, Keystroke,
-    Modifiers, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
+    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
+    Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
+    Keystroke, Modifiers, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
     ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
     StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
     uniform_list,
@@ -431,7 +432,6 @@ struct AppState {
     cover_palettes: HashMap<String, (Hsla, Hsla)>,
     requested_covers: HashSet<String>,
     status: String,
-    error: Option<String>,
     settings_open: bool,
     view_before_now_playing: View,
     playback_mode: PlaybackMode,
@@ -488,7 +488,6 @@ impl Default for AppState {
             cover_palettes: HashMap::new(),
             requested_covers: HashSet::new(),
             status: "Not connected".to_string(),
-            error: None,
             settings_open: false,
             view_before_now_playing: View::Home,
             playback_mode: PlaybackMode::default(),
@@ -532,6 +531,9 @@ pub struct NavidromeApp {
     content_scroll_handle: ScrollHandle,
     /// 每个歌曲列表作用域的 uniform_list 滚动句柄：视口虚拟化 + 按需预取封面。
     song_list_scrolls: RefCell<HashMap<&'static str, UniformListScrollHandle>>,
+    /// 待发出的 Toast 通知：错误站点大多拿不到 Window，先入队，
+    /// 由 UI 循环统一用 window.push_notification 冲刷。
+    pending_notifications: Vec<(NotificationType, SharedString)>,
     cover_slots: Arc<tokio::sync::Semaphore>,
     title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
     tray_rx: Receiver<TrayCommand>,
@@ -641,6 +643,7 @@ impl NavidromeApp {
             lyrics_scroll_target: None,
             content_scroll_handle: ScrollHandle::new(),
             song_list_scrolls: RefCell::new(HashMap::new()),
+            pending_notifications: Vec::new(),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             title_width_cache: RefCell::new(HashMap::new()),
             tray_rx: mpsc::channel().1,
@@ -795,6 +798,19 @@ impl NavidromeApp {
                         }
                         this.maybe_save_session();
                         changed |= this.poll_messages(window, cx);
+                        // 冲刷排队的 Toast：gpui-component 的通知系统由窗口 Root
+                        // 托管（自动消失、可关闭、主题化），需要 Window 句柄。
+                        for (kind, message) in this.pending_notifications.drain(..) {
+                            window.push_notification(
+                                match kind {
+                                    NotificationType::Error => Notification::error(message),
+                                    NotificationType::Info => Notification::info(message),
+                                    NotificationType::Success => Notification::success(message),
+                                    NotificationType::Warning => Notification::warning(message),
+                                },
+                                cx,
+                            );
+                        }
                         this.handle_playback_end();
                         this.maybe_preload_next();
                         this.maybe_scrobble_current();
@@ -1082,6 +1098,13 @@ impl NavidromeApp {
         }
     }
 
+    /// 弹出错误 Toast。错误发生处通常没有 Window（后台消息、设置回写等），
+    /// 因此先入队，由 UI 循环用 window.push_notification 发出。
+    fn notify_error(&mut self, message: impl Into<SharedString>) {
+        self.pending_notifications
+            .push((NotificationType::Error, message.into()));
+    }
+
     fn load_playlists(&mut self) {
         let Some(api) = self.api.clone() else { return };
         self.playlist_ui.list_loading = true;
@@ -1177,7 +1200,6 @@ impl NavidromeApp {
         self.state.current_playlist = Some(playlist.clone());
         self.state.playlist_songs.clear();
         self.state.view = View::PlaylistDetail;
-        self.state.error = None;
         self.ensure_cover(playlist.cover_art.as_deref(), true);
         self.load_playlist_detail(playlist.id);
     }
@@ -1230,7 +1252,7 @@ impl NavidromeApp {
         let url = match api.cover_url(id, 500) {
             Ok(url) => url,
             Err(error) => {
-                self.state.error = Some(format!("{error:#}"));
+                self.notify_error(format!("Cover request failed: {error:#}"));
                 return;
             }
         };
@@ -1425,7 +1447,7 @@ impl NavidromeApp {
         );
         self.select_playing(index, &song, self.config.transcoding_quality);
         let Some(api) = self.api.clone() else {
-            self.state.error = Some("Configure a server before playing".to_string());
+            self.notify_error("Configure a server before playing");
             return;
         };
         let quality = self.config.transcoding_quality;
@@ -1461,7 +1483,7 @@ impl NavidromeApp {
                     .play(url, cache_key, duration, gain, start_position, preload_id);
                 self.report_now_playing(&song, start_position);
             }
-            Err(error) => self.state.error = Some(format!("{error:#}")),
+            Err(error) => self.notify_error(format!("Stream request failed: {error:#}")),
         }
     }
 
@@ -1766,7 +1788,7 @@ impl NavidromeApp {
         self.state.playback_mode = self.state.playback_mode.next();
         self.config.playback_mode = self.state.playback_mode;
         if let Err(error) = config::save(&self.config) {
-            self.state.error = Some(format!("Playback mode save failed: {error:#}"));
+            self.notify_error(format!("Playback mode save failed: {error:#}"));
         }
         self.save_session();
         cx.notify();
@@ -2170,7 +2192,7 @@ impl NavidromeApp {
                     return;
                 }
                 if let Err(error) = config::save(&this.config) {
-                    this.state.error = Some(format!("Volume save failed: {error:#}"));
+                    this.notify_error(format!("Volume save failed: {error:#}"));
                 }
                 cx.notify();
             })?;
@@ -2264,7 +2286,7 @@ impl NavidromeApp {
             Err(error) => {
                 self.api = None;
                 self.state.status = "Invalid server URL".to_string();
-                self.state.error = Some(format!("{error:#}"));
+                self.notify_error(format!("{error:#}"));
                 self.state.settings_open = true;
             }
         }
@@ -2275,7 +2297,7 @@ impl NavidromeApp {
             .clone()
             .unwrap_or_else(config::default_audio_cache_dir);
         if let Err(error) = fs::create_dir_all(&effective_dir) {
-            self.state.error = Some(format!(
+            self.notify_error(format!(
                 "Unable to use cache directory {}: {error}",
                 effective_dir.display()
             ));
@@ -2284,12 +2306,11 @@ impl NavidromeApp {
 
         self.config.cache_dir = cache_dir;
         if let Err(error) = config::save(&self.config) {
-            self.state.error = Some(format!("Cache directory save failed: {error:#}"));
+            self.notify_error(format!("Cache directory save failed: {error:#}"));
             return;
         }
         self.cancel_next_preload();
         self.audio.set_cache_directory(effective_dir.clone());
-        self.state.error = None;
         self.state.status = format!("Audio cache: {}", effective_dir.display());
     }
 
@@ -2322,9 +2343,8 @@ impl NavidromeApp {
         self.cancel_next_preload();
         self.config.transcoding_quality = quality;
         if let Err(error) = config::save(&self.config) {
-            self.state.error = Some(format!("Playback quality save failed: {error:#}"));
+            self.notify_error(format!("Playback quality save failed: {error:#}"));
         } else {
-            self.state.error = None;
             log::info!("transcoding quality changed; quality={}", quality.label());
         }
         cx.notify();
@@ -2334,7 +2354,7 @@ impl NavidromeApp {
         self.cancel_next_preload();
         self.config.volume_normalization = mode;
         if let Err(error) = config::save(&self.config) {
-            self.state.error = Some(format!("Volume normalization save failed: {error:#}"));
+            self.notify_error(format!("Volume normalization save failed: {error:#}"));
         }
         cx.notify();
     }
@@ -2449,7 +2469,7 @@ impl NavidromeApp {
                         }
                         Err(error) => {
                             self.state.status = "Connection failed".to_string();
-                            self.state.error = Some(error);
+                            self.notify_error(format!("Connection failed: {error}"));
                         }
                     }
                 }
@@ -2466,7 +2486,7 @@ impl NavidromeApp {
                             self.state.artists = artists;
                             self.preload_covers(covers);
                         }
-                        Err(error) => self.state.error = Some(error),
+                        Err(error) => self.notify_error(error),
                     }
                 }
                 Msg::ArtistAlbums { artist_id, result } => {
@@ -2483,7 +2503,7 @@ impl NavidromeApp {
                                 self.state.artist_albums = albums;
                                 self.preload_covers(covers);
                             }
-                            Err(error) => self.state.error = Some(error),
+                            Err(error) => self.notify_error(error),
                         }
                     }
                 }
@@ -2515,7 +2535,7 @@ impl NavidromeApp {
                                 );
                             }
                         }
-                        Err(error) => self.state.error = Some(error),
+                        Err(error) => self.notify_error(error),
                     }
                 }
                 Msg::RecentAlbums(result) => {
@@ -2588,7 +2608,7 @@ impl NavidromeApp {
                                     self.play_song_list(&songs, 0);
                                 }
                             }
-                            Err(error) => self.state.error = Some(error),
+                            Err(error) => self.notify_error(error),
                         }
                     }
                 }
@@ -2663,7 +2683,7 @@ impl NavidromeApp {
                         self.state.favorite_ids = favorite_ids;
                         self.preload_covers(covers);
                     }
-                    Err(error) => self.state.error = Some(error),
+                    Err(error) => self.notify_error(error),
                 },
                 Msg::FavoriteChanged {
                     key,
@@ -2677,7 +2697,8 @@ impl NavidromeApp {
                         } else {
                             self.state.favorite_ids.insert(key);
                         }
-                        self.state.error = Some(error);
+                        let action = if starred { "add" } else { "remove" };
+                        self.notify_error(format!("Failed to {action} favorite: {error}"));
                     } else {
                         self.load_favorites();
                     }
@@ -2710,7 +2731,7 @@ impl NavidromeApp {
                                 self.state.playlist_songs = songs;
                                 self.preload_covers(covers);
                             }
-                            Err(error) => self.state.error = Some(error),
+                            Err(error) => self.notify_error(error),
                         }
                     }
                 }
@@ -2720,14 +2741,14 @@ impl NavidromeApp {
                         Ok(results) => {
                             self.state.search_results = Some(results);
                         }
-                        Err(error) => self.state.error = Some(error),
+                        Err(error) => self.notify_error(error),
                     }
                 }
                 Msg::PlayArtistSongs(result) => match result {
                     Ok(songs) => {
                         self.play_song_list(&songs, 0);
                     }
-                    Err(error) => self.state.error = Some(error),
+                    Err(error) => self.notify_error(error),
                 },
                 Msg::Lyrics { song_id, result } => {
                     if self.state.now_playing.as_ref().map(|song| song.id.as_str())
@@ -2772,7 +2793,7 @@ impl NavidromeApp {
             self.cancel_next_preload();
             log::error!("playback error reported to UI: {error}");
             self.state.ended_handled = true;
-            self.state.error = Some(error);
+            self.notify_error(error);
         } else if playback.ended {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
@@ -4115,9 +4136,7 @@ impl NavidromeApp {
         } else {
             "Not connected"
         };
-        let status_color = if self.state.error.is_some() {
-            cx.theme().red
-        } else if self.state.server.is_some() {
+        let status_color = if self.state.server.is_some() {
             cx.theme().accent
         } else {
             cx.theme().muted_foreground
@@ -4226,14 +4245,6 @@ impl NavidromeApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(self.state.status.clone()),
             )
-            .when_some(self.state.error.as_ref(), |this, error| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().red)
-                        .child(error.clone()),
-                )
-            })
             .child(
                 v_flex()
                     .gap_2()
@@ -4489,18 +4500,7 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn error_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        self.state.error.as_ref().map(|message| {
-            div()
-                .p_3()
-                .rounded_md()
-                .bg(cx.theme().red.opacity(0.12))
-                .text_color(cx.theme().red)
-                .child(message.clone())
-                .into_any_element()
-        })
-    }
-
+    /// Toast 通知堆叠：绝对定位在内容区右下角，覆盖在页面之上。
     fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let Some(song) = &self.state.now_playing else {
             return v_flex()
@@ -4812,7 +4812,6 @@ impl NavidromeApp {
                         cx,
                     ),
                 )
-                .children(self.error_banner(cx))
                 .child(self.render_home_section(
                     "recent",
                     "Recently played",
@@ -4878,8 +4877,7 @@ impl NavidromeApp {
                         "Favorites",
                         format!("{total} starred items from your Navidrome library"),
                         cx,
-                    ))
-                    .children(self.error_banner(cx));
+                    ));
 
                 if total == 0 {
                     content = content.child(
@@ -4929,7 +4927,6 @@ impl NavidromeApp {
                     format!("{} artists in your library", self.state.artists.len()),
                     cx,
                 ))
-                .children(self.error_banner(cx))
                 .child(if self.state.artists.is_empty() && self.state.loading {
                     self.render_artist_skeleton_grid(cx)
                 } else {
@@ -4944,7 +4941,6 @@ impl NavidromeApp {
                     format!("{} albums in your library", self.state.albums.len()),
                     cx,
                 ))
-                .children(self.error_banner(cx))
                 .child(
                     if self.state.albums.is_empty() && self.state.albums_loading {
                         self.render_album_skeleton_grid(cx)
@@ -5059,7 +5055,6 @@ impl NavidromeApp {
                                     })),
                             ),
                     )
-                    .children(self.error_banner(cx))
                     .when(
                         self.state.playlists.is_empty() && self.playlist_ui.list_loading,
                         |this| this.child(self.render_list_skeleton(8, cx)),
@@ -5106,8 +5101,7 @@ impl NavidromeApp {
                                         cx.notify();
                                     })),
                             ),
-                    )
-                    .children(self.error_banner(cx));
+                    );
                 if let Some(results) = &self.state.search_results {
                     if !results.artists.is_empty() {
                         content = content
@@ -5153,7 +5147,6 @@ impl NavidromeApp {
                         format!("{} albums", self.state.artist_albums.len()),
                         cx,
                     ))
-                    .children(self.error_banner(cx))
                     .child(self.render_album_grid(
                         "artist-detail",
                         &self.state.artist_albums,
@@ -5247,7 +5240,6 @@ impl NavidromeApp {
                                     ),
                             ),
                     )
-                    .children(self.error_banner(cx))
                     .child(self.render_song_list("album-detail", false, cx))
                     .into_any_element()
             }
@@ -5361,7 +5353,6 @@ impl NavidromeApp {
                                 "Use a song’s actions menu to move or remove it."
                             }),
                     )
-                    .children(self.error_banner(cx))
                     .child(self.render_song_list("playlist-detail", false, cx))
                     .into_any_element()
             }
