@@ -2031,7 +2031,7 @@ impl Render for NavidromeApp {
                             this.child(self.render_settings_overlay(cx))
                         }),
                 )
-                .child(self.render_player(cx))
+                .child(self.render_player(window, cx))
                 .bg(linear_gradient(
                     background_angle,
                     linear_color_stop(background_start, 0.0),
@@ -2162,7 +2162,7 @@ impl Render for NavidromeApp {
                         row.child(self.render_settings_overlay(cx))
                     }),
             )
-            .child(self.render_player(cx))
+            .child(self.render_player(window, cx))
             .into_any_element()
     }
 }

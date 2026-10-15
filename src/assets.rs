@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 38] = [
+const ICON_FILES: [&str; 37] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -23,7 +23,6 @@ const ICON_FILES: [&str; 38] = [
     "heart-filled.svg",
     "repeat.svg",
     "repeat-one.svg",
-    "lyrics.svg",
     "chevron-right.svg",
     "arrow-left.svg",
     "vinyl-highlight.svg",
@@ -58,7 +57,6 @@ pub enum AppIcon {
     HeartFilled,
     Repeat,
     RepeatOne,
-    Lyrics,
     ChevronRight,
     ChevronUp,
     ChevronDown,
@@ -104,7 +102,6 @@ impl IconNamed for AppIcon {
             Self::HeartFilled => "icons/heart-filled.svg",
             Self::Repeat => "icons/repeat.svg",
             Self::RepeatOne => "icons/repeat-one.svg",
-            Self::Lyrics => "icons/lyrics.svg",
             Self::ChevronRight => "icons/chevron-right.svg",
             Self::ChevronUp => "icons/chevron-up.svg",
             Self::ChevronDown => "icons/chevron-down.svg",
@@ -173,7 +170,6 @@ impl AssetSource for Assets {
             "icons/heart-filled.svg" => Some(include_bytes!("../assets/icons/heart-filled.svg")),
             "icons/repeat.svg" => Some(include_bytes!("../assets/icons/repeat.svg")),
             "icons/repeat-one.svg" => Some(include_bytes!("../assets/icons/repeat-one.svg")),
-            "icons/lyrics.svg" => Some(include_bytes!("../assets/icons/lyrics.svg")),
             "icons/chevron-right.svg" => Some(include_bytes!("../assets/icons/chevron-right.svg")),
             "icons/chevron-up.svg" => Some(include_bytes!("../assets/icons/chevron-up.svg")),
             "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),

@@ -3181,7 +3181,11 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    pub(super) fn render_player(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_player(
+        &self,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let playback = self.audio.state();
         let accent = self.now_playing_accent(cx);
         let accent_foreground = accent_foreground(accent);
@@ -3197,8 +3201,10 @@ impl NavidromeApp {
         } else {
             (playback.buffered.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
         };
-        let lyrics_open = self.state.view == View::NowPlaying;
         let queue_open = self.state.view == View::Queue;
+        // 窄窗口优先保证控制按钮的呼吸空间，隐藏格式胶囊（信息仍在
+        // 正在播放页可见）。
+        let show_technical_chip = f32::from(window.viewport_size().width) >= 1080.0;
         let output_volume = effective_volume(self.config.volume, self.muted);
         let volume_icon = if self.muted || output_volume <= 0.001 {
             AppIcon::VolumeMuted
@@ -3218,6 +3224,13 @@ impl NavidromeApp {
             .zip(self.state.now_playing_quality)
             .map(|(song, quality)| playback_technical_info(song, quality));
         let song_info = if let Some(song) = &self.state.now_playing {
+            // 悬停提示显示完整标题/艺人（长标题被截断时也能看全文），
+            // 并说明点击可打开正在播放页。
+            let tooltip_text = if song.artist.trim().is_empty() {
+                format!("{}\nOpen now playing", song.title)
+            } else {
+                format!("{} — {}\nOpen now playing", song.title, song.artist)
+            };
             h_flex()
                 .id("now-playing-info")
                 .w(px(260.0))
@@ -3230,6 +3243,7 @@ impl NavidromeApp {
                 .cursor_pointer()
                 .rounded(px(12.0))
                 .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
                 .child(self.render_cover(song.cover_art.as_deref(), 60.0, cx))
                 .child(
                     v_flex()
@@ -3244,34 +3258,13 @@ impl NavidromeApp {
                                 .child(song.title.clone()),
                         )
                         .child(
-                            h_flex()
+                            div()
                                 .w_full()
                                 .min_w_0()
-                                .overflow_hidden()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .truncate()
-                                        .child(song.artist.clone()),
-                                )
-                                .child(
-                                    Button::new("player-lyrics-shortcut")
-                                        .icon(AppIcon::Lyrics)
-                                        .tooltip("Lyrics")
-                                        .ghost()
-                                        .with_size(px(26.0))
-                                        .rounded_full()
-                                        .selected(lyrics_open)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_now_playing();
-                                            cx.notify();
-                                        })),
-                                ),
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child(song.artist.clone()),
                         ),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -3323,28 +3316,33 @@ impl NavidromeApp {
             .pl_3()
             .border_l_1()
             .border_color(cx.theme().border.opacity(0.8))
-            .when_some(technical_info, |this, info| {
-                let tooltip = info.tooltip.clone();
-                this.child(
-                    h_flex()
-                        .id("player-technical-info")
-                        .min_w_0()
-                        .gap_0p5()
-                        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                        .child(technical_info_chip(
-                            "player-format",
-                            info.format,
-                            accent,
-                            cx,
-                        )),
-                )
-                .child(
-                    div()
-                        .h(px(24.0))
-                        .border_l_1()
-                        .border_color(cx.theme().border.opacity(0.6)),
-                )
-            })
+            .when_some(
+                technical_info.filter(|_| show_technical_chip),
+                |this, info| {
+                    let tooltip = info.tooltip.clone();
+                    this.child(
+                        h_flex()
+                            .id("player-technical-info")
+                            .min_w_0()
+                            .gap_0p5()
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(tooltip.clone()).build(window, cx)
+                            })
+                            .child(technical_info_chip(
+                                "player-format",
+                                info.format,
+                                accent,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .h(px(24.0))
+                            .border_l_1()
+                            .border_color(cx.theme().border.opacity(0.6)),
+                    )
+                },
+            )
             .when_some(self.state.now_playing.as_ref(), |this, song| {
                 this.child(
                     self.favorite_button(FavoriteKind::Song, &song.id, cx)
@@ -3355,7 +3353,7 @@ impl NavidromeApp {
             .child(
                 Button::new("player-queue")
                     .icon(AppIcon::Queue)
-                    .tooltip("Queue")
+                    .tooltip("Queue (Q)")
                     .ghost()
                     .with_size(px(30.0))
                     .rounded_full()
@@ -3461,8 +3459,9 @@ impl NavidromeApp {
                     .child(
                         Button::new("player-volume-mute")
                             .icon(volume_icon)
+                            .tooltip(if self.muted { "Unmute (M)" } else { "Mute (M)" })
                             .ghost()
-                            .with_size(px(28.0))
+                            .with_size(px(30.0))
                             .rounded_full()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_mute(window, cx);
@@ -3495,9 +3494,9 @@ impl NavidromeApp {
                             .child(
                                 Button::new("previous")
                                     .icon(PlayerIcon::Previous)
-                                    .tooltip("Previous track")
+                                    .tooltip("Previous track (Ctrl+Left)")
                                     .ghost()
-                                    .with_size(px(28.0))
+                                    .with_size(px(30.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.skip(-1);
@@ -3512,9 +3511,9 @@ impl NavidromeApp {
                                         PlayerIcon::Play
                                     })
                                     .tooltip(if playback.active && !playback.paused {
-                                        "Pause"
+                                        "Pause (Space)"
                                     } else {
-                                        "Play"
+                                        "Play (Space)"
                                     })
                                     .custom(play_button_style)
                                     .with_size(px(40.0))
@@ -3527,9 +3526,9 @@ impl NavidromeApp {
                             .child(
                                 Button::new("next")
                                     .icon(PlayerIcon::Next)
-                                    .tooltip("Next track")
+                                    .tooltip("Next track (Ctrl+Right)")
                                     .ghost()
-                                    .with_size(px(28.0))
+                                    .with_size(px(30.0))
                                     .rounded_full()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.skip(1);
@@ -3549,8 +3548,8 @@ impl NavidromeApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(
                                 div()
-                                    .w(px(40.0))
                                     .flex_none()
+                                    .min_w(px(40.0))
                                     .text_right()
                                     .child(format_playback(playback.position)),
                             )
@@ -3580,8 +3579,8 @@ impl NavidromeApp {
                             )
                             .child(
                                 div()
-                                    .w(px(40.0))
                                     .flex_none()
+                                    .min_w(px(40.0))
                                     .child(format_playback(duration)),
                             ),
                     ),
