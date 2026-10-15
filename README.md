@@ -74,8 +74,10 @@ JavaScript runtime.
   waiting for the full cache. Its resolution is capped on high-DPI displays to
   keep memory bounded.
 - Mini-player mode that shrinks the main window into a compact, always-on-top
-  widget with cover art, song title, prev/next/play controls, a thin bottom
-  progress line, and a dynamic cover-colored animated background
+  widget (260x56) with cover art, song title, prev/next/play controls, a thin
+  bottom progress line, and a dynamic cover-colored animated background. The
+  cover glows with the track's accent color while playing; scrolling the wheel
+  over the window adjusts volume and briefly flashes it on the progress line
 - Server settings persisted locally as JSON
 - Navidrome-synced favorites for artists, albums, and songs
 - Light theme by default, with light, dark, and system-following appearance options

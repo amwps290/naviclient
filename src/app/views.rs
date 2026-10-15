@@ -2983,18 +2983,37 @@ impl NavidromeApp {
         let artist = song
             .as_ref()
             .map(|song| song.artist.clone())
-            .unwrap_or_else(|| "Choose a song from your library.".to_string());
+            .unwrap_or_else(|| "Choose a song".to_string());
 
         let cover_element = img(cover)
             // `on_click` only fires for elements with an id: it needs element state
             // to track the press/release pair.
             .id("mini-cover")
-            .size(px(26.0))
+            .size(px(34.0))
             .aspect_square()
             .object_fit(ObjectFit::Cover)
             .flex_none()
             .rounded_md()
             .cursor_pointer()
+            // 播放中封面外发光随封面调色板同步，静止时保留一层柔和阴影。
+            .when(is_playing, |this| {
+                this.shadow(vec![box_shadow(
+                    px(0.0),
+                    px(0.0),
+                    px(7.0),
+                    px(0.0),
+                    accent.opacity(0.5),
+                )])
+            })
+            .when(!is_playing, |this| {
+                this.shadow(vec![box_shadow(
+                    px(0.0),
+                    px(1.0),
+                    px(3.0),
+                    px(0.0),
+                    hsla(0.0, 0.0, 0.0, 0.28),
+                )])
+            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| {
                 this.exit_mini_mode(window, cx);
@@ -3003,12 +3022,12 @@ impl NavidromeApp {
             .occlude();
 
         // Fixed widths in the mini row that leave room for the scrolling info text:
-        // px_1p5 padding (12) + cover (26) + gap_1p5 between the 4 row children (18)
-        // + controls (16+2+22+2+16 = 58) + expand button (16) = 130. On Linux the
+        // px_1p5 padding (12) + cover (34) + gap_1p5 between the 4 row children (18)
+        // + controls (18+4+26+4+18 = 70) + expand button (18) = 152. On Linux the
         // window shadow shrinks the content, so use the content (inner) width.
         let paddings = window_paddings(window);
         let content_width = window.viewport_size().width - paddings.left - paddings.right;
-        let info_width = f32::from(content_width - px(130.0)).max(1.0);
+        let info_width = f32::from(content_width - px(152.0)).max(1.0);
         let track_id = song
             .as_ref()
             .map(|song| song.id.clone())
@@ -3053,7 +3072,7 @@ impl NavidromeApp {
         let controls = h_flex()
             .flex_none()
             .items_center()
-            .gap_0p5()
+            .gap_1()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .occlude()
             .child(
@@ -3061,7 +3080,7 @@ impl NavidromeApp {
                     .icon(PlayerIcon::Previous)
                     .tooltip("Previous track")
                     .ghost()
-                    .with_size(px(16.0))
+                    .with_size(px(18.0))
                     .rounded_full()
                     .disabled(!has_track)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -3078,7 +3097,7 @@ impl NavidromeApp {
                     })
                     .tooltip(if is_playing { "Pause" } else { "Play" })
                     .custom(play_button_style)
-                    .with_size(px(22.0))
+                    .with_size(px(26.0))
                     .rounded_full()
                     .disabled(!has_track)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -3091,7 +3110,7 @@ impl NavidromeApp {
                     .icon(PlayerIcon::Next)
                     .tooltip("Next track")
                     .ghost()
-                    .with_size(px(16.0))
+                    .with_size(px(18.0))
                     .rounded_full()
                     .disabled(!has_track)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -3100,25 +3119,39 @@ impl NavidromeApp {
                     })),
             );
 
+        // 滚轮调音量后 1 秒内，进度线位置改为显示当前音量，给无面板的迷你窗口
+        // 一个即时反馈；平时仍显示播放进度。
+        let volume_flash = self
+            .mini_volume_flash
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(1));
+        let (bar_fraction, bar_color) = if volume_flash {
+            (
+                effective_volume(self.config.volume, self.muted),
+                accent.opacity(0.95),
+            )
+        } else {
+            (progress_percent / 100.0, accent.opacity(0.9))
+        };
         let progress_line = div()
             .absolute()
             .bottom_0()
             .left_0()
             .right_0()
-            .h(px(2.0))
-            .bg(accent.opacity(0.12))
+            .h(px(2.5))
+            .bg(accent.opacity(0.2))
             .child(
                 div()
                     .h_full()
-                    .w(relative(progress_percent / 100.0))
-                    .bg(accent.opacity(0.45)),
+                    .rounded_r_full()
+                    .w(relative(bar_fraction.clamp(0.0, 1.0)))
+                    .bg(bar_color),
             );
 
         let expand_button = Button::new("mini-expand")
             .icon(AppIcon::Maximize)
             .tooltip("Exit mini player")
             .ghost()
-            .with_size(px(16.0))
+            .with_size(px(18.0))
             .rounded_full()
             .on_click(cx.listener(|this, _, window, cx| {
                 this.exit_mini_mode(window, cx);
@@ -3146,6 +3179,7 @@ impl NavidromeApp {
                 }
                 let delta = if delta_y > 0.0 { 0.05 } else { -0.05 };
                 this.adjust_volume(delta, window, cx);
+                this.show_mini_volume_flash(cx);
                 cx.stop_propagation();
             }))
             .when(cfg!(target_os = "windows"), |this| {

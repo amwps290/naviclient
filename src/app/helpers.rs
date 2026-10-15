@@ -18,8 +18,10 @@ use crate::msg::DecodedCover;
 // (gpui-component's WindowBorder) pads each edge of the window, so the actual
 // drawable area is smaller than the outer window size. enter_mini_mode adds the
 // window paddings to keep the content at this size on every platform.
-pub(super) const MINI_WINDOW_WIDTH: Pixels = px(200.0);
-pub(super) const MINI_WINDOW_HEIGHT: Pixels = px(50.0);
+// 260x56 leaves the title/artist column ~110px wide; the old 200x50 left ~70px,
+// which forced the scrolling text to run almost constantly.
+pub(super) const MINI_WINDOW_WIDTH: Pixels = px(260.0);
+pub(super) const MINI_WINDOW_HEIGHT: Pixels = px(56.0);
 pub(super) const ALBUM_PAGE_SIZE: usize = 100;
 /// 歌曲行高：60px 内容 + 1px 顶部边框。uniform_list 限高模式和封面预取都依赖它。
 pub(super) const SONG_ROW_HEIGHT: f32 = 61.0;

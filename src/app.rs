@@ -257,6 +257,9 @@ pub struct NavidromeApp {
     restore_size: Option<Size<Pixels>>,
     restore_maximized: bool,
     mini_target_size: Option<Size<Pixels>>,
+    /// 迷你窗口滚轮调音量的闪光：进度线短暂显示音量，约 1 秒后恢复进度。
+    mini_volume_flash: Option<std::time::Instant>,
+    mini_volume_flash_generation: u64,
 }
 
 impl Drop for NavidromeApp {
@@ -368,6 +371,8 @@ impl NavidromeApp {
             restore_size: None,
             restore_maximized: false,
             mini_target_size: None,
+            mini_volume_flash: None,
+            mini_volume_flash_generation: 0,
         };
         app.state.loudness_cache = config::load_loudness();
         app.state.playback_modes = app.config.playback_modes;
@@ -1423,6 +1428,25 @@ impl NavidromeApp {
                     this.notify_error(format!("Volume save failed: {error:#}"));
                 }
                 cx.notify();
+            })?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+    }
+
+    /// 迷你窗口滚轮调音量时在进度线位置闪光显示音量；
+    /// 计时结束后补一次重绘，避免暂停（无周期重绘）时闪光停留。
+    fn show_mini_volume_flash(&mut self, cx: &mut Context<Self>) {
+        self.mini_volume_flash = Some(std::time::Instant::now());
+        self.mini_volume_flash_generation = self.mini_volume_flash_generation.wrapping_add(1);
+        let generation = self.mini_volume_flash_generation;
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(1100)).await;
+            this.update(cx, |this, cx| {
+                if this.mini_volume_flash_generation == generation {
+                    this.mini_volume_flash = None;
+                    cx.notify();
+                }
             })?;
             Ok::<_, anyhow::Error>(())
         })
