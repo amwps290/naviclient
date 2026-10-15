@@ -2124,7 +2124,7 @@ impl Render for NavidromeApp {
                             ))
                             .child(self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx))
                             .child(self.nav_button(View::Albums, "Albums", AppIcon::Albums, cx))
-                            .child(self.nav_button(View::Genres, "Genres", KitIcon::Tags, cx))
+                            .child(self.nav_button(View::Genres, "Genres", AppIcon::Genres, cx))
                             .child(self.nav_button(
                                 View::Playlists,
                                 "Playlists",

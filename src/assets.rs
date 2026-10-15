@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 37] = [
+const ICON_FILES: [&str; 38] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -41,6 +41,7 @@ const ICON_FILES: [&str; 37] = [
     "house.svg",
     "mic-vocal.svg",
     "disc-album.svg",
+    "genre-tags.svg",
     "list-music.svg",
 ];
 
@@ -77,6 +78,7 @@ pub enum AppIcon {
     Home,
     Artists,
     Albums,
+    Genres,
     Playlists,
 }
 
@@ -122,6 +124,7 @@ impl IconNamed for AppIcon {
             Self::Home => "icons/house.svg",
             Self::Artists => "icons/mic-vocal.svg",
             Self::Albums => "icons/disc-album.svg",
+            Self::Genres => "icons/genre-tags.svg",
             Self::Playlists => "icons/list-music.svg",
         }
         .into()
@@ -196,6 +199,7 @@ impl AssetSource for Assets {
             "icons/house.svg" => Some(include_bytes!("../assets/icons/house.svg")),
             "icons/mic-vocal.svg" => Some(include_bytes!("../assets/icons/mic-vocal.svg")),
             "icons/disc-album.svg" => Some(include_bytes!("../assets/icons/disc-album.svg")),
+            "icons/genre-tags.svg" => Some(include_bytes!("../assets/icons/genre-tags.svg")),
             "icons/list-music.svg" => Some(include_bytes!("../assets/icons/list-music.svg")),
             _ => None,
         };
