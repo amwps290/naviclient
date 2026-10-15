@@ -10,7 +10,7 @@ use gpui_kit::{
 
 use crate::audio::PlaybackState;
 use crate::models::{
-    Artist, ArtistSort, PlaybackMode, Song, TranscodingQuality, VolumeNormalization,
+    Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::DecodedCover;
 
@@ -79,26 +79,6 @@ pub(super) fn sort_album_songs(songs: &mut [Song]) {
             .then_with(|| track(a).cmp(&track(b)))
             .then_with(|| a.title.cmp(&b.title))
     });
-}
-
-impl PlaybackMode {
-    pub(super) fn next(self) -> Self {
-        match self {
-            Self::Sequential => Self::RepeatAll,
-            Self::RepeatAll => Self::RepeatOne,
-            Self::RepeatOne => Self::Shuffle,
-            Self::Shuffle => Self::Sequential,
-        }
-    }
-
-    pub(super) fn tooltip(self) -> &'static str {
-        match self {
-            Self::Sequential => "Play sequentially",
-            Self::RepeatAll => "Repeat all",
-            Self::RepeatOne => "Repeat current track",
-            Self::Shuffle => "Shuffle queue",
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -177,7 +157,7 @@ pub(super) fn should_preload_next(playback: &PlaybackState) -> bool {
 }
 
 pub(super) fn next_queue_index(
-    mode: PlaybackMode,
+    modes: PlayModes,
     current: usize,
     len: usize,
     natural_end: bool,
@@ -188,16 +168,20 @@ pub(super) fn next_queue_index(
     if current >= len {
         return None;
     }
-    match mode {
-        PlaybackMode::Shuffle => shuffle_forward
+    if modes.shuffle {
+        // 随机 + 单曲循环：自然结束重播当前，手动切歌仍随机。
+        if natural_end && modes.repeat == RepeatMode::One {
+            return Some(current);
+        }
+        return shuffle_forward
             .or(reserved)
             .or_else(|| Some(random()))
-            .filter(|i| *i < len),
-        PlaybackMode::RepeatOne if natural_end => Some(current),
-        PlaybackMode::RepeatOne | PlaybackMode::RepeatAll => {
-            advance_index(current, len, true, true)
-        }
-        PlaybackMode::Sequential => advance_index(current, len, true, false),
+            .filter(|i| *i < len);
+    }
+    match modes.repeat {
+        RepeatMode::One if natural_end => Some(current),
+        RepeatMode::One | RepeatMode::All => advance_index(current, len, true, true),
+        RepeatMode::Off => advance_index(current, len, true, false),
     }
 }
 

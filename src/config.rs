@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::models::{Config, Genre, PlaybackSession};
+use crate::models::{Config, Genre, PlayModes, PlaybackMode, PlaybackSession};
 
 fn config_path() -> PathBuf {
     if let Some(project_dirs) =
@@ -80,7 +80,11 @@ pub fn load() -> Config {
     let path = config_path();
     let mut config: Config = fs::read_to_string(&path)
         .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
+        .and_then(|text| {
+            let mut value: serde_json::Value = serde_json::from_str(&text).ok()?;
+            migrate_legacy_playback_mode(&mut value);
+            serde_json::from_value(value).ok()
+        })
         .unwrap_or_default();
     config.volume = if config.volume.is_finite() {
         config.volume.clamp(0.0, 1.0)
@@ -88,6 +92,24 @@ pub fn load() -> Config {
         Config::default().volume
     };
     config
+}
+
+/// 将旧版单枚举 `playback_mode` 迁移为二维 `playback_modes`
+/// （随机开关 + 循环模式）。已有 `playback_modes` 或字段无法解析时不覆盖。
+fn migrate_legacy_playback_mode(value: &mut serde_json::Value) {
+    if value.get("playback_modes").is_some() {
+        return;
+    }
+    let Some(legacy) = value
+        .get("playback_mode")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<PlaybackMode>(value).ok())
+    else {
+        return;
+    };
+    if let Ok(modes) = serde_json::to_value(PlayModes::from_legacy(legacy)) {
+        value["playback_modes"] = modes;
+    }
 }
 
 pub fn save(config: &Config) -> Result<()> {
@@ -118,11 +140,12 @@ pub fn save_loudness(cache: &HashMap<String, (f32, f32)>) -> Result<()> {
 }
 
 /// 加载播放会话；文件缺失或损坏时安全回退为 None。
+/// 旧会话的 `playback_mode` 字段同样迁移为二维 `playback_modes`。
 pub fn load_session() -> Option<PlaybackSession> {
-    let path = session_path();
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
+    let text = fs::read_to_string(session_path()).ok()?;
+    let mut value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    migrate_legacy_playback_mode(&mut value);
+    serde_json::from_value(value).ok()
 }
 
 pub fn save_session(session: &PlaybackSession) -> Result<()> {
@@ -171,6 +194,33 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    #[test]
+    fn legacy_playback_mode_field_migrates_to_playback_modes() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(r#"{"server_url":"http://x","playback_mode":"repeat_one"}"#)
+                .unwrap();
+        migrate_legacy_playback_mode(&mut value);
+        assert_eq!(value["playback_modes"]["shuffle"], serde_json::json!(false));
+        assert_eq!(value["playback_modes"]["repeat"], "one");
+
+        let mut value: serde_json::Value =
+            serde_json::from_str(r#"{"playback_mode":"shuffle"}"#).unwrap();
+        migrate_legacy_playback_mode(&mut value);
+        assert_eq!(value["playback_modes"]["shuffle"], serde_json::json!(true));
+        assert_eq!(value["playback_modes"]["repeat"], "off");
+    }
+
+    #[test]
+    fn existing_playback_modes_win_over_legacy_field() {
+        let mut value: serde_json::Value = serde_json::from_str(
+            r#"{"playback_modes":{"shuffle":true,"repeat":"all"},"playback_mode":"sequential"}"#,
+        )
+        .unwrap();
+        migrate_legacy_playback_mode(&mut value);
+        assert_eq!(value["playback_modes"]["repeat"], "all");
+        assert_eq!(value["playback_modes"]["shuffle"], serde_json::json!(true));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use super::{
     sort_album_songs, sort_artists, Shortcut, ShuffleHistory,
 };
 use crate::models::{
-    Artist, ArtistSort, PlaybackMode, Song, TranscodingQuality, VolumeNormalization,
+    Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
 };
 use gpui_kit::Modifiers;
 
@@ -46,13 +46,25 @@ fn preloading_waits_for_safe_current_audio_buffer_and_near_end() {
 
 #[test]
 fn preload_target_matches_playback_modes_and_manual_repeat_one_skip() {
+    let sequential = PlayModes {
+        shuffle: false,
+        repeat: RepeatMode::Off,
+    };
+    let repeat_all = PlayModes {
+        shuffle: false,
+        repeat: RepeatMode::All,
+    };
+    let repeat_one = PlayModes {
+        shuffle: false,
+        repeat: RepeatMode::One,
+    };
     for (mode, current, natural, expected) in [
-        (PlaybackMode::Sequential, 0, true, Some(1)),
-        (PlaybackMode::Sequential, 2, true, None),
-        (PlaybackMode::RepeatAll, 2, true, Some(0)),
-        (PlaybackMode::RepeatOne, 1, true, Some(1)),
-        (PlaybackMode::RepeatOne, 1, false, Some(2)),
-        (PlaybackMode::RepeatOne, 2, false, Some(0)),
+        (sequential, 0, true, Some(1)),
+        (sequential, 2, true, None),
+        (repeat_all, 2, true, Some(0)),
+        (repeat_one, 1, true, Some(1)),
+        (repeat_one, 1, false, Some(2)),
+        (repeat_one, 2, false, Some(0)),
     ] {
         assert_eq!(
             super::next_queue_index(mode, current, 3, natural, None, None, || panic!(
@@ -62,12 +74,29 @@ fn preload_target_matches_playback_modes_and_manual_repeat_one_skip() {
         );
     }
     assert_eq!(
-        super::next_queue_index(PlaybackMode::RepeatAll, 0, 0, true, None, None, || 0),
+        super::next_queue_index(repeat_all, 0, 0, true, None, None, || 0),
         None
     );
     assert_eq!(
-        super::next_queue_index(PlaybackMode::RepeatOne, 0, 1, true, None, None, || 0),
+        super::next_queue_index(repeat_one, 0, 1, true, None, None, || 0),
         Some(0)
+    );
+    // 随机 + 单曲循环：自然结束重播当前，手动切歌仍走随机链。
+    let shuffle_one = PlayModes {
+        shuffle: true,
+        repeat: RepeatMode::One,
+    };
+    assert_eq!(
+        super::next_queue_index(shuffle_one, 1, 3, true, None, None, || panic!(
+            "natural end must replay the current track"
+        )),
+        Some(1)
+    );
+    assert_eq!(
+        super::next_queue_index(shuffle_one, 1, 3, false, None, Some(2), || panic!(
+            "manual next uses the reservation"
+        )),
+        Some(2)
     );
 }
 
@@ -81,7 +110,10 @@ fn shuffle_reservation_and_forward_history_do_not_draw_a_second_random_song() {
     assert_eq!(history.previous(), Some(0));
     let before = history.snapshot();
     let next = super::next_queue_index(
-        PlaybackMode::Shuffle,
+        PlayModes {
+            shuffle: true,
+            repeat: RepeatMode::Off,
+        },
         0,
         4,
         true,
@@ -93,14 +125,26 @@ fn shuffle_reservation_and_forward_history_do_not_draw_a_second_random_song() {
     assert_eq!(history.snapshot(), before);
     assert_eq!(history.restore_forward(), next);
     assert_eq!(
-        super::next_queue_index(PlaybackMode::Shuffle, 2, 4, true, None, Some(3), || panic!(
-            "reserved choice must be reused"
-        )),
+        super::next_queue_index(
+            PlayModes {
+                shuffle: true,
+                repeat: RepeatMode::Off,
+            },
+            2,
+            4,
+            true,
+            None,
+            Some(3),
+            || panic!("reserved choice must be reused")
+        ),
         Some(3)
     );
     assert_eq!(
         super::next_queue_index(
-            PlaybackMode::Shuffle,
+            PlayModes {
+                shuffle: true,
+                repeat: RepeatMode::Off,
+            },
             2,
             4,
             false,
@@ -378,12 +422,21 @@ fn measured_loudness_maps_rms_to_gain() {
 }
 
 #[test]
-fn playback_mode_defaults_to_sequential_and_cycles_in_order() {
-    assert_eq!(PlaybackMode::default(), PlaybackMode::Sequential);
-    assert_eq!(PlaybackMode::Sequential.next(), PlaybackMode::RepeatAll);
-    assert_eq!(PlaybackMode::RepeatAll.next(), PlaybackMode::RepeatOne);
-    assert_eq!(PlaybackMode::RepeatOne.next(), PlaybackMode::Shuffle);
-    assert_eq!(PlaybackMode::Shuffle.next(), PlaybackMode::Sequential);
+fn playback_modes_default_to_sequential_and_independent() {
+    assert_eq!(
+        PlayModes::default(),
+        PlayModes {
+            shuffle: false,
+            repeat: RepeatMode::Off
+        }
+    );
+    // 随机与循环相互独立：可以同时开启随机 + 单曲循环。
+    let both = PlayModes {
+        shuffle: true,
+        repeat: RepeatMode::One,
+    };
+    assert!(both.shuffle);
+    assert_eq!(both.repeat, RepeatMode::One);
 }
 
 #[test]

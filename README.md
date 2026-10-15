@@ -22,6 +22,11 @@ JavaScript runtime.
   waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
+- Independent shuffle toggle and repeat control (off / all / one) in the
+  player's transport controls, persisted across restarts. Shuffle keeps a
+  play history so Previous returns actually played tracks and short-term
+  repeats are avoided; legacy single-mode configs and sessions migrate to
+  the new two-dimensional mode automatically
 - Navidrome now-playing and scrobble sync: reports the current track and
   records completed plays (50% or 4-minute threshold), failures never interrupt
   local playback

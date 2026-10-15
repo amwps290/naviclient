@@ -3349,7 +3349,6 @@ impl NavidromeApp {
                         .with_size(px(30.0)),
                 )
             })
-            .child(self.playback_mode_button(cx))
             .child(
                 Button::new("player-queue")
                     .icon(AppIcon::Queue)
@@ -3491,6 +3490,7 @@ impl NavidromeApp {
                         h_flex()
                             .gap_3()
                             .items_center()
+                            .child(self.shuffle_button(cx))
                             .child(
                                 Button::new("previous")
                                     .icon(PlayerIcon::Previous)
@@ -3534,7 +3534,8 @@ impl NavidromeApp {
                                         this.skip(1);
                                         cx.notify();
                                     })),
-                            ),
+                            )
+                            .child(self.repeat_button(cx)),
                     )
                     .child(
                         h_flex()

@@ -42,7 +42,7 @@ use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, AlbumSort, Artist, ArtistSort, Config, FavoriteKey, FavoriteKind, Favorites, Genre,
-    Lyrics, PlaybackMode, PlaybackSession, Playlist, SearchResults, ServerInfo, Song,
+    Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode, SearchResults, ServerInfo, Song,
     ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
@@ -125,7 +125,7 @@ struct AppState {
     /// 键盘导航选中的歌曲行：作用域 + 行号。
     song_list_selected: Option<(&'static str, usize)>,
     view_before_now_playing: View,
-    playback_mode: PlaybackMode,
+    playback_modes: PlayModes,
     shuffle_history: ShuffleHistory,
     ended_handled: bool,
     now_playing_reported: Option<String>,
@@ -196,7 +196,7 @@ impl Default for AppState {
             settings_open: false,
             song_list_selected: None,
             view_before_now_playing: View::Home,
-            playback_mode: PlaybackMode::default(),
+            playback_modes: PlayModes::default(),
             shuffle_history: ShuffleHistory::default(),
             ended_handled: true,
             now_playing_reported: None,
@@ -370,7 +370,7 @@ impl NavidromeApp {
             mini_target_size: None,
         };
         app.state.loudness_cache = config::load_loudness();
-        app.state.playback_mode = app.config.playback_mode;
+        app.state.playback_modes = app.config.playback_modes;
         // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
         if let Some(cached) = config::load_genres_cache() {
             app.state.genres = cached;
@@ -393,8 +393,8 @@ impl NavidromeApp {
                 let restored_index = index;
                 app.state.queue = session.queue;
                 app.state.queue_index = index;
-                app.state.playback_mode = session.playback_mode;
-                app.config.playback_mode = session.playback_mode;
+                app.state.playback_modes = session.playback_modes;
+                app.config.playback_modes = session.playback_modes;
                 app.state.shuffle_history =
                     ShuffleHistory::restore(session.shuffle_played, session.shuffle_forward);
                 if let Some(index) = restored_index {
@@ -886,7 +886,7 @@ impl NavidromeApp {
         };
         self.ensure_scrobble_on_end();
         self.cache_measured_loudness(event.loudness_db, event.loudness_peak);
-        if self.state.playback_mode == PlaybackMode::Shuffle
+        if self.state.playback_modes.shuffle
             && self.state.shuffle_history.restore_forward().is_none()
         {
             self.state.shuffle_history.advance(next.index);
@@ -902,7 +902,7 @@ impl NavidromeApp {
 
     fn next_queue_index(&self, natural_end: bool) -> Option<usize> {
         next_queue_index(
-            self.state.playback_mode,
+            self.state.playback_modes,
             self.state.queue_index?,
             self.state.queue.len(),
             natural_end,
@@ -954,7 +954,7 @@ impl NavidromeApp {
     fn play_next(&mut self, natural_end: bool) {
         self.freeze_next_preload();
         if let Some(next) = self.next_queue_index(natural_end) {
-            if self.state.playback_mode == PlaybackMode::Shuffle
+            if self.state.playback_modes.shuffle
                 && self.state.shuffle_history.restore_forward().is_none()
             {
                 self.state.shuffle_history.advance(next);
@@ -977,27 +977,37 @@ impl NavidromeApp {
             return;
         }
 
-        if self.state.playback_mode == PlaybackMode::Shuffle {
+        if self.state.playback_modes.shuffle {
             if let Some(previous) = self.state.shuffle_history.previous() {
                 self.play_queue_index(previous);
             }
             return;
         }
 
-        let wraps = matches!(
-            self.state.playback_mode,
-            PlaybackMode::RepeatAll | PlaybackMode::RepeatOne
-        );
+        let wraps = self.state.playback_modes.repeat != RepeatMode::Off;
         let Some(next) = advance_index(index, len, forward, wraps) else {
             return;
         };
         self.play_queue_index(next);
     }
 
-    fn cycle_playback_mode(&mut self, cx: &mut Context<Self>) {
+    /// 切换随机开关：取消预加载（下一首选择变化）并持久化。
+    fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
         self.cancel_next_preload();
-        self.state.playback_mode = self.state.playback_mode.next();
-        self.config.playback_mode = self.state.playback_mode;
+        self.state.playback_modes.shuffle = !self.state.playback_modes.shuffle;
+        self.config.playback_modes = self.state.playback_modes;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Playback mode save failed: {error:#}"));
+        }
+        self.save_session();
+        cx.notify();
+    }
+
+    /// 循环模式循环切换：Off → All → One → Off；同样取消预加载并持久化。
+    fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        self.cancel_next_preload();
+        self.state.playback_modes.repeat = self.state.playback_modes.repeat.next();
+        self.config.playback_modes = self.state.playback_modes;
         if let Err(error) = config::save(&self.config) {
             self.notify_error(format!("Playback mode save failed: {error:#}"));
         }
@@ -1171,11 +1181,8 @@ impl NavidromeApp {
             return (false, false, false);
         };
         let can_play = self.api.is_some();
-        let wraps = matches!(
-            self.state.playback_mode,
-            PlaybackMode::RepeatAll | PlaybackMode::RepeatOne
-        );
-        let (next, previous) = if self.state.playback_mode == PlaybackMode::Shuffle {
+        let wraps = self.state.playback_modes.repeat != RepeatMode::Off;
+        let (next, previous) = if self.state.playback_modes.shuffle {
             (true, self.state.shuffle_history.played.len() > 1)
         } else {
             (
@@ -1483,7 +1490,7 @@ impl NavidromeApp {
             cache_dir: self.config.cache_dir.clone(),
             transcoding_quality: self.config.transcoding_quality,
             volume: self.config.volume,
-            playback_mode: self.config.playback_mode,
+            playback_modes: self.config.playback_modes,
             volume_normalization: self.config.volume_normalization,
             sidebar_collapsed: self.config.sidebar_collapsed,
             albums_sort: self.config.albums_sort,
@@ -1625,7 +1632,7 @@ impl NavidromeApp {
             queue: self.state.queue.clone(),
             queue_index: self.state.queue_index,
             position_secs: position.as_secs_f64(),
-            playback_mode: self.state.playback_mode,
+            playback_modes: self.state.playback_modes,
             shuffle_played,
             shuffle_forward,
         };
@@ -1842,22 +1849,42 @@ impl NavidromeApp {
             }))
     }
 
-    fn playback_mode_button(&self, cx: &Context<Self>) -> Button {
-        let button = Button::new("player-playback-mode")
-            .tooltip(self.state.playback_mode.tooltip())
+    /// 随机开关按钮：开启时高亮；与循环模式相互独立。
+    fn shuffle_button(&self, cx: &Context<Self>) -> Button {
+        Button::new("player-shuffle")
+            .icon(AppIcon::Shuffle)
+            .tooltip(if self.state.playback_modes.shuffle {
+                "Shuffle on"
+            } else {
+                "Shuffle off"
+            })
             .ghost()
             .with_size(px(30.0))
             .rounded_full()
+            .selected(self.state.playback_modes.shuffle)
             .on_click(cx.listener(|this, _, _, cx| {
-                this.cycle_playback_mode(cx);
-            }));
+                this.toggle_shuffle(cx);
+            }))
+    }
 
-        match self.state.playback_mode {
-            PlaybackMode::Sequential => button.icon(AppIcon::PlaySequential),
-            PlaybackMode::RepeatAll => button.icon(AppIcon::Repeat),
-            PlaybackMode::RepeatOne => button.icon(AppIcon::RepeatOne),
-            PlaybackMode::Shuffle => button.icon(AppIcon::Shuffle),
-        }
+    /// 循环模式按钮：Off → All → One 循环切换，开启时高亮，
+    /// 单曲循环显示专属图标。
+    fn repeat_button(&self, cx: &Context<Self>) -> Button {
+        let repeat = self.state.playback_modes.repeat;
+        Button::new("player-repeat")
+            .icon(if repeat == RepeatMode::One {
+                AppIcon::RepeatOne
+            } else {
+                AppIcon::Repeat
+            })
+            .tooltip(repeat.tooltip())
+            .ghost()
+            .with_size(px(30.0))
+            .rounded_full()
+            .selected(repeat != RepeatMode::Off)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.cycle_repeat(cx);
+            }))
     }
 
     fn now_playing_palette(&self, cx: &Context<Self>) -> (Hsla, Hsla) {

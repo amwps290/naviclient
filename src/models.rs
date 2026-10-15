@@ -280,6 +280,69 @@ pub enum PlaybackMode {
     Shuffle,
 }
 
+/// 循环模式：不循环 / 列表循环 / 单曲循环。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatMode {
+    #[default]
+    Off,
+    All,
+    One,
+}
+
+impl RepeatMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::All,
+            Self::All => Self::One,
+            Self::One => Self::Off,
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Off => "Repeat off",
+            Self::All => "Repeat all",
+            Self::One => "Repeat current track",
+        }
+    }
+}
+
+/// 播放模式：随机开关与循环模式相互独立（与 MPRIS 及常见播放器的
+/// 二维模型一致）。旧版单枚举 [`PlaybackMode`] 仅用于配置/会话迁移。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PlayModes {
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default)]
+    pub repeat: RepeatMode,
+}
+
+impl PlayModes {
+    /// 旧版四态枚举到二维模式的迁移映射：随机枚举只保留随机开关，
+    /// 循环枚举只保留循环模式。
+    pub fn from_legacy(mode: PlaybackMode) -> Self {
+        match mode {
+            PlaybackMode::Sequential => Self {
+                shuffle: false,
+                repeat: RepeatMode::Off,
+            },
+            PlaybackMode::RepeatAll => Self {
+                shuffle: false,
+                repeat: RepeatMode::All,
+            },
+            PlaybackMode::RepeatOne => Self {
+                shuffle: false,
+                repeat: RepeatMode::One,
+            },
+            PlaybackMode::Shuffle => Self {
+                shuffle: true,
+                repeat: RepeatMode::Off,
+            },
+        }
+    }
+}
+
 /// 专辑列表的排序方式。除 `NewestAdded` 外均直接映射到
 /// Subsonic `getAlbumList2` 的服务端排序，保持增量分页可用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -345,8 +408,8 @@ pub struct PlaybackSession {
     pub queue_index: Option<usize>,
     /// 播放位置（秒）。
     pub position_secs: f64,
-    /// 播放模式。
-    pub playback_mode: PlaybackMode,
+    /// 播放模式（随机开关 + 循环模式）。
+    pub playback_modes: PlayModes,
     /// 随机播放历史（播放过的索引）。
     pub shuffle_played: Vec<usize>,
     /// 随机播放回退暂存。
@@ -366,8 +429,9 @@ pub struct Config {
     pub transcoding_quality: TranscodingQuality,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    /// 播放模式（随机开关 + 循环模式）。
     #[serde(default)]
-    pub playback_mode: PlaybackMode,
+    pub playback_modes: PlayModes,
     #[serde(default)]
     pub volume_normalization: VolumeNormalization,
     /// 侧边栏是否折叠为图标栏。
@@ -391,7 +455,7 @@ impl Default for Config {
             cache_dir: None,
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
-            playback_mode: PlaybackMode::Sequential,
+            playback_modes: PlayModes::default(),
             volume_normalization: VolumeNormalization::Track,
             sidebar_collapsed: false,
             albums_sort: AlbumSort::default(),
@@ -439,8 +503,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AlbumSort, ArtistSort, Config, PlaybackMode, PlaybackSession, Song, ThemePreference,
-        TranscodingQuality, VolumeNormalization,
+        AlbumSort, ArtistSort, Config, PlayModes, PlaybackMode, PlaybackSession, RepeatMode, Song,
+        ThemePreference, TranscodingQuality, VolumeNormalization,
     };
 
     #[test]
@@ -525,13 +589,47 @@ mod tests {
     }
 
     #[test]
-    fn legacy_config_defaults_to_sequential_playback_mode() {
+    fn legacy_playback_mode_maps_to_independent_shuffle_and_repeat() {
+        for (legacy, shuffle, repeat) in [
+            (PlaybackMode::Sequential, false, RepeatMode::Off),
+            (PlaybackMode::RepeatAll, false, RepeatMode::All),
+            (PlaybackMode::RepeatOne, false, RepeatMode::One),
+            (PlaybackMode::Shuffle, true, RepeatMode::Off),
+        ] {
+            let modes = PlayModes::from_legacy(legacy);
+            assert_eq!(modes.shuffle, shuffle);
+            assert_eq!(modes.repeat, repeat);
+        }
+        assert_eq!(
+            PlayModes::default(),
+            PlayModes {
+                shuffle: false,
+                repeat: RepeatMode::Off
+            }
+        );
+    }
+
+    #[test]
+    fn repeat_mode_cycles_off_all_one() {
+        assert_eq!(RepeatMode::Off.next(), RepeatMode::All);
+        assert_eq!(RepeatMode::All.next(), RepeatMode::One);
+        assert_eq!(RepeatMode::One.next(), RepeatMode::Off);
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_sequential_playback_modes() {
         let config: Config = serde_json::from_str(
             r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
         )
-        .expect("legacy config without playback_mode should still deserialize");
+        .expect("legacy config without playback modes should still deserialize");
 
-        assert_eq!(config.playback_mode, PlaybackMode::Sequential);
+        assert_eq!(
+            config.playback_modes,
+            PlayModes {
+                shuffle: false,
+                repeat: RepeatMode::Off
+            }
+        );
     }
 
     #[test]
@@ -563,17 +661,21 @@ mod tests {
     }
 
     #[test]
-    fn playback_mode_round_trips_through_config_json() {
+    fn playback_modes_round_trip_through_config_json() {
         let config = Config {
-            playback_mode: PlaybackMode::Shuffle,
+            playback_modes: PlayModes {
+                shuffle: true,
+                repeat: RepeatMode::One,
+            },
             ..Config::default()
         };
 
         let json = serde_json::to_string(&config).expect("config should serialize");
         let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
 
-        assert_eq!(restored.playback_mode, PlaybackMode::Shuffle);
-        assert!(json.contains(r#""playback_mode":"shuffle""#));
+        assert!(restored.playback_modes.shuffle);
+        assert_eq!(restored.playback_modes.repeat, RepeatMode::One);
+        assert!(json.contains(r#""playback_modes":{"shuffle":true,"repeat":"one"}"#));
     }
 
     #[test]
@@ -583,7 +685,10 @@ mod tests {
             queue: vec![Song::default()],
             queue_index: Some(2),
             position_secs: 61.5,
-            playback_mode: PlaybackMode::Shuffle,
+            playback_modes: PlayModes {
+                shuffle: true,
+                repeat: RepeatMode::All,
+            },
             shuffle_played: vec![0, 3, 1],
             shuffle_forward: vec![2],
         };
@@ -596,7 +701,8 @@ mod tests {
         assert_eq!(restored.queue.len(), 1);
         assert_eq!(restored.queue_index, Some(2));
         assert!((restored.position_secs - 61.5).abs() < 1e-9);
-        assert_eq!(restored.playback_mode, PlaybackMode::Shuffle);
+        assert!(restored.playback_modes.shuffle);
+        assert_eq!(restored.playback_modes.repeat, RepeatMode::All);
         assert_eq!(restored.shuffle_played, vec![0, 3, 1]);
         assert_eq!(restored.shuffle_forward, vec![2]);
     }
