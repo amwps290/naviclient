@@ -505,12 +505,114 @@ where
     Ok(out)
 }
 
+/// 解析单个 structuredLyrics 变体为歌词行（不含翻译）。
+fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
+    let offset = variant
+        .get("offset")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let raw_lines = variant.get("line")?.as_array()?;
+    Some(
+        raw_lines
+            .iter()
+            .map(|line| {
+                let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
+                    let adjusted = i128::from(start) + i128::from(offset);
+                    adjusted.clamp(0, i128::from(u64::MAX)) as u64
+                });
+                LyricLine {
+                    start_ms,
+                    text: line
+                        .get("value")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    translation: None,
+                }
+            })
+            .collect(),
+    )
+}
+
+/// 翻译行与主行配对的时间容差（毫秒）。
+const TRANSLATION_MATCH_TOLERANCE_MS: u64 = 2_500;
+
+/// 将翻译变体逐行配到主歌词上（原地写入 translation 字段）：
+/// 双方都同步时按时间戳就近匹配（±2.5 秒），都无时间戳且行数
+/// 相同则按行号对齐；空行/与原文相同的文本不写入。
+fn pair_translations(primary: &mut [LyricLine], candidate: &[LyricLine]) {
+    let primary_synced = primary.iter().any(|line| line.start_ms.is_some());
+    let candidate_synced = candidate.iter().any(|line| line.start_ms.is_some());
+    if primary_synced && candidate_synced {
+        for line in primary.iter_mut() {
+            let Some(start) = line.start_ms else {
+                continue;
+            };
+            let best = candidate
+                .iter()
+                .filter_map(|other| {
+                    let other_start = other.start_ms?;
+                    let distance = start.abs_diff(other_start);
+                    (distance <= TRANSLATION_MATCH_TOLERANCE_MS).then_some((distance, &other.text))
+                })
+                .min_by_key(|(distance, _)| *distance);
+            if let Some((_, text)) = best {
+                if !text.is_empty() && text != &line.text {
+                    line.translation = Some(text.clone());
+                }
+            }
+        }
+    } else if !primary_synced && !candidate_synced && primary.len() == candidate.len() {
+        for (line, other) in primary.iter_mut().zip(candidate) {
+            if !other.text.is_empty() && other.text != line.text {
+                line.translation = Some(other.text.clone());
+            }
+        }
+    }
+}
+
+/// 变体的语言标签；缺失时视为空字符串（不同变体仍可区分）。
+fn variant_language(variant: &Value) -> &str {
+    variant
+        .get("lang")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/// 变体排序键：同步优先、行数多者优先。
+fn variant_rank(variant: &Value) -> (bool, usize) {
+    (
+        variant
+            .get("synced")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        variant
+            .get("line")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+    )
+}
+
+/// 同分时靠前者胜出：服务器通常把原文排在翻译之前，平局让原文当主行。
+fn pick_variant<'a>(candidates: &[&'a Value]) -> Option<&'a Value> {
+    candidates
+        .iter()
+        .enumerate()
+        .max_by(|(index_a, a), (index_b, b)| {
+            variant_rank(a)
+                .cmp(&variant_rank(b))
+                // max_by 取“较大者”，传 b 的索引反向比较即可让小索引获胜。
+                .then(index_b.cmp(index_a))
+        })
+        .map(|(_, variant)| *variant)
+}
+
 fn parse_structured_lyrics(body: &Value) -> Option<Lyrics> {
     let variants = body
         .get("lyricsList")?
         .get("structuredLyrics")?
         .as_array()?;
-    let selected = variants
+    let usable = variants
         .iter()
         .filter(|lyrics| {
             lyrics
@@ -518,40 +620,20 @@ fn parse_structured_lyrics(body: &Value) -> Option<Lyrics> {
                 .and_then(Value::as_array)
                 .is_some_and(|lines| !lines.is_empty())
         })
-        .max_by_key(|lyrics| {
-            let synced = lyrics
-                .get("synced")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let line_count = lyrics
-                .get("line")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            (synced, line_count)
-        })?;
-    let offset = selected
-        .get("offset")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let lines = selected
-        .get("line")?
-        .as_array()?
-        .iter()
-        .map(|line| {
-            let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
-                let adjusted = i128::from(start) + i128::from(offset);
-                adjusted.clamp(0, i128::from(u64::MAX)) as u64
-            });
-            LyricLine {
-                start_ms,
-                text: line
-                    .get("value")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-            }
-        })
+        .collect::<Vec<_>>();
+    let selected = pick_variant(&usable)?;
+    // 翻译候选：不同语言且行非空；同分时同样优先靠前者。
+    let translation_candidates: Vec<&Value> = usable
+        .into_iter()
+        .filter(|variant| variant_language(variant) != variant_language(selected))
         .collect();
+    let translation_variant = pick_variant(&translation_candidates);
+    let mut lines = parse_lyric_lines(selected)?;
+    if let Some(candidate) = translation_variant {
+        if let Some(candidate_lines) = parse_lyric_lines(candidate) {
+            pair_translations(&mut lines, &candidate_lines);
+        }
+    }
 
     Some(Lyrics {
         display_artist: selected
@@ -587,6 +669,7 @@ fn parse_plain_lyrics(body: &Value) -> Option<Lyrics> {
             .map(|line| LyricLine {
                 start_ms: None,
                 text: line.to_string(),
+                translation: None,
             })
             .collect(),
     })
@@ -792,6 +875,114 @@ mod tests {
         assert_eq!(favorite_param(FavoriteKind::Artist), "artistId");
         assert_eq!(favorite_param(FavoriteKind::Album), "albumId");
         assert_eq!(favorite_param(FavoriteKind::Song), "id");
+    }
+
+    fn test_lyric_line(start_ms: Option<u64>, text: &str) -> LyricLine {
+        LyricLine {
+            start_ms,
+            text: text.to_string(),
+            translation: None,
+        }
+    }
+
+    #[test]
+    fn translations_pair_by_nearest_timestamp_within_tolerance() {
+        let mut primary = vec![
+            test_lyric_line(Some(0), "hello"),
+            test_lyric_line(Some(5000), "world"),
+        ];
+        let candidate = vec![
+            test_lyric_line(Some(100), "你好"),
+            test_lyric_line(Some(5100), "世界"),
+            test_lyric_line(Some(9000), "多余行"),
+        ];
+        pair_translations(&mut primary, &candidate);
+        assert_eq!(primary[0].translation.as_deref(), Some("你好"));
+        assert_eq!(primary[1].translation.as_deref(), Some("世界"));
+    }
+
+    #[test]
+    fn translations_reject_far_and_duplicate_and_empty_text() {
+        let mut primary = vec![
+            test_lyric_line(Some(0), "a"),
+            test_lyric_line(Some(10_000), "b"),
+            test_lyric_line(Some(20_000), "same"),
+        ];
+        let candidate = vec![
+            test_lyric_line(Some(30_000), "超出容差"),
+            test_lyric_line(Some(20_000), "same"),
+            test_lyric_line(Some(10_000), ""),
+        ];
+        pair_translations(&mut primary, &candidate);
+        assert_eq!(primary[0].translation, None);
+        // 空文本不作为翻译。
+        assert_eq!(primary[1].translation, None);
+        // 与原文相同也不重复显示。
+        assert_eq!(primary[2].translation, None);
+    }
+
+    #[test]
+    fn unsynced_translations_pair_by_line_index_only() {
+        let mut primary = vec![test_lyric_line(None, "one"), test_lyric_line(None, "two")];
+        let candidate = vec![test_lyric_line(None, "一"), test_lyric_line(None, "二")];
+        pair_translations(&mut primary, &candidate);
+        assert_eq!(primary[0].translation.as_deref(), Some("一"));
+        assert_eq!(primary[1].translation.as_deref(), Some("二"));
+
+        // 行数不同时不做行号对齐，宁缺毋滥。
+        let mut primary = vec![test_lyric_line(None, "one")];
+        pair_translations(&mut primary, &candidate);
+        assert_eq!(primary[0].translation, None);
+    }
+
+    #[test]
+    fn structured_lyrics_translation_variant_is_extracted() {
+        let body = serde_json::json!({
+            "lyricsList": { "structuredLyrics": [
+                {
+                    "lang": "eng",
+                    "synced": true,
+                    "line": [
+                        {"start": 0, "value": "hello"},
+                        {"start": 5000, "value": "world"},
+                    ]
+                },
+                {
+                    "lang": "zho",
+                    "synced": true,
+                    "line": [
+                        {"start": 0, "value": "你好"},
+                        {"start": 5000, "value": "世界"},
+                    ]
+                },
+            ]}
+        });
+        let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
+        assert_eq!(lyrics.lines[0].text, "hello");
+        assert_eq!(lyrics.lines[0].translation.as_deref(), Some("你好"));
+        assert_eq!(lyrics.lines[1].text, "world");
+        assert_eq!(lyrics.lines[1].translation.as_deref(), Some("世界"));
+    }
+
+    #[test]
+    fn same_language_variants_do_not_become_translations() {
+        let body = serde_json::json!({
+            "lyricsList": { "structuredLyrics": [
+                {
+                    "lang": "eng",
+                    "synced": true,
+                    "line": [{"start": 0, "value": "hello"}]
+                },
+                {
+                    "lang": "eng",
+                    "synced": false,
+                    "line": [{"value": "hello (alternate)"}]
+                },
+            ]}
+        });
+        let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
+        assert_eq!(lyrics.lines[0].text, "hello");
+        assert_eq!(lyrics.lines[0].translation, None);
     }
 
     #[test]

@@ -380,6 +380,13 @@ impl NavidromeApp {
         if let Some(cached) = config::load_genres_cache() {
             app.state.genres = cached;
         }
+        // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
+        {
+            let prune_config = app.config.clone();
+            app.spawn_future(async move {
+                config::prune_cover_cache(&prune_config);
+            });
+        }
         app.state.albums_sort = app.config.albums_sort;
         app.state.artists_sort = app.config.artists_sort;
         app.audio.set_volume(initial_volume);
@@ -1515,6 +1522,7 @@ impl NavidromeApp {
             transcoding_quality: self.config.transcoding_quality,
             volume: self.config.volume,
             playback_modes: self.config.playback_modes,
+            show_lyrics_translation: self.config.show_lyrics_translation,
             volume_normalization: self.config.volume_normalization,
             sidebar_collapsed: self.config.sidebar_collapsed,
             albums_sort: self.config.albums_sort,
@@ -1610,6 +1618,15 @@ impl NavidromeApp {
         self.config.volume_normalization = mode;
         if let Err(error) = config::save(&self.config) {
             self.notify_error(format!("Volume normalization save failed: {error:#}"));
+        }
+        cx.notify();
+    }
+
+    /// 歌词翻译行显示开关；服务器无多语言变体时该开关无效果。
+    fn set_show_lyrics_translation(&mut self, show: bool, cx: &mut Context<Self>) {
+        self.config.show_lyrics_translation = show;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Lyrics translation save failed: {error:#}"));
         }
         cx.notify();
     }

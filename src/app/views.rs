@@ -1746,6 +1746,51 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
+                            .child("Lyrics"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_4()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        "Show translated lyrics under the original line when the server provides another language variant.",
+                                    ),
+                            )
+                            .child(
+                                h_flex().gap_2().children(
+                                    [("Show translation", true), ("Original only", false)]
+                                        .into_iter()
+                                        .map(|(label, show)| {
+                                            Button::new(SharedString::from(format!(
+                                                "lyrics-translation-{show}"
+                                            )))
+                                            .label(label)
+                                            .selected(
+                                                self.config.show_lyrics_translation == show,
+                                            )
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.set_show_lyrics_translation(show, cx);
+                                            }))
+                                        }),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .child("Appearance"),
                     )
                     .child(
@@ -1854,6 +1899,7 @@ impl NavidromeApp {
                 .into_any_element()
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
             let synced = lyrics.is_synced();
+            let show_translation = self.config.show_lyrics_translation;
             v_flex()
                 .id("lyrics-scroll")
                 .flex_1()
@@ -1873,6 +1919,10 @@ impl NavidromeApp {
                         lyric_line.text.clone()
                     };
                     let start_ms = lyric_line.start_ms;
+                    let translation = lyric_line
+                        .translation
+                        .clone()
+                        .filter(|text| show_translation && !text.is_empty());
                     let line = div()
                         .id(SharedString::from(format!(
                             "lyric-line-{}-{index}",
@@ -1896,7 +1946,18 @@ impl NavidromeApp {
                                     cx.notify();
                                 }))
                         })
-                        .child(text);
+                        // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。
+                        .child(v_flex().gap_1().child(div().child(text)).when_some(
+                            translation,
+                            |this, translation| {
+                                this.child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(translation),
+                                )
+                            },
+                        ));
 
                     if current {
                         line.text_2xl()

@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use md5::{Digest, Md5};
 
 use crate::models::{Config, Genre, PlayModes, PlaybackMode, PlaybackSession};
 
@@ -61,6 +62,75 @@ pub fn audio_cache_dir(config: &Config) -> PathBuf {
         .cache_dir
         .clone()
         .unwrap_or_else(default_audio_cache_dir)
+}
+
+/// 封面磁盘缓存目录（与音频缓存同体系，切换缓存目录即切换命名空间）。
+pub fn cover_cache_dir(config: &Config) -> PathBuf {
+    audio_cache_dir(config).join("covers")
+}
+
+/// 由封面 id 派生缓存文件名：id 直接拼路径会有注入/非法字符风险，
+/// 统一取 md5 十六进制。
+pub fn cover_cache_file_name(cover_id: &str) -> String {
+    format!("{:x}.cover", Md5::digest(cover_id.as_bytes()))
+}
+
+/// 读取缓存的原封字节；文件缺失或读取失败按未命中处理。
+fn read_cover_at(path: &Path) -> Option<Vec<u8>> {
+    fs::read(path).ok()
+}
+
+/// 写入原封字节；失败只记日志不影响播放。
+fn write_cover_at(path: &Path, bytes: &[u8]) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Err(error) = fs::write(path, bytes) {
+        log::warn!("failed to write cover cache {:?}: {error}", path);
+    }
+}
+
+/// 缓存总量上限；超出时从最旧开始删除。
+const COVER_CACHE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+/// 清理封面缓存：总量超过上限时按修改时间从最旧开始删除，
+/// 返回删除的字节数供日志记录。目录不存在时静默返回 0。
+fn prune_cover_cache_at(dir: &Path, max_bytes: u64) -> u64 {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut files = Vec::new();
+    let mut total: u64 = 0;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let size = meta.len();
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        total += size;
+        files.push((modified, size, entry.path()));
+    }
+    if total <= max_bytes {
+        return 0;
+    }
+    // 最旧的在前；逐个删除直到回到限额内。
+    files.sort_by_key(|(modified, _, _)| *modified);
+    let mut removed = 0;
+    for (_, size, path) in files {
+        if total <= max_bytes {
+            break;
+        }
+        if fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(size);
+            removed += size;
+        }
+    }
+    removed
 }
 
 pub fn log_path() -> PathBuf {
@@ -182,6 +252,30 @@ fn write_genres_at(path: &Path, genres: &[Genre]) -> Result<()> {
     fs::write(path, text).context("failed to write genres cache")
 }
 
+/// 读取封面磁盘缓存；未命中返回 None。
+/// 网络请求固定使用 500px 档位，缓存键只需封面 id。
+pub fn read_cover_cache(config: &Config, cover_id: &str) -> Option<Vec<u8>> {
+    read_cover_at(&cover_cache_dir(config).join(cover_cache_file_name(cover_id)))
+}
+
+/// 下载成功后写入封面磁盘缓存。
+pub fn write_cover_cache(config: &Config, cover_id: &str, bytes: &[u8]) {
+    write_cover_at(
+        &cover_cache_dir(config).join(cover_cache_file_name(cover_id)),
+        bytes,
+    )
+}
+
+/// 启动时清理超限的封面缓存；返回删除的字节数。
+pub fn prune_cover_cache(config: &Config) -> u64 {
+    let dir = cover_cache_dir(config);
+    let removed = prune_cover_cache_at(&dir, COVER_CACHE_MAX_BYTES);
+    if removed > 0 {
+        log::info!("pruned {removed} bytes of cover cache under {dir:?}");
+    }
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +288,67 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    #[test]
+    fn cover_cache_file_name_is_deterministic_and_path_safe() {
+        let a = cover_cache_file_name("al-123");
+        let b = cover_cache_file_name("al-123");
+        assert_eq!(a, b);
+        assert!(a.ends_with(".cover"));
+        // 任何 id（含路径分隔符等危险字符）都映射为纯十六进制名。
+        assert_eq!(
+            cover_cache_file_name("../evil/id"),
+            cover_cache_file_name("../evil/id")
+        );
+        assert!(!cover_cache_file_name("../evil/id").contains('/'));
+        assert_ne!(cover_cache_file_name("al-1"), cover_cache_file_name("al-2"));
+    }
+
+    #[test]
+    fn cover_cache_round_trips_and_missing_files_miss() {
+        let dir = std::env::temp_dir().join(format!("navidrome-cover-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let config = Config {
+            cache_dir: Some(dir.clone()),
+            ..Config::default()
+        };
+
+        assert!(read_cover_cache(&config, "al-404").is_none());
+        write_cover_cache(&config, "al-1", b"png-bytes");
+        assert_eq!(
+            read_cover_cache(&config, "al-1").as_deref(),
+            Some(b"png-bytes".as_slice())
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cover_cache_prune_removes_oldest_files_beyond_limit() {
+        let dir =
+            std::env::temp_dir().join(format!("navidrome-cover-prune-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 三个文件共 300 字节；上限 200：最旧的 two.bin 应被删到回到限额内。
+        std::fs::write(dir.join("oldest.cover"), vec![0u8; 150]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(dir.join("middle.cover"), vec![0u8; 100]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(dir.join("newest.cover"), vec![0u8; 50]).unwrap();
+
+        let removed = prune_cover_cache_at(&dir, 200);
+        assert_eq!(removed, 150);
+        assert!(!dir.join("oldest.cover").exists());
+        assert!(dir.join("middle.cover").exists());
+        assert!(dir.join("newest.cover").exists());
+
+        // 限额内不删除。
+        assert_eq!(prune_cover_cache_at(&dir, 200), 0);
+        // 目录不存在时静默返回 0。
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(prune_cover_cache_at(&dir, 200), 0);
     }
 
     #[test]

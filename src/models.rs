@@ -262,6 +262,8 @@ impl Lyrics {
 pub struct LyricLine {
     pub start_ms: Option<u64>,
     pub text: String,
+    /// 其他语言变体中按时间戳就近匹配到的翻译行；无可用变体时为 None。
+    pub translation: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -437,6 +439,9 @@ pub struct Config {
     /// 侧边栏是否折叠为图标栏。
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    /// 歌词是否显示翻译行（服务器返回多语言变体时）。
+    #[serde(default = "default_true")]
+    pub show_lyrics_translation: bool,
     /// 专辑列表排序方式。
     #[serde(default)]
     pub albums_sort: AlbumSort,
@@ -458,6 +463,7 @@ impl Default for Config {
             playback_modes: PlayModes::default(),
             volume_normalization: VolumeNormalization::Track,
             sidebar_collapsed: false,
+            show_lyrics_translation: default_true(),
             albums_sort: AlbumSort::default(),
             artists_sort: ArtistSort::default(),
         }
@@ -466,6 +472,10 @@ impl Default for Config {
 
 fn default_volume() -> f32 {
     0.7
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// 音量标准化模式：关闭 / 按曲目 / 按专辑（ReplayGain）。
@@ -641,6 +651,24 @@ mod tests {
 
         assert_eq!(config.albums_sort, AlbumSort::NewestAdded);
         assert_eq!(config.artists_sort, ArtistSort::Name);
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_showing_lyrics_translation() {
+        let config: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without lyrics settings should still deserialize");
+        assert!(config.show_lyrics_translation);
+
+        let json = serde_json::to_string(&Config {
+            show_lyrics_translation: false,
+            ..Config::default()
+        })
+        .expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+        assert!(!restored.show_lyrics_translation);
+        assert!(json.contains("show_lyrics_translation"));
     }
 
     #[test]

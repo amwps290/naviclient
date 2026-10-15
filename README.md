@@ -115,7 +115,9 @@ Played audio is cached separately in the configured audio cache directory.
 The folder can be changed from Settings, completed tracks are reused without
 another download, partial original tracks resume through HTTP range requests
 when supported, and the oldest cache files are removed at startup when the
-cache exceeds 4 GiB.
+cache exceeds 4 GiB. Album cover art bytes are also cached to disk under the
+same directory (`covers/`), capped at 256 MiB with oldest-first pruning, so
+restarts render grids instantly without re-downloading every cover.
 
 Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
