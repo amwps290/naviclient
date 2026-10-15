@@ -16,6 +16,7 @@ impl NavidromeApp {
         self.load_albums();
         self.load_playlists();
         self.load_favorites();
+        self.load_newest_albums();
         self.load_recent_albums();
         self.load_frequent_albums();
         self.load_random_albums();
@@ -37,12 +38,25 @@ impl NavidromeApp {
         self.state.albums_exhausted = false;
         self.state.albums_page = 0;
         self.state.albums.clear();
+        let sort = self.state.albums_sort;
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let _ = tx.send(Msg::Albums(
-                api.albums(ALBUM_PAGE_SIZE as u32, 0)
+                api.albums(ALBUM_PAGE_SIZE as u32, 0, sort)
                     .await
                     .map_err(error_message),
+            ));
+        });
+    }
+
+    /// 首页“最近添加”区块（与专辑页排序状态解耦）。
+    pub(super) fn load_newest_albums(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        self.state.newest_albums_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::NewestAlbums(
+                api.albums_newest(30).await.map_err(error_message),
             ));
         });
     }
@@ -90,14 +104,44 @@ impl NavidromeApp {
         }
         self.state.albums_loading = true;
         let offset = album_page_offset(self.state.albums_page, ALBUM_PAGE_SIZE);
+        let sort = self.state.albums_sort;
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let _ = tx.send(Msg::Albums(
-                api.albums(ALBUM_PAGE_SIZE as u32, offset)
+                api.albums(ALBUM_PAGE_SIZE as u32, offset, sort)
                     .await
                     .map_err(error_message),
             ));
         });
+    }
+
+    /// 切换专辑排序：更新状态并持久化，然后重新从第一页加载。
+    pub(super) fn set_album_sort(&mut self, sort: AlbumSort, cx: &mut Context<Self>) {
+        if self.state.albums_sort == sort {
+            return;
+        }
+        self.state.albums_sort = sort;
+        self.config.albums_sort = sort;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Album sort save failed: {error:#}"));
+        }
+        self.load_albums();
+        cx.notify();
+    }
+
+    /// 切换艺术家排序：全量列表已在客户端，原地重排并重置增量渲染进度。
+    pub(super) fn set_artist_sort(&mut self, sort: ArtistSort, cx: &mut Context<Self>) {
+        if self.state.artists_sort == sort {
+            return;
+        }
+        self.state.artists_sort = sort;
+        self.config.artists_sort = sort;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Artist sort save failed: {error:#}"));
+        }
+        sort_artists(&mut self.state.artists, sort);
+        self.state.artists_visible = self.state.artists.len().min(300);
+        cx.notify();
     }
 
     pub(super) fn maybe_load_more_content(&mut self) {
@@ -314,7 +358,8 @@ impl NavidromeApp {
                 Msg::Artists(result) => {
                     self.state.loading = false;
                     match result {
-                        Ok(artists) => {
+                        Ok(mut artists) => {
+                            sort_artists(&mut artists, self.state.artists_sort);
                             let covers = artists
                                 .iter()
                                 .filter_map(|item| item.cover_art.clone())
@@ -354,9 +399,14 @@ impl NavidromeApp {
                             if albums.is_empty() {
                                 self.state.albums_exhausted = true;
                             } else {
-                                albums
-                                    .sort_by_key(|album| album.created.clone().unwrap_or_default());
-                                albums.reverse();
+                                // 服务端已按所选方式排序；仅“最近添加”需要
+                                // 同页内按 created 时间修正顺序。
+                                if self.state.albums_sort == AlbumSort::NewestAdded {
+                                    albums.sort_by_key(|album| {
+                                        album.created.clone().unwrap_or_default()
+                                    });
+                                    albums.reverse();
+                                }
                                 let covers: Vec<String> = albums
                                     .iter()
                                     .filter_map(|item| item.cover_art.clone())
@@ -374,6 +424,24 @@ impl NavidromeApp {
                             }
                         }
                         Err(error) => self.notify_error(error),
+                    }
+                }
+                Msg::NewestAlbums(result) => {
+                    self.state.newest_albums_loading = false;
+                    match result {
+                        Ok(albums) => {
+                            let covers: Vec<String> = albums
+                                .iter()
+                                .filter_map(|item| item.cover_art.clone())
+                                .take(30)
+                                .collect();
+                            self.state.newest_albums = albums;
+                            self.preload_covers(covers);
+                        }
+                        Err(error) => {
+                            // 非关键增强：加载失败只记录日志，不阻断其余页面。
+                            log::warn!("newest albums load failed: {error}");
+                        }
                     }
                 }
                 Msg::RecentAlbums(result) => {

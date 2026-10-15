@@ -27,6 +27,11 @@ JavaScript runtime.
   local playback
 - Home page with collapsible sections: recently played, frequently played,
   random albums and newest albums, fed by Navidrome's album lists
+- Album and artist pages with a sort menu (recently added, name, artist, or
+  year for albums; name A–Z/Z–A or album count for artists). Sort orders use
+  server-side `getAlbumList2` sorting so incremental paging keeps working, are
+  persisted across restarts, and legacy configs safely default to newest-added
+  and name order
 - Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover

@@ -12,7 +12,7 @@ use crate::playlist::{can_edit, song_ids, PlaylistDetails, PlaylistEdit, Playlis
 mod playlist_tests;
 
 use crate::models::{
-    Album, Artist, FavoriteKey, FavoriteKind, Favorites, LyricLine, Lyrics, Playlist,
+    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, LyricLine, Lyrics, Playlist,
     SearchResults, ServerInfo, Song,
 };
 
@@ -171,18 +171,21 @@ impl Api {
         Ok(albums)
     }
 
-    pub async fn albums(&self, size: u32, offset: u32) -> Result<Vec<Album>> {
-        let body = self
-            .get_json(
-                "getAlbumList2",
-                &[
-                    ("type", "newest"),
-                    ("size", &size.to_string()),
-                    ("offset", &offset.to_string()),
-                ],
-            )
-            .await?;
+    pub async fn albums(&self, size: u32, offset: u32, sort: AlbumSort) -> Result<Vec<Album>> {
+        let mut params = album_sort_params(sort);
+        params.push(("size", size.to_string()));
+        params.push(("offset", offset.to_string()));
+        let params: Vec<(&str, &str)> = params
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+        let body = self.get_json("getAlbumList2", &params).await?;
         parse_album_list2(&body)
+    }
+
+    /// 首页“最近添加”区块（`type=newest`，与专辑页排序状态解耦）。
+    pub async fn albums_newest(&self, size: u32) -> Result<Vec<Album>> {
+        self.albums_by_type("newest", size).await
     }
 
     /// 最近播放的专辑列表（依赖 Navidrome/Subsonic 的 `type=recent`）。
@@ -445,6 +448,21 @@ fn parse_album_list2(body: &Value) -> Result<Vec<Album>> {
     Ok(albums)
 }
 
+/// 将专辑排序映射为 `getAlbumList2` 查询参数（除 size/offset 外）。
+/// `byYear` 使用 fromYear > toYear 的倒序区间，年份新→旧。
+fn album_sort_params(sort: AlbumSort) -> Vec<(&'static str, String)> {
+    match sort {
+        AlbumSort::NewestAdded => vec![("type", "newest".to_string())],
+        AlbumSort::Name => vec![("type", "alphabeticalByName".to_string())],
+        AlbumSort::Artist => vec![("type", "alphabeticalByArtist".to_string())],
+        AlbumSort::Year => vec![
+            ("type", "byYear".to_string()),
+            ("fromYear", "9999".to_string()),
+            ("toYear", "0".to_string()),
+        ],
+    }
+}
+
 fn parse_array<T>(value: &Value, key: &str) -> Result<Vec<T>>
 where
     T: serde::de::DeserializeOwned,
@@ -640,6 +658,48 @@ mod tests {
             let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
             assert_eq!(params["type"], list_type);
         }
+    }
+
+    #[test]
+    fn album_sort_params_map_to_subsonic_list_types() {
+        assert_eq!(
+            album_sort_params(AlbumSort::NewestAdded),
+            vec![("type", "newest".to_string())]
+        );
+        assert_eq!(
+            album_sort_params(AlbumSort::Name),
+            vec![("type", "alphabeticalByName".to_string())]
+        );
+        assert_eq!(
+            album_sort_params(AlbumSort::Artist),
+            vec![("type", "alphabeticalByArtist".to_string())]
+        );
+        assert_eq!(
+            album_sort_params(AlbumSort::Year),
+            vec![
+                ("type", "byYear".to_string()),
+                ("fromYear", "9999".to_string()),
+                ("toYear", "0".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn sorted_album_request_includes_type_size_and_offset() {
+        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let mut params = album_sort_params(AlbumSort::Artist);
+        params.push(("size", "100".to_string()));
+        params.push(("offset", "300".to_string()));
+        let params: Vec<(&str, &str)> = params
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+        let url = api.url_for("getAlbumList2", &params).unwrap();
+        let parsed = Url::parse(&url).unwrap();
+        let query: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(query["type"], "alphabeticalByArtist");
+        assert_eq!(query["size"], "100");
+        assert_eq!(query["offset"], "300");
     }
 
     #[test]

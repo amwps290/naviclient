@@ -5,12 +5,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::{
-    px, hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Hsla, Modifiers, Pixels,
+    hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Modifiers, Pixels,
 };
 
 use crate::audio::PlaybackState;
+use crate::models::{
+    Artist, ArtistSort, PlaybackMode, Song, TranscodingQuality, VolumeNormalization,
+};
 use crate::msg::DecodedCover;
-use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
 
 // The mini player content target size. On Linux, the client-side window shadow
 // (gpui-component's WindowBorder) pads each edge of the window, so the actual
@@ -161,8 +163,35 @@ pub(super) fn next_queue_index(
     }
 }
 
+/// 按所选方式对艺术家列表原地排序。
+/// 名称比较不区分大小写，与 Navidrome 索引分组的顺序一致；
+/// 专辑数相同时回退到名称 A→Z，保证多次排序结果稳定。
+pub(super) fn sort_artists(artists: &mut [Artist], sort: ArtistSort) {
+    match sort {
+        ArtistSort::Name => artists.sort_by_key(artist_name_key),
+        ArtistSort::NameDesc => {
+            artists.sort_by_key(|artist| std::cmp::Reverse(artist_name_key(artist)))
+        }
+        ArtistSort::AlbumCount => artists.sort_by(|a, b| {
+            b.album_count
+                .unwrap_or(0)
+                .cmp(&a.album_count.unwrap_or(0))
+                .then_with(|| artist_name_key(a).cmp(&artist_name_key(b)))
+        }),
+    }
+}
+
+fn artist_name_key(artist: &Artist) -> String {
+    artist.name.trim().to_lowercase()
+}
+
 /// 计算顺序（非随机）切歌的目标 index；`wraps` 为 true 时队列首尾循环，否则在边界停止。
-pub(super) fn advance_index(current: usize, len: usize, forward: bool, wraps: bool) -> Option<usize> {
+pub(super) fn advance_index(
+    current: usize,
+    len: usize,
+    forward: bool,
+    wraps: bool,
+) -> Option<usize> {
     if len == 0 {
         return None;
     }
@@ -330,7 +359,11 @@ pub(super) fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
 }
 
 /// 计算快进/快退的目标位置，不越过歌曲起点与终点。
-pub(super) fn seek_target(position: Duration, duration: Option<Duration>, delta_secs: i64) -> Duration {
+pub(super) fn seek_target(
+    position: Duration,
+    duration: Option<Duration>,
+    delta_secs: i64,
+) -> Duration {
     let duration = duration.unwrap_or_default();
     if delta_secs >= 0 {
         (position + Duration::from_secs(delta_secs as u64)).min(duration)
@@ -391,7 +424,10 @@ pub(super) struct PlaybackTechnicalInfo {
     pub(super) tooltip: String,
 }
 
-pub(super) fn playback_technical_info(song: &Song, quality: TranscodingQuality) -> PlaybackTechnicalInfo {
+pub(super) fn playback_technical_info(
+    song: &Song,
+    quality: TranscodingQuality,
+) -> PlaybackTechnicalInfo {
     let source = source_technical_info(song);
     if let Some(bit_rate) = quality.max_bit_rate() {
         let estimated_bytes = song.duration.and_then(|seconds| {

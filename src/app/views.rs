@@ -3,6 +3,7 @@
 //! 从 app.rs 拆出；渲染方法之间共享父模块的私有字段与逻辑方法。
 
 use super::*;
+use gpui_kit::component::menu::PopupMenuItem;
 
 impl NavidromeApp {
     pub(super) fn render_cover(
@@ -316,6 +317,62 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// 专辑页排序菜单：当前方式打勾；切换后持久化并从第一页重新加载。
+    pub(super) fn render_album_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let app = cx.entity().downgrade();
+        Button::new("albums-sort")
+            .label(format!("Sort: {}", self.state.albums_sort.label()))
+            .icon(AppIcon::ChevronDown)
+            .tooltip("Album sort order")
+            .ghost()
+            .small()
+            .dropdown_menu(move |menu, _, cx| {
+                app.update(cx, |this, cx| {
+                    let mut menu = menu;
+                    for sort in AlbumSort::ALL {
+                        let checked = this.state.albums_sort == sort;
+                        menu =
+                            menu.item(PopupMenuItem::new(sort.label()).checked(checked).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_album_sort(sort, cx);
+                                }),
+                            ));
+                    }
+                    menu
+                })
+                .expect("app owns album sort menu")
+            })
+            .into_any_element()
+    }
+
+    /// 艺术家页排序菜单：全量列表在客户端重排，切换立即生效。
+    pub(super) fn render_artist_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let app = cx.entity().downgrade();
+        Button::new("artists-sort")
+            .label(format!("Sort: {}", self.state.artists_sort.label()))
+            .icon(AppIcon::ChevronDown)
+            .tooltip("Artist sort order")
+            .ghost()
+            .small()
+            .dropdown_menu(move |menu, _, cx| {
+                app.update(cx, |this, cx| {
+                    let mut menu = menu;
+                    for sort in ArtistSort::ALL {
+                        let checked = this.state.artists_sort == sort;
+                        menu =
+                            menu.item(PopupMenuItem::new(sort.label()).checked(checked).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_artist_sort(sort, cx);
+                                }),
+                            ));
+                    }
+                    menu
+                })
+                .expect("app owns artist sort menu")
+            })
+            .into_any_element()
+    }
+
     pub(super) fn render_scrolling_title(
         &self,
         text: SharedString,
@@ -586,7 +643,11 @@ impl NavidromeApp {
     }
 
     /// 列表行骨架屏：播放列表 / 歌曲列表加载期间占位。
-    pub(super) fn render_list_skeleton(&self, rows: usize, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_list_skeleton(
+        &self,
+        rows: usize,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let muted = cx.theme().muted_foreground;
         v_flex()
             .gap_2()
@@ -846,14 +907,12 @@ impl NavidromeApp {
         // 专辑 / 播放列表详情和队列页中表格占满剩余高度（表头固定，列表内部滚动）；
         // 收藏与搜索页的歌曲表格与其他分区共存，限制高度独立滚动。
         let fill = matches!(scope, "album-detail" | "playlist-detail" | "queue");
-        let rows = cx.processor(
-            move |this, range: Range<usize>, _window, cx| {
-                let playback = this.audio.state();
-                range
-                    .map(|index| this.render_song_row(scope, index, editable, &playback, cx))
-                    .collect::<Vec<_>>()
-            },
-        );
+        let rows = cx.processor(move |this, range: Range<usize>, _window, cx| {
+            let playback = this.audio.state();
+            range
+                .map(|index| this.render_song_row(scope, index, editable, &playback, cx))
+                .collect::<Vec<_>>()
+        });
         // 限高模式：显式给出列表高度 min(行数×行高, 视口)，不依赖 max_h。
         // taffy 计算自动高度父容器的内容尺寸时会忽略 max 约束（ContentSize
         // 模式不套用 min/max），Infer+max_h 会让列表按全部内容高度参与布局。
@@ -953,12 +1012,12 @@ impl NavidromeApp {
             .border_color(cx.theme().border.opacity(0.6))
             .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
             .cursor_pointer();
-        let keyboard_selected = self
-            .state
-            .song_list_selected
-            .is_some_and(|(selected_scope, selected_index)| {
-                selected_scope == scope && selected_index == index
-            });
+        let keyboard_selected =
+            self.state
+                .song_list_selected
+                .is_some_and(|(selected_scope, selected_index)| {
+                    selected_scope == scope && selected_index == index
+                });
         let row = if keyboard_selected {
             row.bg(cx.theme().accent.opacity(0.16))
         } else if current {
@@ -975,209 +1034,197 @@ impl NavidromeApp {
                 .justify_center()
                 .child(self.favorite_button(FavoriteKind::Song, &song.id, cx)),
         )
-            .child(
-                div()
-                    .w(px(42.0))
-                    .h(px(42.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border.opacity(0.7))
-                    .bg(cx.theme().background)
-                    .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
-            )
-            .child(
-                h_flex()
-                    .flex_1()
-                    .flex_grow(3.0)
-                    .min_w_0()
-                    .gap_2()
-                    .text_color(if current {
-                        cx.theme().info
-                    } else {
-                        cx.theme().foreground
-                    })
-                    .child(self.render_playing_indicator(&key, current, animated, cx))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .line_height(rems(1.25))
-                                    .truncate()
-                                    .child(song.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .line_height(rems(1.2))
-                                    .truncate()
-                                    .child(album),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .flex_grow(2.0)
-                    .max_w(px(180.0))
-                    .min_w_0()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .truncate()
-                    .child(song.artist.clone()),
-            )
-            .child(
-                div()
-                    .w(px(64.0))
-                    .text_sm()
-                    .text_right()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format_duration(song.duration)),
-            )
-            .child(
-                // 行尾操作列：固定宽度、常规布局，不再用悬浮层盖住行内容。
-                h_flex()
-                    .flex_none()
-                    .h_full()
-                    .w(px(if editable { 124.0 } else { 92.0 }))
-                    .items_center()
-                    .justify_end()
-                    .gap_0p5()
-                    .when(editable, |slot| {
-                        slot.child(
-                            Button::new(SharedString::from(format!("queue-up-{key}")))
-                                .icon(AppIcon::ChevronUp)
-                                .tooltip("Move up")
-                                .ghost()
-                                .small()
-                                .disabled(index == 0)
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_queue_item(index, index - 1);
-                                    cx.notify();
-                                })),
+        .child(
+            div()
+                .w(px(42.0))
+                .h(px(42.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().border.opacity(0.7))
+                .bg(cx.theme().background)
+                .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
+        )
+        .child(
+            h_flex()
+                .flex_1()
+                .flex_grow(3.0)
+                .min_w_0()
+                .gap_2()
+                .text_color(if current {
+                    cx.theme().info
+                } else {
+                    cx.theme().foreground
+                })
+                .child(self.render_playing_indicator(&key, current, animated, cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .line_height(rems(1.25))
+                                .truncate()
+                                .child(song.title.clone()),
                         )
                         .child(
-                            Button::new(SharedString::from(format!("queue-down-{key}")))
-                                .icon(AppIcon::ChevronDown)
-                                .tooltip("Move down")
-                                .ghost()
-                                .small()
-                                .disabled(index + 1 >= total)
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_queue_item(index, index + 1);
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!("queue-remove-{key}")))
-                                .icon(AppIcon::Close)
-                                .tooltip("Remove from queue")
-                                .ghost()
-                                .small()
+                            div()
+                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.remove_from_queue(index);
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .when(!editable, |slot| {
-                        slot.child(
-                            Button::new(SharedString::from(format!("play-next-{key}")))
-                                .icon(PlayerIcon::Next)
-                                .tooltip("Play next")
-                                .ghost()
-                                .small()
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(song) = this.song_for_scope(scope, index) {
-                                        this.insert_next(song.clone());
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!("add-to-queue-{key}")))
-                                .icon(AppIcon::Queue)
-                                .tooltip("Add to queue")
-                                .ghost()
-                                .small()
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(song) = this.song_for_scope(scope, index) {
-                                        this.add_to_queue(song.clone());
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                    })
+                                .line_height(rems(1.2))
+                                .truncate()
+                                .child(album),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex_grow(2.0)
+                .max_w(px(180.0))
+                .min_w_0()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .truncate()
+                .child(song.artist.clone()),
+        )
+        .child(
+            div()
+                .w(px(64.0))
+                .text_sm()
+                .text_right()
+                .text_color(cx.theme().muted_foreground)
+                .child(format_duration(song.duration)),
+        )
+        .child(
+            // 行尾操作列：固定宽度、常规布局，不再用悬浮层盖住行内容。
+            h_flex()
+                .flex_none()
+                .h_full()
+                .w(px(if editable { 124.0 } else { 92.0 }))
+                .items_center()
+                .justify_end()
+                .gap_0p5()
+                .when(editable, |slot| {
+                    slot.child(
+                        Button::new(SharedString::from(format!("queue-up-{key}")))
+                            .icon(AppIcon::ChevronUp)
+                            .tooltip("Move up")
+                            .ghost()
+                            .small()
+                            .disabled(index == 0)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.move_queue_item(index, index - 1);
+                                cx.notify();
+                            })),
+                    )
                     .child(
-                        div()
-                            .id("song-actions-trigger")
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation()
-                            })
-                            .on_click(|_, _, cx| cx.stop_propagation())
-                            .child(
-                                Button::new(SharedString::from(format!("song-menu-{key}")))
-                                    .icon(IconName::Ellipsis)
-                                    .tooltip("Song actions")
-                                    .ghost()
-                                    .small()
-                                    .dropdown_menu(move |menu, _, cx| {
-                                        button_menu_app
-                                            .update(cx, |this, cx| {
-                                                let Some(context) = this
-                                                    .song_menu_context(scope, index, editable)
-                                                else {
-                                                    return menu;
-                                                };
-                                                this.song_menu(menu, context, cx)
-                                            })
-                                            .expect("app owns song menu")
-                                    }),
-                            ),
-                    ),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                // 单击立即播放该歌曲
-                this.play_song_at_scope(scope, index);
-                cx.notify();
-            }))
-            .context_menu(move |menu, _, cx| {
-                menu_app
-                    .update(cx, |this, cx| {
-                        let context = this.song_menu_context(scope, index, editable);
-                        let Some(context) = context else {
-                            return menu;
-                        };
-                        this.song_menu(menu, context, cx)
-                    })
-                    .unwrap_or_else(|_| unreachable!("app outlives its rows"))
-            })
-            .into_any_element()
+                        Button::new(SharedString::from(format!("queue-down-{key}")))
+                            .icon(AppIcon::ChevronDown)
+                            .tooltip("Move down")
+                            .ghost()
+                            .small()
+                            .disabled(index + 1 >= total)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.move_queue_item(index, index + 1);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("queue-remove-{key}")))
+                            .icon(AppIcon::Close)
+                            .tooltip("Remove from queue")
+                            .ghost()
+                            .small()
+                            .text_color(cx.theme().muted_foreground)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_from_queue(index);
+                                cx.notify();
+                            })),
+                    )
+                })
+                .when(!editable, |slot| {
+                    slot.child(
+                        Button::new(SharedString::from(format!("play-next-{key}")))
+                            .icon(PlayerIcon::Next)
+                            .tooltip("Play next")
+                            .ghost()
+                            .small()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(song) = this.song_for_scope(scope, index) {
+                                    this.insert_next(song.clone());
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("add-to-queue-{key}")))
+                            .icon(AppIcon::Queue)
+                            .tooltip("Add to queue")
+                            .ghost()
+                            .small()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(song) = this.song_for_scope(scope, index) {
+                                    this.add_to_queue(song.clone());
+                                }
+                                cx.notify();
+                            })),
+                    )
+                })
+                .child(
+                    div()
+                        .id("song-actions-trigger")
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            Button::new(SharedString::from(format!("song-menu-{key}")))
+                                .icon(IconName::Ellipsis)
+                                .tooltip("Song actions")
+                                .ghost()
+                                .small()
+                                .dropdown_menu(move |menu, _, cx| {
+                                    button_menu_app
+                                        .update(cx, |this, cx| {
+                                            let Some(context) =
+                                                this.song_menu_context(scope, index, editable)
+                                            else {
+                                                return menu;
+                                            };
+                                            this.song_menu(menu, context, cx)
+                                        })
+                                        .expect("app owns song menu")
+                                }),
+                        ),
+                ),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            // 单击立即播放该歌曲
+            this.play_song_at_scope(scope, index);
+            cx.notify();
+        }))
+        .context_menu(move |menu, _, cx| {
+            menu_app
+                .update(cx, |this, cx| {
+                    let context = this.song_menu_context(scope, index, editable);
+                    let Some(context) = context else {
+                        return menu;
+                    };
+                    this.song_menu(menu, context, cx)
+                })
+                .unwrap_or_else(|_| unreachable!("app outlives its rows"))
+        })
+        .into_any_element()
     }
 
     /// 打开歌曲菜单时从当前状态构建菜单上下文；列表已变化时返回 None。
@@ -1392,10 +1439,13 @@ impl NavidromeApp {
             .items_start()
             // 固定黑色半透明背景：亮/暗主题下都是压暗效果。
             .bg(hsla(0.0, 0.0, 0.0, 0.35))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                this.state.settings_open = false;
-                cx.notify();
-            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.state.settings_open = false;
+                    cx.notify();
+                }),
+            )
             .child(
                 v_flex()
                     .id("settings-card")
@@ -1651,7 +1701,11 @@ impl NavidromeApp {
     }
 
     /// Toast 通知堆叠：绝对定位在内容区右下角，覆盖在页面之上。
-    pub(super) fn render_now_playing(&self, window: &Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_now_playing(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let Some(song) = &self.state.now_playing else {
             return v_flex()
                 .size_full()
@@ -1943,7 +1997,11 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    pub(super) fn render_content(&self, window: &mut Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_content(
+        &self,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         match self.state.view {
             View::Home => v_flex()
                 .gap_5()
@@ -1997,33 +2055,29 @@ impl NavidromeApp {
                     ),
                     cx,
                 ))
-                .child(
-                    self.render_home_section(
+                .child(self.render_home_section(
+                    "newest",
+                    "Newest albums",
+                    self.render_home_album_content(
                         "newest",
-                        "Newest albums",
-                        self.render_home_album_content(
-                            "newest",
-                            &self.state.albums[..self.state.albums.len().min(30)],
-                            self.state.albums_loading,
-                            "No albums in your library yet.",
-                            cx,
-                            window,
-                        ),
+                        &self.state.newest_albums,
+                        self.state.newest_albums_loading,
+                        "No albums in your library yet.",
                         cx,
+                        window,
                     ),
-                )
+                    cx,
+                ))
                 .into_any_element(),
             View::Favorites => {
                 let favorites = &self.state.favorites;
                 let total =
                     favorites.artists.len() + favorites.albums.len() + favorites.songs.len();
-                let mut content = v_flex()
-                    .gap_5()
-                    .child(self.page_header(
-                        "Favorites",
-                        format!("{total} starred items from your Navidrome library"),
-                        cx,
-                    ));
+                let mut content = v_flex().gap_5().child(self.page_header(
+                    "Favorites",
+                    format!("{total} starred items from your Navidrome library"),
+                    cx,
+                ));
 
                 if total == 0 {
                     content = content.child(
@@ -2068,11 +2122,18 @@ impl NavidromeApp {
             }
             View::Artists => v_flex()
                 .gap_5()
-                .child(self.page_header(
-                    "Artists",
-                    format!("{} artists in your library", self.state.artists.len()),
-                    cx,
-                ))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_end()
+                        .gap_3()
+                        .child(div().flex_1().child(self.page_header(
+                            "Artists",
+                            format!("{} artists in your library", self.state.artists.len()),
+                            cx,
+                        )))
+                        .child(self.render_artist_sort_button(cx)),
+                )
                 .child(if self.state.artists.is_empty() && self.state.loading {
                     self.render_artist_skeleton_grid(cx)
                 } else {
@@ -2082,11 +2143,18 @@ impl NavidromeApp {
                 .into_any_element(),
             View::Albums => v_flex()
                 .gap_5()
-                .child(self.page_header(
-                    "Albums",
-                    format!("{} albums in your library", self.state.albums.len()),
-                    cx,
-                ))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_end()
+                        .gap_3()
+                        .child(div().flex_1().child(self.page_header(
+                            "Albums",
+                            format!("{} albums in your library", self.state.albums.len()),
+                            cx,
+                        )))
+                        .child(self.render_album_sort_button(cx)),
+                )
                 .child(
                     if self.state.albums.is_empty() && self.state.albums_loading {
                         self.render_album_skeleton_grid(cx)
@@ -2584,7 +2652,11 @@ impl NavidromeApp {
         }
     }
 
-    pub(super) fn render_mini(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_mini(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let theme = cx.theme().clone();
         let song = self.state.now_playing.clone();
         let has_track = song.is_some();

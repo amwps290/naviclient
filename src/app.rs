@@ -8,6 +8,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui_kit::assets::IconName as KitIcon;
 use gpui_kit::component::{
     box_shadow,
     button::{Button, ButtonCustomVariant, ButtonVariants},
@@ -15,22 +16,20 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, DropdownMenu},
     notification::{Notification, NotificationType},
-    scroll::{Scrollbar, ScrollableElement},
+    scroll::{ScrollableElement, Scrollbar},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconNamed, IconName, Selectable,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable,
     Sizable, Theme, ThemeMode, TitleBar, WindowExt,
 };
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::assets::IconName as KitIcon;
 use gpui_kit::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, size, Animation, AnimationExt, AppContext, Context, Entity, FontWeight,
-    Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement, IntoElement,
-    Keystroke, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render,
-    ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
+    relative, rems, size, uniform_list, Animation, AnimationExt, AppContext, Context, Entity,
+    FontWeight, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
+    IntoElement, Keystroke, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels,
+    Render, ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
     StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
-    uniform_list,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use smol::Timer;
@@ -42,8 +41,8 @@ use crate::audio::{format_playback, AudioHandle, PlaybackState, TrackTransition}
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
-    Album, Artist, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics, PlaybackMode,
-    PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
+    Album, AlbumSort, Artist, ArtistSort, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics,
+    PlaybackMode, PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
     TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
@@ -63,17 +62,20 @@ mod views;
 use helpers::*;
 use playlists::{PlaylistUi, SongMenuContext};
 
-
 struct AppState {
     server: Option<ServerInfo>,
     view: View,
     loading: bool,
     artists: Vec<Artist>,
     artists_visible: usize,
+    artists_sort: ArtistSort,
     albums: Vec<Album>,
     albums_loading: bool,
     albums_exhausted: bool,
     albums_page: usize,
+    albums_sort: AlbumSort,
+    newest_albums: Vec<Album>,
+    newest_albums_loading: bool,
     recent_albums: Vec<Album>,
     recent_albums_loading: bool,
     frequent_albums: Vec<Album>,
@@ -128,10 +130,14 @@ impl Default for AppState {
             loading: false,
             artists: Vec::new(),
             artists_visible: 0,
+            artists_sort: ArtistSort::default(),
             albums: Vec::new(),
             albums_loading: false,
             albums_exhausted: false,
             albums_page: 0,
+            albums_sort: AlbumSort::default(),
+            newest_albums: Vec::new(),
+            newest_albums_loading: false,
             recent_albums: Vec::new(),
             recent_albums_loading: false,
             frequent_albums: Vec::new(),
@@ -343,6 +349,8 @@ impl NavidromeApp {
         };
         app.state.loudness_cache = config::load_loudness();
         app.state.playback_mode = app.config.playback_mode;
+        app.state.albums_sort = app.config.albums_sort;
+        app.state.artists_sort = app.config.artists_sort;
         app.audio.set_volume(initial_volume);
 
         // 恢复上次播放会话（仅服务器匹配时；不自动播放，点播放时从保存位置继续）。
@@ -1452,6 +1460,8 @@ impl NavidromeApp {
             playback_mode: self.config.playback_mode,
             volume_normalization: self.config.volume_normalization,
             sidebar_collapsed: self.config.sidebar_collapsed,
+            albums_sort: self.config.albums_sort,
+            artists_sort: self.config.artists_sort,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -1704,7 +1714,12 @@ impl NavidromeApp {
                 .child(button)
                 .into_any_element()
         } else {
-            div().mt_auto().w_full().pt_2().child(button).into_any_element()
+            div()
+                .mt_auto()
+                .w_full()
+                .pt_2()
+                .child(button)
+                .into_any_element()
         }
     }
 
@@ -2083,14 +2098,20 @@ impl Render for NavidromeApp {
                                 )
                             })
                             .child(self.nav_button(View::Home, "Home", AppIcon::Home, cx))
-                            .child(self.nav_button(View::Favorites, "Favorites", AppIcon::Heart, cx))
-                            .child(
-                                self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx),
-                            )
+                            .child(self.nav_button(
+                                View::Favorites,
+                                "Favorites",
+                                AppIcon::Heart,
+                                cx,
+                            ))
+                            .child(self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx))
                             .child(self.nav_button(View::Albums, "Albums", AppIcon::Albums, cx))
-                            .child(
-                                self.nav_button(View::Playlists, "Playlists", AppIcon::Playlists, cx),
-                            )
+                            .child(self.nav_button(
+                                View::Playlists,
+                                "Playlists",
+                                AppIcon::Playlists,
+                                cx,
+                            ))
                             .child(self.nav_button(View::Search, "Search", KitIcon::Search, cx))
                             .child(self.sidebar_collapse_toggle(cx)),
                     )
@@ -2207,7 +2228,6 @@ fn set_always_on_top(_window: &mut Window, on: bool) {
     );
 }
 
-
 fn technical_info_chip(
     id: &'static str,
     label: String,
@@ -2232,4 +2252,3 @@ fn technical_info_chip(
         .child(label)
         .into_any_element()
 }
-

@@ -80,9 +80,9 @@ impl NavidromeApp {
             return;
         }
         let next = match self.state.song_list_selected {
-            Some((selected_scope, index)) if selected_scope == scope => index
-                .saturating_add_signed(delta)
-                .min(len - 1),
+            Some((selected_scope, index)) if selected_scope == scope => {
+                index.saturating_add_signed(delta).min(len - 1)
+            }
             _ => {
                 if delta > 0 {
                     0

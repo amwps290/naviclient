@@ -23,6 +23,7 @@ pub enum Msg {
         result: Result<Vec<Album>, String>,
     },
     Albums(Result<Vec<Album>, String>),
+    NewestAlbums(Result<Vec<Album>, String>),
     RecentAlbums(Result<Vec<Album>, String>),
     FrequentAlbums(Result<Vec<Album>, String>),
     RandomAlbums(Result<Vec<Album>, String>),

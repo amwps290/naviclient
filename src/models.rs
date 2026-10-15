@@ -266,6 +266,61 @@ pub enum PlaybackMode {
     Shuffle,
 }
 
+/// 专辑列表的排序方式。除 `NewestAdded` 外均直接映射到
+/// Subsonic `getAlbumList2` 的服务端排序，保持增量分页可用。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumSort {
+    /// 最近添加（`type=newest`）。
+    #[default]
+    NewestAdded,
+    /// 名称 A→Z（`type=alphabeticalByName`）。
+    Name,
+    /// 艺术家名称 A→Z（`type=alphabeticalByArtist`）。
+    Artist,
+    /// 发行年份新→旧（`type=byYear`，fromYear > toYear 表示倒序）。
+    Year,
+}
+
+impl AlbumSort {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NewestAdded => "Recently added",
+            Self::Name => "Name",
+            Self::Artist => "Artist",
+            Self::Year => "Year",
+        }
+    }
+
+    pub const ALL: [Self; 4] = [Self::NewestAdded, Self::Name, Self::Artist, Self::Year];
+}
+
+/// 艺术家列表的排序方式。`getArtists` 不支持服务端排序参数，
+/// 全量列表已一次性加载，在客户端排序。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtistSort {
+    /// 名称 A→Z（服务器索引顺序）。
+    #[default]
+    Name,
+    /// 名称 Z→A。
+    NameDesc,
+    /// 专辑数多→少，同名按 A→Z。
+    AlbumCount,
+}
+
+impl ArtistSort {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name (A–Z)",
+            Self::NameDesc => "Name (Z–A)",
+            Self::AlbumCount => "Album count",
+        }
+    }
+
+    pub const ALL: [Self; 3] = [Self::Name, Self::NameDesc, Self::AlbumCount];
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlaybackSession {
     /// 归属服务器（切换服务器时不恢复其他服务器的会话）。
@@ -304,6 +359,12 @@ pub struct Config {
     /// 侧边栏是否折叠为图标栏。
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    /// 专辑列表排序方式。
+    #[serde(default)]
+    pub albums_sort: AlbumSort,
+    /// 艺术家列表排序方式。
+    #[serde(default)]
+    pub artists_sort: ArtistSort,
 }
 
 impl Default for Config {
@@ -319,6 +380,8 @@ impl Default for Config {
             playback_mode: PlaybackMode::Sequential,
             volume_normalization: VolumeNormalization::Track,
             sidebar_collapsed: false,
+            albums_sort: AlbumSort::default(),
+            artists_sort: ArtistSort::default(),
         }
     }
 }
@@ -362,8 +425,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Config, PlaybackMode, PlaybackSession, Song, ThemePreference, TranscodingQuality,
-        VolumeNormalization,
+        AlbumSort, ArtistSort, Config, PlaybackMode, PlaybackSession, Song, ThemePreference,
+        TranscodingQuality, VolumeNormalization,
     };
 
     #[test]
@@ -455,6 +518,34 @@ mod tests {
         .expect("legacy config without playback_mode should still deserialize");
 
         assert_eq!(config.playback_mode, PlaybackMode::Sequential);
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_default_library_sorts() {
+        let config: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without sort fields should still deserialize");
+
+        assert_eq!(config.albums_sort, AlbumSort::NewestAdded);
+        assert_eq!(config.artists_sort, ArtistSort::Name);
+    }
+
+    #[test]
+    fn library_sorts_round_trip_through_config_json() {
+        let config = Config {
+            albums_sort: AlbumSort::Year,
+            artists_sort: ArtistSort::AlbumCount,
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+
+        assert_eq!(restored.albums_sort, AlbumSort::Year);
+        assert_eq!(restored.artists_sort, ArtistSort::AlbumCount);
+        assert!(json.contains(r#""albums_sort":"year""#));
+        assert!(json.contains(r#""artists_sort":"album_count""#));
     }
 
     #[test]

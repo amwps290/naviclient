@@ -7,11 +7,13 @@ use gpui_kit::hsla;
 use super::{
     accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
     extract_cover_palette, format_file_size, loudness_gain_factor, match_shortcut,
-    normalize_volume, playback_technical_info, queue_index_after_move,
-    queue_index_after_remove, readable_accent, replay_gain_factor, restored_volume,
-    seek_target, should_scrobble, Shortcut, ShuffleHistory,
+    normalize_volume, playback_technical_info, queue_index_after_move, queue_index_after_remove,
+    readable_accent, replay_gain_factor, restored_volume, seek_target, should_scrobble,
+    sort_artists, Shortcut, ShuffleHistory,
 };
-use crate::models::{PlaybackMode, Song, TranscodingQuality, VolumeNormalization};
+use crate::models::{
+    Artist, ArtistSort, PlaybackMode, Song, TranscodingQuality, VolumeNormalization,
+};
 use gpui_kit::Modifiers;
 
 #[test]
@@ -487,4 +489,66 @@ fn seek_target_clamps_to_track_bounds() {
         seek_target(Duration::from_secs(60), duration, -5),
         Duration::from_secs(55)
     );
+}
+
+fn test_artist(name: &str, album_count: i32) -> Artist {
+    Artist {
+        id: name.to_string(),
+        name: name.to_string(),
+        album_count: Some(album_count),
+        cover_art: None,
+    }
+}
+
+#[test]
+fn artist_sort_name_is_case_insensitive_ascending() {
+    let mut artists = vec![
+        test_artist("beatles", 1),
+        test_artist("Adele", 1),
+        test_artist("coldplay", 1),
+    ];
+    sort_artists(&mut artists, ArtistSort::Name);
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["Adele", "beatles", "coldplay"]);
+}
+
+#[test]
+fn artist_sort_name_desc_reverses_ascending_order() {
+    let mut artists = vec![
+        test_artist("Adele", 1),
+        test_artist("beatles", 1),
+        test_artist("coldplay", 1),
+    ];
+    sort_artists(&mut artists, ArtistSort::NameDesc);
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["coldplay", "beatles", "Adele"]);
+}
+
+#[test]
+fn artist_sort_album_count_orders_by_size_then_name() {
+    let mut artists = vec![
+        test_artist("Adele", 4),
+        test_artist("coldplay", 9),
+        test_artist("beatles", 9),
+        test_artist("unknown", 0),
+    ];
+    sort_artists(&mut artists, ArtistSort::AlbumCount);
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["beatles", "coldplay", "Adele", "unknown"]);
+}
+
+#[test]
+fn artist_sort_handles_missing_album_counts() {
+    let mut artists = vec![
+        Artist {
+            id: "a".to_string(),
+            name: "A".to_string(),
+            album_count: None,
+            cover_art: None,
+        },
+        test_artist("B", 2),
+    ];
+    sort_artists(&mut artists, ArtistSort::AlbumCount);
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["B", "A"]);
 }
