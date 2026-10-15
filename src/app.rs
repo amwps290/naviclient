@@ -73,6 +73,8 @@ struct AppState {
     albums_loading: bool,
     albums_exhausted: bool,
     albums_page: usize,
+    /// 最近一次专辑分页请求失败时为 true：网格下方显示重试入口。
+    albums_page_failed: bool,
     albums_sort: AlbumSort,
     newest_albums: Vec<Album>,
     newest_albums_loading: bool,
@@ -89,6 +91,8 @@ struct AppState {
     genre_albums_loading: bool,
     genre_albums_page: usize,
     genre_albums_exhausted: bool,
+    /// 最近一次流派专辑分页请求失败时为 true。
+    genre_albums_page_failed: bool,
     search_filter: SearchFilter,
     collapsed_sections: HashSet<String>,
     current_artist: Option<Artist>,
@@ -143,6 +147,7 @@ impl Default for AppState {
             albums_loading: false,
             albums_exhausted: false,
             albums_page: 0,
+            albums_page_failed: false,
             albums_sort: AlbumSort::default(),
             newest_albums: Vec::new(),
             newest_albums_loading: false,
@@ -159,6 +164,7 @@ impl Default for AppState {
             genre_albums_loading: false,
             genre_albums_page: 0,
             genre_albums_exhausted: false,
+            genre_albums_page_failed: false,
             search_filter: SearchFilter::default(),
             collapsed_sections: HashSet::new(),
             current_artist: None,

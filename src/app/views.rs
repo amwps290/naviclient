@@ -417,6 +417,52 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// 页头右侧的单视图刷新按钮：只重载当前视图，不必全量刷新媒体库。
+    pub(super) fn header_refresh_button(
+        &self,
+        id: &'static str,
+        tooltip: &'static str,
+        loading: bool,
+        cx: &Context<Self>,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> gpui_kit::AnyElement {
+        Button::new(id)
+            .icon(AppIcon::Refresh)
+            .tooltip(tooltip)
+            .ghost()
+            .small()
+            .loading(loading)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                action(this, cx);
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// 列表底部的“加载失败重试”行：分页请求失败时可见，点击重新请求。
+    pub(super) fn render_retry_row(
+        &self,
+        id: &'static str,
+        cx: &Context<Self>,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> gpui_kit::AnyElement {
+        div()
+            .py_2()
+            .flex()
+            .justify_center()
+            .child(
+                Button::new(id)
+                    .label("Loading failed — try again")
+                    .outline()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        action(this, cx);
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_scrolling_title(
         &self,
         text: SharedString,
@@ -2117,11 +2163,24 @@ impl NavidromeApp {
                 let favorites = &self.state.favorites;
                 let total =
                     favorites.artists.len() + favorites.albums.len() + favorites.songs.len();
-                let mut content = v_flex().gap_5().child(self.page_header(
-                    "Favorites",
-                    format!("{total} starred items from your Navidrome library"),
-                    cx,
-                ));
+                let mut content = v_flex().gap_5().child(
+                    h_flex()
+                        .w_full()
+                        .items_end()
+                        .gap_3()
+                        .child(div().flex_1().child(self.page_header(
+                            "Favorites",
+                            format!("{total} starred items from your Navidrome library"),
+                            cx,
+                        )))
+                        .child(self.header_refresh_button(
+                            "refresh-favorites",
+                            "Refresh favorites",
+                            false,
+                            cx,
+                            |this, _cx| this.load_favorites(),
+                        )),
+                );
 
                 if total == 0 {
                     content = content.child(
@@ -2176,7 +2235,14 @@ impl NavidromeApp {
                             format!("{} artists in your library", self.state.artists.len()),
                             cx,
                         )))
-                        .child(self.render_artist_sort_button(cx)),
+                        .child(self.render_artist_sort_button(cx))
+                        .child(self.header_refresh_button(
+                            "refresh-artists",
+                            "Refresh artists",
+                            self.state.loading && self.state.artists.is_empty(),
+                            cx,
+                            |this, _cx| this.load_artists(),
+                        )),
                 )
                 .child(if self.state.artists.is_empty() && self.state.loading {
                     self.render_artist_skeleton_grid(cx)
@@ -2197,13 +2263,28 @@ impl NavidromeApp {
                             format!("{} albums in your library", self.state.albums.len()),
                             cx,
                         )))
-                        .child(self.render_album_sort_button(cx)),
+                        .child(self.render_album_sort_button(cx))
+                        .child(self.header_refresh_button(
+                            "refresh-albums",
+                            "Refresh albums",
+                            self.state.albums_loading,
+                            cx,
+                            |this, _cx| this.load_albums(),
+                        )),
                 )
                 .child(
                     if self.state.albums.is_empty() && self.state.albums_loading {
                         self.render_album_skeleton_grid(cx)
                     } else {
                         self.render_album_grid("albums", &self.state.albums, cx, window)
+                    },
+                )
+                .when(
+                    self.state.albums_page_failed && !self.state.albums_loading,
+                    |this| {
+                        this.child(self.render_retry_row("retry-albums", cx, |this, _cx| {
+                            this.load_more_albums()
+                        }))
                     },
                 )
                 .into_any_element(),
@@ -2217,7 +2298,24 @@ impl NavidromeApp {
                 };
                 v_flex()
                     .gap_5()
-                    .child(self.page_header("Genres", subtitle, cx))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_end()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(self.page_header("Genres", subtitle, cx)),
+                            )
+                            .child(self.header_refresh_button(
+                                "refresh-genres",
+                                "Refresh genres",
+                                self.state.genres_loading,
+                                cx,
+                                |this, _cx| this.load_genres(),
+                            )),
+                    )
                     .child(
                         if self.state.genres.is_empty() && self.state.genres_loading {
                             self.render_album_skeleton_grid(cx)
@@ -2247,6 +2345,12 @@ impl NavidromeApp {
                     .child(
                         if self.state.genre_albums.is_empty() && self.state.genre_albums_loading {
                             self.render_album_skeleton_grid(cx)
+                        } else if self.state.genre_albums.is_empty() {
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No albums in this genre yet.")
+                                .into_any_element()
                         } else {
                             self.render_album_grid(
                                 "genre-detail",
@@ -2254,6 +2358,16 @@ impl NavidromeApp {
                                 cx,
                                 window,
                             )
+                        },
+                    )
+                    .when(
+                        self.state.genre_albums_page_failed && !self.state.genre_albums_loading,
+                        |this| {
+                            this.child(self.render_retry_row(
+                                "retry-genre-albums",
+                                cx,
+                                |this, _cx| this.load_more_genre_albums(),
+                            ))
                         },
                     )
                     .into_any_element()
@@ -2409,7 +2523,14 @@ impl NavidromeApp {
                                         this.submit_search(cx);
                                         cx.notify();
                                     })),
-                            ),
+                            )
+                            .child(self.header_refresh_button(
+                                "refresh-search",
+                                "Run search again",
+                                false,
+                                cx,
+                                |this, cx| this.submit_search(cx),
+                            )),
                     );
                 if self.state.search_results.is_some() {
                     // 过滤只在有结果后出现；会话内状态，不持久化。
@@ -2497,6 +2618,18 @@ impl NavidromeApp {
                                     .child("No songs matched your search."),
                             );
                         }
+                    }
+                    if filter == SearchFilter::All
+                        && results.artists.is_empty()
+                        && results.albums.is_empty()
+                        && results.songs.is_empty()
+                    {
+                        content = content.child(
+                            div()
+                                .py_8()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No results matched your search."),
+                        );
                     }
                 }
                 content.into_any_element()

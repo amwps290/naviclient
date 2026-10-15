@@ -62,6 +62,7 @@ impl NavidromeApp {
             return;
         };
         self.state.genre_albums_loading = true;
+        self.state.genre_albums_page_failed = false;
         let offset = album_page_offset(self.state.genre_albums_page, ALBUM_PAGE_SIZE);
         let tx = self.tx.clone();
         self.spawn_future(async move {
@@ -484,7 +485,10 @@ impl NavidromeApp {
                                 );
                             }
                         }
-                        Err(error) => self.notify_error(error),
+                        Err(error) => {
+                            self.state.albums_page_failed = true;
+                            self.notify_error(error);
+                        }
                     }
                 }
                 Msg::NewestAlbums(result) => {
@@ -539,7 +543,10 @@ impl NavidromeApp {
                                     self.preload_covers(covers);
                                 }
                             }
-                            Err(error) => self.notify_error(error),
+                            Err(error) => {
+                                self.state.genre_albums_page_failed = true;
+                                self.notify_error(error);
+                            }
                         }
                     }
                 }

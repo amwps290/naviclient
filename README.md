@@ -39,6 +39,10 @@ JavaScript runtime.
   segmented control; empty filtered categories show an explicit hint
 - Multi-disc albums list their tracks in (disc, track) order, with missing
   numbers sorted last instead of breaking the order
+- Per-view refresh buttons on Home, Favorites, Artists, Albums, Genres, and
+  Search reload only that view's data instead of the whole library; a failed
+  album page (Albums or a genre page) shows an inline "try again" row, empty
+  search results and empty genres get explicit empty states
 - Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
