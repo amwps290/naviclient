@@ -1,6 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
-  <path d="M110 110L128 174Q130 180 130 185" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+  <!-- Counterweight stub and weight (opposite the arm, above the pivot). -->
+  <path d="M110 110L108.1 96.4" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+  <g transform="rotate(-7.5 107.5 91.2)">
+    <rect x="101.3" y="82.7" width="12.4" height="17" rx="5"/>
+  </g>
+  <!-- Arm tube with a gentle bend toward the headshell. -->
+  <path d="M110 110C112.5 129 120 148 127.2 165.5Q129.8 172 130 178L130 185" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+  <!-- Headshell: tapered cartridge with rounded nose. -->
   <g transform="rotate(-28 130 187)">
-    <rect x="124" y="183" width="12" height="23" rx="2.4"/>
+    <path d="M125 184H135L135.9 190.5L134.5 201Q134.4 203 132.4 203H127.6Q125.6 203 125.5 201L124.1 190.5Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/>
   </g>
 </svg>

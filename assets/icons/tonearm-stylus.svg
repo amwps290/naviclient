@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
   <g transform="rotate(-28 130 187)">
-    <rect x="128" y="205" width="4" height="2.5" rx="0.6" opacity="0.8"/>
-    <path d="M130 207V210" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+    <rect x="128" y="203.4" width="4" height="2.4" rx="0.6" opacity="0.8"/>
+    <path d="M130 205.8V209.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
   </g>
 </svg>

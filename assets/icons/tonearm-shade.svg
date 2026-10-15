@@ -1,6 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
-  <path d="M111.5 109.6L129.5 173.6Q131.5 180 131.5 185" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+  <!-- Shaded right side of the stub and tube. -->
+  <path d="M111.5 110L109.6 96.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+  <path d="M111.5 109.7C114 128.7 121.5 147.7 128.7 165.2Q131.3 171.7 131.5 177.7L131.5 182.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+  <!-- Counterweight inset, leaving a light rim on the top-left. -->
+  <g transform="rotate(-7.5 107.5 91.2)">
+    <rect x="102.2" y="83.6" width="11.4" height="15.6" rx="4.4"/>
+  </g>
+  <!-- Headshell inset, leaving a light rim on the top-left. -->
   <g transform="rotate(-28 130 187)">
-    <rect x="125" y="184" width="10" height="21" rx="1.6"/>
+    <path d="M125.9 185H134.1L135 190.5L133.7 200.3Q133.6 202.1 131.8 202.1H128.2Q126.4 202.1 126.3 200.3L125 190.5Z"/>
   </g>
 </svg>
