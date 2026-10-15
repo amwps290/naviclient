@@ -9,7 +9,7 @@ use super::{
     extract_cover_palette, format_file_size, loudness_gain_factor, match_shortcut,
     normalize_volume, playback_technical_info, queue_index_after_move, queue_index_after_remove,
     readable_accent, replay_gain_factor, restored_volume, seek_target, should_scrobble,
-    sort_artists, Shortcut, ShuffleHistory,
+    sort_album_songs, sort_artists, Shortcut, ShuffleHistory,
 };
 use crate::models::{
     Artist, ArtistSort, PlaybackMode, Song, TranscodingQuality, VolumeNormalization,
@@ -551,4 +551,42 @@ fn artist_sort_handles_missing_album_counts() {
     sort_artists(&mut artists, ArtistSort::AlbumCount);
     let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(names, ["B", "A"]);
+}
+
+fn album_song(title: &str, disc: Option<i32>, track: Option<i32>) -> Song {
+    Song {
+        id: title.to_string(),
+        title: title.to_string(),
+        disc,
+        track,
+        ..Song::default()
+    }
+}
+
+#[test]
+fn album_songs_sort_by_disc_then_track() {
+    let mut songs = vec![
+        album_song("B1", Some(2), Some(1)),
+        album_song("A3", Some(1), Some(3)),
+        album_song("A1", Some(1), Some(1)),
+        album_song("A2", Some(1), Some(2)),
+        album_song("B2", Some(2), Some(2)),
+    ];
+    sort_album_songs(&mut songs);
+    let titles: Vec<&str> = songs.iter().map(|song| song.title.as_str()).collect();
+    assert_eq!(titles, ["A1", "A2", "A3", "B1", "B2"]);
+}
+
+#[test]
+fn album_songs_without_disc_or_track_sort_last_and_stably() {
+    let mut songs = vec![
+        album_song("Unknown", None, None),
+        album_song("Track 2", None, Some(2)),
+        album_song("Track 1", Some(1), Some(1)),
+    ];
+    sort_album_songs(&mut songs);
+    let titles: Vec<&str> = songs.iter().map(|song| song.title.as_str()).collect();
+    // 缺失碟号/曲目号的排在有效条目之后；Track 2 虽有曲目号但无碟号，
+    // 与 Unknown 一样进入“碟号缺失”分组，再按（曲目号, 标题）排。
+    assert_eq!(titles, ["Track 1", "Track 2", "Unknown"]);
 }

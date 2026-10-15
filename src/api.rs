@@ -12,8 +12,8 @@ use crate::playlist::{can_edit, song_ids, PlaylistDetails, PlaylistEdit, Playlis
 mod playlist_tests;
 
 use crate::models::{
-    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, LyricLine, Lyrics, Playlist,
-    SearchResults, ServerInfo, Song,
+    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics,
+    Playlist, SearchResults, ServerInfo, Song,
 };
 
 #[derive(Clone)]
@@ -208,6 +208,32 @@ impl Api {
             .get_json(
                 "getAlbumList2",
                 &[("type", list_type), ("size", &size.to_string())],
+            )
+            .await?;
+        parse_album_list2(&body)
+    }
+
+    /// 全部流派（`getGenres`）。
+    pub async fn genres(&self) -> Result<Vec<Genre>> {
+        let body = self.get_json("getGenres", &[]).await?;
+        let mut genres = Vec::new();
+        for genre in body["genres"]["genre"].as_array().into_iter().flatten() {
+            genres.push(serde_json::from_value(genre.clone())?);
+        }
+        Ok(genres)
+    }
+
+    /// 指定流派的专辑列表（`getAlbumList2 type=byGenre`），支持增量分页。
+    pub async fn albums_by_genre(&self, genre: &str, size: u32, offset: u32) -> Result<Vec<Album>> {
+        let body = self
+            .get_json(
+                "getAlbumList2",
+                &[
+                    ("type", "byGenre"),
+                    ("genre", genre),
+                    ("size", &size.to_string()),
+                    ("offset", &offset.to_string()),
+                ],
             )
             .await?;
         parse_album_list2(&body)
@@ -682,6 +708,46 @@ mod tests {
                 ("toYear", "0".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn albums_by_genre_uses_subsonic_parameters() {
+        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let url = api
+            .url_for(
+                "getAlbumList2",
+                &[
+                    ("type", "byGenre"),
+                    ("genre", "Jazz"),
+                    ("size", "100"),
+                    ("offset", "300"),
+                ],
+            )
+            .unwrap();
+        let parsed = Url::parse(&url).unwrap();
+        let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(params["type"], "byGenre");
+        assert_eq!(params["genre"], "Jazz");
+        assert_eq!(params["size"], "100");
+        assert_eq!(params["offset"], "300");
+    }
+
+    #[test]
+    fn genre_parses_subsonic_camel_case_counts() {
+        let genre: Genre = serde_json::from_value(serde_json::json!({
+            "value": "Progressive Rock",
+            "songCount": 42,
+            "albumCount": 7,
+        }))
+        .expect("genre should deserialize");
+        assert_eq!(genre.value, "Progressive Rock");
+        assert_eq!(genre.song_count, Some(42));
+        assert_eq!(genre.album_count, Some(7));
+
+        let minimal: Genre = serde_json::from_value(serde_json::json!({"value": "Rock"}))
+            .expect("genre without counts should deserialize");
+        assert_eq!(minimal.song_count, None);
+        assert_eq!(minimal.album_count, None);
     }
 
     #[test]

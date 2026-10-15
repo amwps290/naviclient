@@ -32,6 +32,13 @@ JavaScript runtime.
   server-side `getAlbumList2` sorting so incremental paging keeps working, are
   persisted across restarts, and legacy configs safely default to newest-added
   and name order
+- Genre browsing: a Genres sidebar entry lists every genre with album and song
+  counts (Subsonic `getGenres`), and each genre page shows its albums with the
+  same incremental paging as the Albums page (`getAlbumList2 type=byGenre`)
+- Search results can be filtered to All, Artists, Albums, or Songs with a
+  segmented control; empty filtered categories show an explicit hint
+- Multi-disc albums list their tracks in (disc, track) order, with missing
+  numbers sorted last instead of breaking the order
 - Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover

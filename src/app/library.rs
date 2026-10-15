@@ -14,12 +14,72 @@ impl NavidromeApp {
         });
         self.load_artists();
         self.load_albums();
+        self.load_genres();
         self.load_playlists();
         self.load_favorites();
         self.load_newest_albums();
         self.load_recent_albums();
         self.load_frequent_albums();
         self.load_random_albums();
+    }
+
+    /// 加载全部流派（`getGenres`）。
+    pub(super) fn load_genres(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        self.state.genres_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let _ = tx.send(Msg::Genres(api.genres().await.map_err(error_message)));
+        });
+    }
+
+    /// 打开流派详情页并从第一页加载该流派的专辑。
+    pub(super) fn open_genre(&mut self, genre: String) {
+        self.state.current_genre = Some(genre.clone());
+        self.state.genre_albums.clear();
+        self.state.genre_albums_page = 0;
+        self.state.genre_albums_exhausted = false;
+        self.state.genre_albums_loading = true;
+        self.state.view = View::GenreDetail;
+        let Some(api) = self.api.clone() else { return };
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api
+                .albums_by_genre(&genre, ALBUM_PAGE_SIZE as u32, 0)
+                .await
+                .map_err(error_message);
+            let _ = tx.send(Msg::GenreAlbums { genre, result });
+        });
+    }
+
+    /// 流派详情页接近底部时追加下一页。
+    pub(super) fn load_more_genre_albums(&mut self) {
+        if self.state.genre_albums_loading || self.state.genre_albums_exhausted {
+            return;
+        }
+        let Some(api) = self.api.clone() else { return };
+        let Some(genre) = self.state.current_genre.clone() else {
+            return;
+        };
+        self.state.genre_albums_loading = true;
+        let offset = album_page_offset(self.state.genre_albums_page, ALBUM_PAGE_SIZE);
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api
+                .albums_by_genre(&genre, ALBUM_PAGE_SIZE as u32, offset)
+                .await
+                .map_err(error_message);
+            let _ = tx.send(Msg::GenreAlbums { genre, result });
+        });
+    }
+
+    /// 切换搜索结果显示过滤（会话内状态，不持久化）。
+    pub(super) fn set_search_filter(&mut self, filter: SearchFilter, cx: &mut Context<Self>) {
+        if self.state.search_filter == filter {
+            return;
+        }
+        self.state.search_filter = filter;
+        cx.notify();
     }
 
     pub(super) fn load_artists(&mut self) {
@@ -155,6 +215,7 @@ impl NavidromeApp {
         }
         match self.state.view {
             View::Albums => self.load_more_albums(),
+            View::GenreDetail => self.load_more_genre_albums(),
             View::Artists if self.state.artists_visible < self.state.artists.len() => {
                 self.state.artists_visible =
                     (self.state.artists_visible + 300).min(self.state.artists.len());
@@ -444,6 +505,40 @@ impl NavidromeApp {
                         }
                     }
                 }
+                Msg::Genres(result) => {
+                    self.state.genres_loading = false;
+                    match result {
+                        Ok(mut genres) => {
+                            // 服务器返回顺序不定，统一按名称 A→Z 展示。
+                            genres.sort_by_key(|genre| genre.value.trim().to_lowercase());
+                            self.state.genres = genres;
+                        }
+                        Err(error) => self.notify_error(error),
+                    }
+                }
+                Msg::GenreAlbums { genre, result } => {
+                    self.state.genre_albums_loading = false;
+                    // 只处理当前流派页的响应，忽略过期请求。
+                    if self.state.current_genre.as_deref() == Some(genre.as_str()) {
+                        match result {
+                            Ok(albums) => {
+                                if albums.is_empty() {
+                                    self.state.genre_albums_exhausted = true;
+                                } else {
+                                    let covers: Vec<String> = albums
+                                        .iter()
+                                        .filter_map(|item| item.cover_art.clone())
+                                        .take(80)
+                                        .collect();
+                                    self.state.genre_albums.extend(albums);
+                                    self.state.genre_albums_page += 1;
+                                    self.preload_covers(covers);
+                                }
+                            }
+                            Err(error) => self.notify_error(error),
+                        }
+                    }
+                }
                 Msg::RecentAlbums(result) => {
                     self.state.recent_albums_loading = false;
                     match result {
@@ -499,7 +594,7 @@ impl NavidromeApp {
                     {
                         match result {
                             Ok(mut songs) => {
-                                songs.sort_by_key(|song| song.track.unwrap_or(i32::MAX));
+                                sort_album_songs(&mut songs);
                                 // 只预加载首屏封面，滚动时按需补齐，避免一次发起几百个请求。
                                 let covers = songs
                                     .iter()

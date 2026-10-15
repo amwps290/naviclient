@@ -373,6 +373,50 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// 流派卡片网格：卡片显示流派名与专辑/歌曲数，点击进入流派详情。
+    pub(super) fn render_genre_grid(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        h_flex()
+            .items_start()
+            .flex_wrap()
+            .gap_4()
+            .children(self.state.genres.iter().enumerate().map(|(index, genre)| {
+                let genre_for_click = genre.value.clone();
+                let counts = match (genre.album_count, genre.song_count) {
+                    (Some(albums), Some(songs)) => format!("{albums} albums · {songs} songs"),
+                    (Some(albums), None) => format!("{albums} albums"),
+                    (None, Some(songs)) => format!("{songs} songs"),
+                    (None, None) => "—".to_string(),
+                };
+                div()
+                    .id(SharedString::from(format!("genre-card-{index}")))
+                    .w(px(232.0))
+                    .p_4()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .cursor_pointer()
+                    .hover(|style| style.bg(cx.theme().accent.opacity(0.1)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_genre(genre_for_click.clone());
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .truncate()
+                            .child(genre.value.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(counts),
+                    )
+            }))
+            .into_any_element()
+    }
+
     pub(super) fn render_scrolling_title(
         &self,
         text: SharedString,
@@ -2163,6 +2207,52 @@ impl NavidromeApp {
                     },
                 )
                 .into_any_element(),
+            View::Genres => v_flex()
+                .gap_5()
+                .child(self.page_header(
+                    "Genres",
+                    format!("{} genres in your library", self.state.genres.len()),
+                    cx,
+                ))
+                .child(
+                    if self.state.genres.is_empty() && self.state.genres_loading {
+                        self.render_album_skeleton_grid(cx)
+                    } else if self.state.genres.is_empty() {
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No genres in your library yet.")
+                            .into_any_element()
+                    } else {
+                        self.render_genre_grid(cx)
+                    },
+                )
+                .into_any_element(),
+            View::GenreDetail => {
+                let Some(genre) = self.state.current_genre.clone() else {
+                    return div().child("Genre not found").into_any_element();
+                };
+                v_flex()
+                    .gap_5()
+                    .child(self.page_header(
+                        genre,
+                        format!("{} albums", self.state.genre_albums.len()),
+                        cx,
+                    ))
+                    .child(
+                        if self.state.genre_albums.is_empty() && self.state.genre_albums_loading {
+                            self.render_album_skeleton_grid(cx)
+                        } else {
+                            self.render_album_grid(
+                                "genre-detail",
+                                &self.state.genre_albums,
+                                cx,
+                                window,
+                            )
+                        },
+                    )
+                    .into_any_element()
+            }
             View::Playlists => {
                 let visible_playlists =
                     self.state.playlists_visible.min(self.state.playlists.len());
@@ -2316,36 +2406,92 @@ impl NavidromeApp {
                                     })),
                             ),
                     );
+                if self.state.search_results.is_some() {
+                    // 过滤只在有结果后出现；会话内状态，不持久化。
+                    content =
+                        content.child(h_flex().gap_2().children(SearchFilter::ALL.map(|filter| {
+                            Button::new(SharedString::from(format!(
+                                "search-filter-{}",
+                                filter.label()
+                            )))
+                            .label(filter.label())
+                            .ghost()
+                            .small()
+                            .selected(self.state.search_filter == filter)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.set_search_filter(filter, cx);
+                                },
+                            ))
+                        })));
+                }
                 if let Some(results) = &self.state.search_results {
-                    if !results.artists.is_empty() {
-                        content = content
-                            .child(
+                    let filter = self.state.search_filter;
+                    let show_artists =
+                        filter == SearchFilter::All || filter == SearchFilter::Artists;
+                    let show_albums = filter == SearchFilter::All || filter == SearchFilter::Albums;
+                    let show_songs = filter == SearchFilter::All || filter == SearchFilter::Songs;
+                    if show_artists {
+                        if !results.artists.is_empty() {
+                            content = content
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Artists"),
+                                )
+                                .child(self.render_artist_grid(&results.artists, cx, window));
+                        } else if filter == SearchFilter::Artists {
+                            content = content.child(
                                 div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Artists"),
-                            )
-                            .child(self.render_artist_grid(&results.artists, cx, window));
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No artists matched your search."),
+                            );
+                        }
                     }
-                    if !results.albums.is_empty() {
-                        content = content
-                            .child(
+                    if show_albums {
+                        if !results.albums.is_empty() {
+                            content = content
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Albums"),
+                                )
+                                .child(self.render_album_grid(
+                                    "search",
+                                    &results.albums,
+                                    cx,
+                                    window,
+                                ));
+                        } else if filter == SearchFilter::Albums {
+                            content = content.child(
                                 div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Albums"),
-                            )
-                            .child(self.render_album_grid("search", &results.albums, cx, window));
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No albums matched your search."),
+                            );
+                        }
                     }
-                    if !results.songs.is_empty() {
-                        content = content
-                            .child(
+                    if show_songs {
+                        if !results.songs.is_empty() {
+                            content = content
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Songs"),
+                                )
+                                .child(self.render_song_list("search", false, cx));
+                        } else if filter == SearchFilter::Songs {
+                            content = content.child(
                                 div()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Songs"),
-                            )
-                            .child(self.render_song_list("search", false, cx));
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No songs matched your search."),
+                            );
+                        }
                     }
                 }
                 content.into_any_element()

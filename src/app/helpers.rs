@@ -34,6 +34,8 @@ pub(super) enum View {
     Favorites,
     Artists,
     Albums,
+    Genres,
+    GenreDetail,
     Playlists,
     Search,
     ArtistDetail,
@@ -41,6 +43,42 @@ pub(super) enum View {
     PlaylistDetail,
     NowPlaying,
     Queue,
+}
+
+/// 搜索结果的显示过滤；会话内状态，不持久化。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum SearchFilter {
+    #[default]
+    All,
+    Artists,
+    Albums,
+    Songs,
+}
+
+impl SearchFilter {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Artists => "Artists",
+            Self::Albums => "Albums",
+            Self::Songs => "Songs",
+        }
+    }
+
+    pub(super) const ALL: [Self; 4] = [Self::All, Self::Artists, Self::Albums, Self::Songs];
+}
+
+/// 专辑内歌曲按（碟号， 曲目号）排序；缺失字段排到最后，
+/// 同一曲内缺失曲目号的按标题保持稳定顺序。
+pub(super) fn sort_album_songs(songs: &mut [Song]) {
+    songs.sort_by(|a, b| {
+        let disc = |song: &Song| song.disc.unwrap_or(i32::MAX);
+        let track = |song: &Song| song.track.unwrap_or(i32::MAX);
+        disc(a)
+            .cmp(&disc(b))
+            .then_with(|| track(a).cmp(&track(b)))
+            .then_with(|| a.title.cmp(&b.title))
+    });
 }
 
 impl PlaybackMode {

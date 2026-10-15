@@ -105,6 +105,17 @@ pub struct Artist {
     pub cover_art: Option<String>,
 }
 
+/// Subsonic `getGenres` 返回的流派条目。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Genre {
+    pub value: String,
+    #[serde(default)]
+    pub song_count: Option<i64>,
+    #[serde(default)]
+    pub album_count: Option<i64>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Album {
@@ -143,6 +154,9 @@ pub struct Song {
     pub artist_id: Option<String>,
     #[serde(default)]
     pub track: Option<i32>,
+    /// 碟号（Subsonic `discNumber`）；多碟专辑按（碟号， 曲目号）排序。
+    #[serde(default)]
+    pub disc: Option<i32>,
     #[serde(default)]
     pub duration: Option<i32>,
     #[serde(default)]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::{Hsla, Image as GpuiImage};
 
 use crate::models::{
-    Album, Artist, FavoriteKey, Favorites, Lyrics, Playlist, SearchResults, ServerInfo, Song,
+    Album, Artist, FavoriteKey, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
 
@@ -24,6 +24,11 @@ pub enum Msg {
     },
     Albums(Result<Vec<Album>, String>),
     NewestAlbums(Result<Vec<Album>, String>),
+    Genres(Result<Vec<Genre>, String>),
+    GenreAlbums {
+        genre: String,
+        result: Result<Vec<Album>, String>,
+    },
     RecentAlbums(Result<Vec<Album>, String>),
     FrequentAlbums(Result<Vec<Album>, String>),
     RandomAlbums(Result<Vec<Album>, String>),

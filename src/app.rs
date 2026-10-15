@@ -41,9 +41,9 @@ use crate::audio::{format_playback, AudioHandle, PlaybackState, TrackTransition}
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
-    Album, AlbumSort, Artist, ArtistSort, Config, FavoriteKey, FavoriteKind, Favorites, Lyrics,
-    PlaybackMode, PlaybackSession, Playlist, SearchResults, ServerInfo, Song, ThemePreference,
-    TranscodingQuality, VolumeNormalization,
+    Album, AlbumSort, Artist, ArtistSort, Config, FavoriteKey, FavoriteKind, Favorites, Genre,
+    Lyrics, PlaybackMode, PlaybackSession, Playlist, SearchResults, ServerInfo, Song,
+    ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::single_instance;
@@ -82,6 +82,14 @@ struct AppState {
     frequent_albums_loading: bool,
     random_albums: Vec<Album>,
     random_albums_loading: bool,
+    genres: Vec<Genre>,
+    genres_loading: bool,
+    current_genre: Option<String>,
+    genre_albums: Vec<Album>,
+    genre_albums_loading: bool,
+    genre_albums_page: usize,
+    genre_albums_exhausted: bool,
+    search_filter: SearchFilter,
     collapsed_sections: HashSet<String>,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
@@ -144,6 +152,14 @@ impl Default for AppState {
             frequent_albums_loading: false,
             random_albums: Vec::new(),
             random_albums_loading: false,
+            genres: Vec::new(),
+            genres_loading: false,
+            current_genre: None,
+            genre_albums: Vec::new(),
+            genre_albums_loading: false,
+            genre_albums_page: 0,
+            genre_albums_exhausted: false,
+            search_filter: SearchFilter::default(),
             collapsed_sections: HashSet::new(),
             current_artist: None,
             artist_albums: Vec::new(),
@@ -1735,6 +1751,7 @@ impl NavidromeApp {
                 (view, self.state.view),
                 (View::Artists, View::ArtistDetail)
                     | (View::Albums, View::AlbumDetail)
+                    | (View::Genres, View::GenreDetail)
                     | (View::Playlists, View::PlaylistDetail)
             );
         let collapsed = self.config.sidebar_collapsed;
@@ -1746,6 +1763,7 @@ impl NavidromeApp {
                 match view {
                     View::Artists if this.state.artists.is_empty() => this.load_artists(),
                     View::Albums if this.state.albums.is_empty() => this.load_albums(),
+                    View::Genres if this.state.genres.is_empty() => this.load_genres(),
                     View::Playlists if this.state.playlists.is_empty() => this.load_playlists(),
                     View::Favorites => this.load_favorites(),
                     _ => {}
@@ -2106,6 +2124,7 @@ impl Render for NavidromeApp {
                             ))
                             .child(self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx))
                             .child(self.nav_button(View::Albums, "Albums", AppIcon::Albums, cx))
+                            .child(self.nav_button(View::Genres, "Genres", KitIcon::Tags, cx))
                             .child(self.nav_button(
                                 View::Playlists,
                                 "Playlists",
