@@ -1027,7 +1027,9 @@ impl NavidromeApp {
             .child(
                 div()
                     .flex_1()
-                    .flex_grow(3.0)
+                    .flex_grow(2.0)
+                    .max_w(px(180.0))
+                    .min_w_0()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .truncate()
