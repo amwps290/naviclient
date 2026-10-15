@@ -2207,27 +2207,32 @@ impl NavidromeApp {
                     },
                 )
                 .into_any_element(),
-            View::Genres => v_flex()
-                .gap_5()
-                .child(self.page_header(
-                    "Genres",
-                    format!("{} genres in your library", self.state.genres.len()),
-                    cx,
-                ))
-                .child(
-                    if self.state.genres.is_empty() && self.state.genres_loading {
-                        self.render_album_skeleton_grid(cx)
-                    } else if self.state.genres.is_empty() {
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("No genres in your library yet.")
-                            .into_any_element()
-                    } else {
-                        self.render_genre_grid(cx)
-                    },
-                )
-                .into_any_element(),
+            View::Genres => {
+                // 有旧数据（磁盘缓存）时直接渲染，仅在后台重验证中提示；
+                // 首次无缓存才显示骨架屏。
+                let subtitle = if self.state.genres_loading && !self.state.genres.is_empty() {
+                    format!("{} genres — refreshing…", self.state.genres.len())
+                } else {
+                    format!("{} genres in your library", self.state.genres.len())
+                };
+                v_flex()
+                    .gap_5()
+                    .child(self.page_header("Genres", subtitle, cx))
+                    .child(
+                        if self.state.genres.is_empty() && self.state.genres_loading {
+                            self.render_album_skeleton_grid(cx)
+                        } else if self.state.genres.is_empty() {
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No genres in your library yet.")
+                                .into_any_element()
+                        } else {
+                            self.render_genre_grid(cx)
+                        },
+                    )
+                    .into_any_element()
+            }
             View::GenreDetail => {
                 let Some(genre) = self.state.current_genre.clone() else {
                     return div().child("Genre not found").into_any_element();

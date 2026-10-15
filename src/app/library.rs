@@ -509,8 +509,12 @@ impl NavidromeApp {
                     self.state.genres_loading = false;
                     match result {
                         Ok(mut genres) => {
-                            // 服务器返回顺序不定，统一按名称 A→Z 展示。
+                            // 服务器返回顺序不定，统一按名称 A→Z 展示；
+                            // 写入磁盘缓存供下次启动即时展示。
                             genres.sort_by_key(|genre| genre.value.trim().to_lowercase());
+                            if let Err(error) = config::save_genres_cache(&genres) {
+                                log::warn!("failed to cache genres: {error}");
+                            }
                             self.state.genres = genres;
                         }
                         Err(error) => self.notify_error(error),

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::models::{Config, PlaybackSession};
+use crate::models::{Config, Genre, PlaybackSession};
 
 fn config_path() -> PathBuf {
     if let Some(project_dirs) =
@@ -33,6 +33,16 @@ fn loudness_path() -> PathBuf {
         project_dirs.config_dir().join("loudness.json")
     } else {
         PathBuf::from("navidrome-loudness.json")
+    }
+}
+
+fn genres_cache_path() -> PathBuf {
+    if let Some(project_dirs) =
+        directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
+    {
+        project_dirs.config_dir().join("genres.json")
+    } else {
+        PathBuf::from("navidrome-genres.json")
     }
 }
 
@@ -122,4 +132,74 @@ pub fn save_session(session: &PlaybackSession) -> Result<()> {
     }
     let text = serde_json::to_string_pretty(session)?;
     fs::write(path, text).context("failed to write session")
+}
+
+/// 读取流派缓存（`getGenres` 在服务端要对全库聚合统计，大曲库下响应慢）。
+/// 命中时先渲染旧数据、后台刷新后覆盖；文件缺失或损坏时安全回退为 None。
+pub fn load_genres_cache() -> Option<Vec<Genre>> {
+    read_genres_at(&genres_cache_path())
+}
+
+/// 保存最新流派列表，供下次启动即时展示。
+pub fn save_genres_cache(genres: &[Genre]) -> Result<()> {
+    write_genres_at(&genres_cache_path(), genres)
+}
+
+fn read_genres_at(path: &Path) -> Option<Vec<Genre>> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+}
+
+fn write_genres_at(path: &Path, genres: &[Genre]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("failed to create config directory")?;
+    }
+    let text = serde_json::to_string_pretty(genres)?;
+    fs::write(path, text).context("failed to write genres cache")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Genre;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "navidrome-client-test-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn genres_cache_round_trips_through_disk() {
+        let path = temp_path("genres.json");
+        let genres = vec![
+            Genre {
+                value: "Rock".to_string(),
+                song_count: Some(120),
+                album_count: Some(12),
+            },
+            Genre {
+                value: "Jazz".to_string(),
+                song_count: None,
+                album_count: None,
+            },
+        ];
+
+        write_genres_at(&path, &genres).expect("cache write should succeed");
+        let restored = read_genres_at(&path).expect("cache read should succeed");
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].value, "Rock");
+        assert_eq!(restored[0].song_count, Some(120));
+
+        // 缺失与损坏文件都必须安全回退，不能 panic。
+        std::fs::remove_file(&path).unwrap();
+        assert!(read_genres_at(&path).is_none());
+        std::fs::write(&path, "{not valid json").unwrap();
+        assert!(read_genres_at(&path).is_none());
+        std::fs::remove_file(&path).unwrap();
+    }
 }

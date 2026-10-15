@@ -365,6 +365,10 @@ impl NavidromeApp {
         };
         app.state.loudness_cache = config::load_loudness();
         app.state.playback_mode = app.config.playback_mode;
+        // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
+        if let Some(cached) = config::load_genres_cache() {
+            app.state.genres = cached;
+        }
         app.state.albums_sort = app.config.albums_sort;
         app.state.artists_sort = app.config.artists_sort;
         app.audio.set_volume(initial_volume);
