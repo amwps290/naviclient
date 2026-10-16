@@ -410,7 +410,19 @@ fn report_output_device(
     });
 }
 
-/// 枚举系统输出设备：(名称, 是否默认)。在后台线程调用，避免阻塞 UI。
+/// 判断是否为 ALSA 的 plughw 条目：cpal 的 ALSA 后端会把同一物理 PCM
+/// 枚举为 hw:/plughw: 两个设备，描述第一行（即显示名）完全相同；
+/// plughw 带格式转换层，任意采样率/声道更稳健，去重时优先保留。
+fn is_plughw_device(device: &cpal::Device) -> bool {
+    use cpal::traits::DeviceTrait;
+    device
+        .id()
+        .map(|id| id.1.starts_with("plughw:"))
+        .unwrap_or(false)
+}
+
+/// 枚举系统输出设备：(名称, 是否默认)，按名称去重（同名 hw/plughw
+/// 只保留一条）。在后台线程调用，避免阻塞 UI。
 pub fn list_output_devices() -> Result<Vec<(String, bool)>> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
@@ -421,11 +433,24 @@ pub fn list_output_devices() -> Result<Vec<(String, bool)>> {
     let devices = host
         .output_devices()
         .map_err(|error| anyhow!("could not enumerate output devices: {error}"))?;
-    Ok(devices
-        .filter_map(|device| {
-            let name = device.description().ok()?.name().to_string();
+    let mut seen: Vec<(String, bool)> = Vec::new();
+    for device in devices {
+        let Ok(description) = device.description() else {
+            continue;
+        };
+        let name = description.name().to_string();
+        let plughw = is_plughw_device(&device);
+        match seen.iter_mut().find(|(seen_name, _)| *seen_name == name) {
+            // 同名重复：hw 后遇到 plughw 时升级标记，否则跳过。
+            Some((_, prefer_plughw)) => *prefer_plughw |= plughw,
+            None => seen.push((name, plughw)),
+        }
+    }
+    Ok(seen
+        .into_iter()
+        .map(|(name, _)| {
             let is_default = default_name.as_deref() == Some(name.as_str());
-            Some((name, is_default))
+            (name, is_default)
         })
         .collect())
 }
@@ -442,26 +467,43 @@ fn open_audio_device(
     use cpal::traits::{DeviceTrait, HostTrait};
     let devices = cpal::default_host()
         .output_devices()
-        .map_err(|error| anyhow!("could not enumerate output devices: {error}"))?;
+        .map_err(|error| anyhow!("could not enumerate output devices: {error}"))?
+        // 同名条目（hw/plughw）优先打开带格式转换的 plughw，
+        // 与设置页列表的去重规则保持一致。
+        .filter(|device| {
+            device
+                .description()
+                .map(|description| description.name() == name)
+                .unwrap_or(false)
+        });
+    let mut fallback = None;
     for device in devices {
-        let matches = device
-            .description()
-            .map(|description| description.name() == name)
-            .unwrap_or(false);
-        if matches {
-            let builder = DeviceSinkBuilder::from_device(device)
-                .map_err(|error| anyhow!("{error}"))?
-                .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES));
-            let sink = builder
-                .open_sink_or_fallback()
-                .map_err(|error| anyhow!("{error}"))?;
-            return Ok((sink, Some(name.to_string())));
+        if is_plughw_device(&device) {
+            return open_named_sink(device, name);
         }
+        fallback.get_or_insert(device);
+    }
+    if let Some(device) = fallback {
+        return open_named_sink(device, name);
     }
     // 目标设备不存在（如已拔出）：回退默认设备，保证播放不中新。
     log::warn!("audio output device {name:?} not found; falling back to the default device");
     let sink = open_audio_sink().map_err(|error| anyhow!("{error}"))?;
     Ok((sink, None))
+}
+
+/// 按设备打开输出流；返回 sink 与设备名。
+fn open_named_sink(
+    device: cpal::Device,
+    name: &str,
+) -> Result<(rodio::MixerDeviceSink, Option<String>), anyhow::Error> {
+    let builder = DeviceSinkBuilder::from_device(device)
+        .map_err(|error| anyhow!("{error}"))?
+        .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES));
+    let sink = builder
+        .open_sink_or_fallback()
+        .map_err(|error| anyhow!("{error}"))?;
+    Ok((sink, Some(name.to_string())))
 }
 
 struct AudioOutput {
