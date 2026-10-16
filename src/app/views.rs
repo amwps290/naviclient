@@ -389,7 +389,7 @@ impl NavidromeApp {
             .min_w_0()
             .truncate()
             .cursor_pointer()
-            .hover(|style| style.text_color(cx.theme().accent))
+            .hover(|style| style.text_color(cx.theme().primary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 open(this);
@@ -1283,13 +1283,14 @@ impl NavidromeApp {
             .px_3()
             .gap_2()
             .items_center()
-            .bg(cx.theme().accent.opacity(0.16))
+            .bg(cx.theme().list_active)
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
                 div()
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().primary)
                     .child(format!("{} selected", songs.len())),
             )
             .child(div().flex_1())
@@ -1423,15 +1424,29 @@ impl NavidromeApp {
                     *selected_scope == scope && indices.contains(&index)
                 });
         // 高亮优先级：多选 > 键盘光标 > 正在播放。
+        // accent 是背景 token（亮色 neutral-100），做行高亮近似不可见；
+        // 沿用框架选中行语义色 list_active，键盘光标用其半透明弱化。
         let row = if multi_selected {
-            row.bg(cx.theme().accent.opacity(0.28))
+            row.bg(cx.theme().list_active)
         } else if keyboard_selected {
-            row.bg(cx.theme().accent.opacity(0.16))
+            row.bg(cx.theme().list_active.opacity(0.5))
         } else if current {
             row.bg(cx.theme().info.opacity(0.1))
         } else {
             row
         };
+        // 多选行左侧竖条：不依赖色彩感知也能明确区分选中态。
+        let row = row.when(multi_selected, |row| {
+            row.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(3.0))
+                    .bg(cx.theme().list_active_border),
+            )
+        });
         row.child(
             div()
                 .w(px(34.0))
