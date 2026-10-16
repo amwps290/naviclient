@@ -442,6 +442,9 @@ pub struct Config {
     /// 歌词是否显示翻译行（服务器返回多语言变体时）。
     #[serde(default = "default_true")]
     pub show_lyrics_translation: bool,
+    /// 音频输出设备名；None 表示跟随系统默认设备。
+    #[serde(default)]
+    pub output_device: Option<String>,
     /// 专辑列表排序方式。
     #[serde(default)]
     pub albums_sort: AlbumSort,
@@ -464,6 +467,7 @@ impl Default for Config {
             volume_normalization: VolumeNormalization::Track,
             sidebar_collapsed: false,
             show_lyrics_translation: default_true(),
+            output_device: None,
             albums_sort: AlbumSort::default(),
             artists_sort: ArtistSort::default(),
         }
@@ -651,6 +655,23 @@ mod tests {
 
         assert_eq!(config.albums_sort, AlbumSort::NewestAdded);
         assert_eq!(config.artists_sort, ArtistSort::Name);
+    }
+
+    #[test]
+    fn output_device_defaults_to_following_system_default() {
+        let config: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without output device should still deserialize");
+        assert_eq!(config.output_device, None);
+
+        let json = serde_json::to_string(&Config {
+            output_device: Some("Speakers".to_string()),
+            ..Config::default()
+        })
+        .expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+        assert_eq!(restored.output_device.as_deref(), Some("Speakers"));
     }
 
     #[test]

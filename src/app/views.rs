@@ -1703,6 +1703,90 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
+                            .child("Audio output"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_4()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child({
+                                let playback = self.audio.state();
+                                let active = match playback.output_name.as_deref() {
+                                    Some(name) => name.to_string(),
+                                    None => "System default".to_string(),
+                                };
+                                div().text_xs().text_color(cx.theme().muted_foreground).child(
+                                    format!(
+                                        "Active: {active} · {} Hz · {} ch",
+                                        playback.output_sample_rate, playback.output_channels
+                                    ),
+                                )
+                            })
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .child(
+                                        Button::new("output-device-default")
+                                            .label("System default")
+                                            .tooltip("Follow the OS default output device")
+                                            .selected(self.config.output_device.is_none())
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.set_output_device(None, cx);
+                                            })),
+                                    )
+                                    .children(
+                                        self.state
+                                            .output_devices
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, (name, is_default))| {
+                                                let name_for_click = name.clone();
+                                                // 按钮元素 id 用索引：设备名可能含特殊字符。
+                                                Button::new(SharedString::from(format!(
+                                                    "output-device-{index}"
+                                                )))
+                                                .label(format!(
+                                                    "{name}{}",
+                                                    if *is_default { " (default)" } else { "" }
+                                                ))
+                                                .selected(
+                                                    self.config.output_device
+                                                        .as_deref()
+                                                        .is_some_and(|selected| selected == name)
+                                                )
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.set_output_device(
+                                                        Some(name_for_click.clone()),
+                                                        cx,
+                                                    );
+                                                }))
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("refresh-output-devices")
+                                            .label("Refresh devices")
+                                            .ghost()
+                                            .small()
+                                            .loading(self.state.output_devices_loading)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.refresh_output_devices(cx);
+                                            })),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .child("Volume normalization"),
                     )
                     .child(

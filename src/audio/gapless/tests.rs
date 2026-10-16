@@ -248,6 +248,8 @@ impl Engine {
         let (player, output) = Player::new();
         let slot = Slot::default();
         let device = AudioOutput {
+            sink: None,
+            name: None,
             player,
             channels: stereo(),
             sample_rate: rate(48_000),

@@ -58,6 +58,12 @@ pub struct PlaybackState {
     pub loudness_db: f32,
     /// 当前歌曲已测峰值（0..=1），未测时为 0.0。
     pub loudness_peak: f32,
+    /// 当前音频输出设备名；None 表示跟随系统默认。
+    pub output_name: Option<String>,
+    /// 输出设备实际采样率（诊断展示用）。
+    pub output_sample_rate: u32,
+    /// 输出设备实际声道数（诊断展示用）。
+    pub output_channels: u16,
 }
 
 #[derive(Debug)]
@@ -85,6 +91,8 @@ enum Command {
     Stop,
     SetVolume(f32),
     SetCacheDirectory(PathBuf),
+    /// 切换输出设备；None 表示跟随系统默认。
+    SetOutputDevice(Option<String>),
     Seek(Duration),
 }
 
@@ -96,14 +104,14 @@ pub struct AudioHandle {
 }
 
 impl AudioHandle {
-    pub fn start(cache_dir: PathBuf) -> Result<Self> {
+    pub fn start(cache_dir: PathBuf, output_device: Option<String>) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let worker_state = Arc::clone(&state);
         let transition = Arc::new(Mutex::new(None));
         thread::Builder::new()
             .name("audio-worker".to_string())
-            .spawn(move || run_worker(rx, worker_state, cache_dir))
+            .spawn(move || run_worker(rx, worker_state, cache_dir, output_device))
             .context("failed to start audio worker")?;
         log::debug!("audio worker thread started");
         Ok(Self {
@@ -203,6 +211,14 @@ impl AudioHandle {
         self.cancel_transition();
         if self.tx.send(Command::SetCacheDirectory(cache_dir)).is_err() {
             log::error!("failed to update cache directory: audio worker is unavailable");
+        }
+    }
+
+    /// 切换输出设备；播放中会在新设备上从当前位置继续，暂停意图保留。
+    pub fn set_output_device(&self, name: Option<String>) {
+        self.cancel_transition();
+        if self.tx.send(Command::SetOutputDevice(name)).is_err() {
+            log::error!("failed to switch output device: audio worker is unavailable");
         }
     }
 
@@ -320,26 +336,31 @@ fn spawn_preparation(
     }
 }
 
-fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_cache_dir: PathBuf) {
-    let mut device_sink = match open_audio_sink() {
-        Ok(sink) => sink,
+fn run_worker(
+    rx: Receiver<Command>,
+    state: Arc<Mutex<PlaybackState>>,
+    initial_cache_dir: PathBuf,
+    output_device: Option<String>,
+) {
+    let (device_sink, output_name) = match open_audio_device(output_device.as_deref()) {
+        Ok(opened) => opened,
         Err(error) => {
-            log::error!("failed to open the default audio output device: {error}");
+            log::error!("failed to open the audio output device: {error:#}");
             set_state(&state, |s| {
                 s.active = false;
                 s.ended = false;
-                s.error = Some(format!(
-                    "Failed to open the default audio output device: {error}"
-                ));
+                s.error = Some(format!("Failed to open the audio output device: {error:#}"));
             });
             return;
         }
     };
     log::info!(
-        "default audio output device opened; channels={} sample_rate={}",
+        "audio output device opened; name={:?} channels={} sample_rate={}",
+        output_name,
         device_sink.config().channel_count().get(),
         device_sink.config().sample_rate().get()
     );
+    report_output_device(&state, &output_name, &device_sink);
 
     let client = match Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -358,13 +379,14 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
         }
     };
 
-    device_sink.log_on_drop(false);
     let output_channels = device_sink.config().channel_count();
     let output_sample_rate = device_sink.config().sample_rate();
     let mixer = device_sink.mixer().clone();
     let (player, source) = Player::new();
     mixer.add(source);
     let output = AudioOutput {
+        sink: Some(device_sink),
+        name: output_name,
         player,
         channels: output_channels,
         sample_rate: output_sample_rate,
@@ -373,7 +395,81 @@ fn run_worker(rx: Receiver<Command>, state: Arc<Mutex<PlaybackState>>, initial_c
     run_playback(rx, state, initial_cache_dir, client, output);
 }
 
+/// 向状态上报当前输出设备与实际采样率/声道（诊断展示用）。
+fn report_output_device(
+    state: &Arc<Mutex<PlaybackState>>,
+    name: &Option<String>,
+    sink: &rodio::MixerDeviceSink,
+) {
+    let sample_rate = sink.config().sample_rate().get();
+    let channels = sink.config().channel_count().get();
+    set_state(state, |s| {
+        s.output_name = name.clone();
+        s.output_sample_rate = sample_rate;
+        s.output_channels = channels;
+    });
+}
+
+/// 枚举系统输出设备：(名称, 是否默认)。在后台线程调用，避免阻塞 UI。
+pub fn list_output_devices() -> Result<Vec<(String, bool)>> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let default_name = host
+        .default_output_device()
+        .and_then(|device| device.description().ok())
+        .map(|description| description.name().to_string());
+    let devices = host
+        .output_devices()
+        .map_err(|error| anyhow!("could not enumerate output devices: {error}"))?;
+    Ok(devices
+        .filter_map(|device| {
+            let name = device.description().ok()?.name().to_string();
+            let is_default = default_name.as_deref() == Some(name.as_str());
+            Some((name, is_default))
+        })
+        .collect())
+}
+
+/// 按名称打开指定输出设备；None 或设备不存在时回退系统默认。
+/// 返回实际打开的 sink 与设备名（回退后名称与请求可能不同）。
+fn open_audio_device(
+    name: Option<&str>,
+) -> Result<(rodio::MixerDeviceSink, Option<String>), anyhow::Error> {
+    let Some(name) = name else {
+        let sink = open_audio_sink().map_err(|error| anyhow!("{error}"))?;
+        return Ok((sink, None));
+    };
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let devices = cpal::default_host()
+        .output_devices()
+        .map_err(|error| anyhow!("could not enumerate output devices: {error}"))?;
+    for device in devices {
+        let matches = device
+            .description()
+            .map(|description| description.name() == name)
+            .unwrap_or(false);
+        if matches {
+            let builder = DeviceSinkBuilder::from_device(device)
+                .map_err(|error| anyhow!("{error}"))?
+                .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES));
+            let sink = builder
+                .open_sink_or_fallback()
+                .map_err(|error| anyhow!("{error}"))?;
+            return Ok((sink, Some(name.to_string())));
+        }
+    }
+    // 目标设备不存在（如已拔出）：回退默认设备，保证播放不中新。
+    log::warn!("audio output device {name:?} not found; falling back to the default device");
+    let sink = open_audio_sink().map_err(|error| anyhow!("{error}"))?;
+    Ok((sink, None))
+}
+
 struct AudioOutput {
+    /// 保持存活的输出流：切换设备时整体替换，旧 sink 随之 drop 关闭。
+    /// 测试（无声卡音频工作线程）传 None。
+    sink: Option<rodio::MixerDeviceSink>,
+    /// 当前设备名；None 表示跟随系统默认。
+    name: Option<String>,
     player: Player,
     channels: ChannelCount,
     sample_rate: SampleRate,
@@ -387,10 +483,15 @@ fn run_playback(
     client: Client,
     output: AudioOutput,
 ) {
+    // sink_keeper/output_name 的"读取"就是保活副作用：变量本身从不被读，
+    // 设备切换时被整体替换，旧值 drop 即关闭旧输出流。
+    #[allow(unused_assignments)]
     let AudioOutput {
-        player,
-        channels: output_channels,
-        sample_rate: output_sample_rate,
+        sink: mut sink_keeper,
+        name: mut output_name,
+        mut player,
+        channels: mut output_channels,
+        sample_rate: mut output_sample_rate,
         handoff,
     } = output;
     let (preparation_tx, preparation_rx) = mpsc::channel::<PreparationResult>();
@@ -630,6 +731,47 @@ fn run_playback(
                             "failed to change audio cache directory; directory={}: {error:#}",
                             new_cache_dir.display()
                         ),
+                    }
+                }
+                Command::SetOutputDevice(target) => {
+                    // 先记录当前输出进度与出声状态（旧 Player 释放前）。
+                    let had_output = !player.empty();
+                    let position = position_offset
+                        .saturating_add(player.get_pos().saturating_sub(track_boundary));
+                    match open_audio_device(target.as_deref()) {
+                        Ok((mut new_sink, new_name)) => {
+                            let channels = new_sink.config().channel_count();
+                            let sample_rate = new_sink.config().sample_rate();
+                            let mixer = new_sink.mixer().clone();
+                            let (new_player, source) = Player::new();
+                            mixer.add(source);
+                            new_sink.log_on_drop(false);
+                            log::info!(
+                                "audio output switched; name={:?} channels={} sample_rate={}",
+                                new_name,
+                                channels.get(),
+                                sample_rate.get()
+                            );
+                            // 替换保活变量：旧 sink 与旧 Player 上的源一起释放。
+                            let new_sink_ref = sink_keeper.insert(new_sink);
+                            output_name = new_name;
+                            player = new_player;
+                            output_channels = channels;
+                            output_sample_rate = sample_rate;
+                            report_output_device(&state, &output_name, new_sink_ref);
+                            // 正在出声的曲目：在新输出上从当前位置继续。
+                            // 复用 Seek 路径重建流（保留暂停意图、作废预
+                            // 加载衔接）；准备中的曲目会在新 Player 上落地。
+                            if had_output {
+                                pending_commands.push_back(Command::Seek(position));
+                            }
+                        }
+                        Err(error) => {
+                            // 保留原输出继续播放；空闲时错误会经由启动错误显示。
+                            log::warn!("failed to switch audio output to {target:?}: {error:#}");
+                            startup_error =
+                                Some(format!("Unable to switch audio output: {error:#}"));
+                        }
                     }
                 }
                 Command::Seek(position) => {

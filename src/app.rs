@@ -130,6 +130,9 @@ struct AppState {
     ended_handled: bool,
     now_playing_reported: Option<String>,
     scrobbled_song_id: Option<String>,
+    /// 音频输出设备清单（设置页展示）：(名称, 是否默认)。
+    output_devices: Vec<(String, bool)>,
+    output_devices_loading: bool,
     /// 本地测量的歌曲响度缓存：song_id → (rms_db, peak)。
     loudness_cache: HashMap<String, (f32, f32)>,
 }
@@ -201,6 +204,8 @@ impl Default for AppState {
             ended_handled: true,
             now_playing_reported: None,
             scrobbled_song_id: None,
+            output_devices: Vec::new(),
+            output_devices_loading: false,
             loudness_cache: HashMap::new(),
         }
     }
@@ -278,7 +283,8 @@ impl NavidromeApp {
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle());
         let audio_cache_dir = config::audio_cache_dir(&config);
-        let audio = AudioHandle::start(audio_cache_dir).expect("failed to start audio worker");
+        let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
+            .expect("failed to start audio worker");
         let default_cover = Arc::new(GpuiImage::from_bytes(
             GpuiImageFormat::Png,
             include_bytes!("../assets/default-cover.png").to_vec(),
@@ -1523,6 +1529,7 @@ impl NavidromeApp {
             volume: self.config.volume,
             playback_modes: self.config.playback_modes,
             show_lyrics_translation: self.config.show_lyrics_translation,
+            output_device: self.config.output_device.clone(),
             volume_normalization: self.config.volume_normalization,
             sidebar_collapsed: self.config.sidebar_collapsed,
             albums_sort: self.config.albums_sort,
@@ -1628,6 +1635,35 @@ impl NavidromeApp {
         if let Err(error) = config::save(&self.config) {
             self.notify_error(format!("Lyrics translation save failed: {error:#}"));
         }
+        cx.notify();
+    }
+
+    /// 枚举输出设备（后台线程，避免 cpal 枚举阻塞 UI）。
+    fn refresh_output_devices(&mut self, cx: &mut Context<Self>) {
+        if self.state.output_devices_loading {
+            return;
+        }
+        self.state.output_devices_loading = true;
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = crate::audio::list_output_devices().map_err(error_message);
+            let _ = tx.send(Msg::OutputDevices(result));
+        });
+        cx.notify();
+    }
+
+    /// 切换输出设备：持久化选择并通知音频线程；正在播放时
+    /// 音频线程会在新设备上从当前位置继续，暂停意图保留。
+    fn set_output_device(&mut self, name: Option<String>, cx: &mut Context<Self>) {
+        if self.config.output_device == name {
+            return;
+        }
+        self.config.output_device = name.clone();
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Audio output save failed: {error:#}"));
+        }
+        self.cancel_next_preload();
+        self.audio.set_output_device(name);
         cx.notify();
     }
 
@@ -2082,6 +2118,7 @@ impl Render for NavidromeApp {
                                             .small()
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.state.settings_open = true;
+                                                this.refresh_output_devices(cx);
                                                 cx.notify();
                                             })),
                                     ),
@@ -2158,6 +2195,9 @@ impl Render for NavidromeApp {
                                         .selected(self.state.settings_open)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.state.settings_open = !this.state.settings_open;
+                                            if this.state.settings_open {
+                                                this.refresh_output_devices(cx);
+                                            }
                                             cx.notify();
                                         })),
                                 ),

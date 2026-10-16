@@ -51,6 +51,12 @@ JavaScript runtime.
 - Collapsible Home sections keep the page compact as more album lists are added
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
+- Audio output device management: pick a specific output device (or follow the
+  OS default) from Settings, persisted across restarts, with the active
+  device's real sample rate and channel count shown for diagnostics.
+  Switching devices keeps the current track and position, rebuilding the
+  stream on the new output while preserving pause state; a missing target
+  device falls back to the system default
 - ReplayGain volume normalization (Off / Track / Album) so loud and quiet
   tracks play at a similar level, with peak-based anti-clipping; falls back to
   locally measured loudness when the server provides no ReplayGain metadata

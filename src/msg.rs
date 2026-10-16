@@ -25,6 +25,7 @@ pub enum Msg {
     Albums(Result<Vec<Album>, String>),
     NewestAlbums(Result<Vec<Album>, String>),
     Genres(Result<Vec<Genre>, String>),
+    OutputDevices(Result<Vec<(String, bool)>, String>),
     GenreAlbums {
         genre: String,
         result: Result<Vec<Album>, String>,

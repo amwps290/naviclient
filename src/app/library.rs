@@ -524,6 +524,13 @@ impl NavidromeApp {
                         Err(error) => self.notify_error(error),
                     }
                 }
+                Msg::OutputDevices(result) => {
+                    self.state.output_devices_loading = false;
+                    match result {
+                        Ok(devices) => self.state.output_devices = devices,
+                        Err(error) => self.notify_error(error),
+                    }
+                }
                 Msg::GenreAlbums { genre, result } => {
                     self.state.genre_albums_loading = false;
                     // 只处理当前流派页的响应，忽略过期请求。
