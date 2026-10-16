@@ -1712,13 +1712,11 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    /// 应用预设：同步配置、滑杆显示与音频线程，并开启均衡器。
-    fn apply_eq_preset(&mut self, gains: [f32; 10], window: &mut Window, cx: &mut Context<Self>) {
+    /// 应用预设（不含滑杆显示同步——由调用方在可用的上下文里完成）：
+    /// 更新配置、推送音频线程并开启均衡器。
+    fn set_eq_preset_values(&mut self, gains: [f32; 10], cx: &mut Context<Self>) {
         self.config.equalizer.gains_db = gains;
         self.config.equalizer.enabled = true;
-        for (band, slider) in self.eq_sliders.iter().enumerate() {
-            slider.update(cx, |state, cx| state.set_value(gains[band], window, cx));
-        }
         self.push_equalizer_to_audio();
         self.schedule_eq_save(cx);
         cx.notify();

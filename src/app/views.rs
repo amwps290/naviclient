@@ -4,6 +4,7 @@
 
 use super::*;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::popover::Popover;
 
 impl NavidromeApp {
     pub(super) fn render_cover(
@@ -414,6 +415,118 @@ impl NavidromeApp {
                             .child(counts),
                     )
             }))
+            .into_any_element()
+    }
+
+    /// 底部播放条的均衡器弹出面板：锚定 EQ 按钮的 Popover，
+    /// 点击外部自动关闭；面板内开关/预设/10 段滑杆与配置实时同步。
+    pub(super) fn render_eq_popover(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let app = cx.entity().downgrade();
+        let sliders = self.eq_sliders.clone();
+        let enabled = self.config.equalizer.enabled;
+        let gains = self.config.equalizer.gains_db;
+
+        let presets: Vec<(&'static str, [f32; 10])> = EqSettings::PRESETS.to_vec();
+
+        Popover::new("eq-popover")
+            .trigger(
+                Button::new("player-eq")
+                    .icon(AppIcon::Eq)
+                    .tooltip("Equalizer")
+                    .ghost()
+                    .with_size(px(30.0))
+                    .rounded_full(),
+            )
+            .content(move |_, _, popover_cx| {
+                let accent = popover_cx.theme().accent;
+                let muted = popover_cx.theme().muted_foreground;
+                v_flex()
+                    .w(px(400.0))
+                    .gap_3()
+                    .p_3()
+                    // 开关
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Equalizer"),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .children([(true, "On"), (false, "Off")].map(
+                                        |(enable, label)| {
+                                            let app = app.clone();
+                                            Button::new(SharedString::from(format!(
+                                                "eq-popover-{label}"
+                                            )))
+                                            .label(label)
+                                            .small()
+                                            .ghost()
+                                            .selected(enabled == enable)
+                                            .on_click(move |_, _, cx| {
+                                                let _ = app.update(cx, |this, cx| {
+                                                    this.set_eq_enabled(enable, cx);
+                                                });
+                                            })
+                                        },
+                                    )),
+                            ),
+                    )
+                    // 预设
+                    .child(h_flex().gap_1().flex_wrap().children(presets.iter().map(
+                        |(name, preset_gains)| {
+                            let preset_gains = *preset_gains;
+                            let app = app.clone();
+                            let sliders = sliders.clone();
+                            Button::new(SharedString::from(format!("eq-popover-preset-{name}")))
+                                .label(*name)
+                                .small()
+                                .ghost()
+                                .selected(enabled && gains == preset_gains)
+                                .on_click(move |_, window, cx| {
+                                    for (band, slider) in sliders.iter().enumerate() {
+                                        slider.update(cx, |state, cx| {
+                                            state.set_value(preset_gains[band], window, cx)
+                                        });
+                                    }
+                                    let _ = app.update(cx, |this, cx| {
+                                        this.set_eq_preset_values(preset_gains, cx);
+                                    });
+                                })
+                        },
+                    )))
+                    // 10 段滑杆
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .children(sliders.iter().enumerate().map(|(band, slider)| {
+                                let center_hz = EqSettings::BANDS[band];
+                                let label = if center_hz >= 1000.0 {
+                                    format!("{}k", (center_hz / 1000.0) as u32)
+                                } else {
+                                    format!("{}", center_hz as u32)
+                                };
+                                v_flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .w(px(34.0))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(if enabled { accent } else { muted })
+                                            .child(format!("{:+.0}", gains[band])),
+                                    )
+                                    .child(Slider::new(slider).vertical().h(px(96.0)).bg(accent))
+                                    .child(div().text_xs().text_color(muted).child(label))
+                            })),
+                    )
+                    .into_any_element()
+            })
             .into_any_element()
     }
 
@@ -1776,116 +1889,6 @@ impl NavidromeApp {
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.refresh_output_devices(cx);
                                             })),
-                                    ),
-                            ),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Equalizer"),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_4()
-                            .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
-                            .child(
-                                div().text_xs().text_color(cx.theme().muted_foreground).child(
-                                    "10-band graphic equalizer (31 Hz to 16 kHz, ±12 dB). \
-                                    Changes take effect on the playing track within ~20 ms; \
-                                    adjustments are saved automatically.",
-                                ),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("eq-enabled-on")
-                                            .label("On")
-                                            .selected(self.config.equalizer.enabled)
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.set_eq_enabled(true, cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("eq-enabled-off")
-                                            .label("Off")
-                                            .selected(!self.config.equalizer.enabled)
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.set_eq_enabled(false, cx);
-                                            })),
-                                    ),
-                            )
-                            .child(
-                                h_flex().gap_2().flex_wrap().children(
-                                    EqSettings::PRESETS.iter().map(|(name, gains)| {
-                                        let gains = *gains;
-                                        Button::new(SharedString::from(format!(
-                                            "eq-preset-{name}"
-                                        )))
-                                        .label(*name)
-                                        .selected(
-                                            self.config.equalizer.enabled
-                                                && self.config.equalizer.gains_db == gains,
-                                        )
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.apply_eq_preset(gains, window, cx);
-                                        }))
-                                    }),
-                                ),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_4()
-                                    .children(
-                                        self.eq_sliders
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(band, slider)| {
-                                                let center_hz = EqSettings::BANDS[band];
-                                                let label = if center_hz >= 1000.0 {
-                                                    format!("{}k", (center_hz / 1000.0) as u32)
-                                                } else {
-                                                    format!("{}", center_hz as u32)
-                                                };
-                                                v_flex()
-                                                    .items_center()
-                                                    .gap_1()
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(cx.theme().foreground)
-                                                            .child(format!(
-                                                                "{:+.0}",
-                                                                self.config
-                                                                    .equalizer
-                                                                    .gains_db[band]
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        Slider::new(slider)
-                                                            .vertical()
-                                                            .h(px(96.0))
-                                                            .bg(cx.theme().accent),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(
-                                                                cx.theme().muted_foreground
-                                                            )
-                                                            .child(label),
-                                                    )
-                                            }),
                                     ),
                             ),
                     ),
@@ -3638,6 +3641,7 @@ impl NavidromeApp {
                         .with_size(px(30.0)),
                 )
             })
+            .child(self.render_eq_popover(cx))
             .child(
                 Button::new("player-queue")
                     .icon(AppIcon::Queue)

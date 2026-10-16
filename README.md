@@ -58,10 +58,11 @@ JavaScript runtime.
   stream on the new output while preserving pause state; a missing target
   device falls back to the system default
 - 10-band graphic equalizer (31.25 Hz to 16 kHz, +/-12 dB per band) with
-  eight built-in presets and per-band sliders in Settings. Filtering runs in
-  the audio worker after ReplayGain gain and before output conversion, so
-  loudness measurement stays EQ-independent; settings changes take effect on
-  the playing track within ~20 ms without restarting it
+  eight built-in presets, opened from an EQ button in the bottom player bar
+  as a popover (click outside to dismiss, drag sliders while listening).
+  Filtering runs in the audio worker after ReplayGain gain and before output
+  conversion, so loudness measurement stays EQ-independent; changes take
+  effect on the playing track within ~20 ms without restarting it
 - ReplayGain volume normalization (Off / Track / Album) so loud and quiet
   tracks play at a similar level, with peak-based anti-clipping; falls back to
   locally measured loudness when the server provides no ReplayGain metadata
