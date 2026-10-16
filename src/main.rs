@@ -136,6 +136,7 @@ fn run_app() {
                                 Theme::sync_system_appearance(Some(window), cx)
                             }
                         }
+                        app::adjust_light_theme_contrast(cx);
 
                         cx.new(|cx| app::NavidromeApp::new(window, cx))
                     })

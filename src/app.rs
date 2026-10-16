@@ -25,7 +25,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, size, uniform_list, Animation, AnimationExt, AppContext, Context, Entity,
+    relative, rems, size, uniform_list, Animation, AnimationExt, App, AppContext, Context, Entity,
     FontWeight, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
     IntoElement, Keystroke, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels,
     Render, ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
@@ -61,6 +61,26 @@ mod queue;
 mod views;
 use helpers::*;
 use playlists::{PlaylistUi, SongMenuContext};
+
+/// 亮色主题次要文字对比度修正（UX 反馈：提示灰在亮色界面看不清）。
+///
+/// 默认亮色主题 muted.foreground = neutral-500（#737373），在白底上
+/// 对比度约 4.7:1；应用的次要文字大量使用 text_xs 小字号并叠在半透明
+/// 卡片上，观感发灰发虚。这里把全局 Theme 的默认亮色配置替换为
+/// muted 前景加深到 neutral-600（#525252，约 7.4:1）的副本，再重载
+/// 当前模式让 colors 立即生效。此后所有 `Theme::change`（设置页切换、
+/// System 外观同步）都会从这份配置加载，无需重复调用。深色主题
+/// （neutral-400 on neutral-950）不受影响。
+pub fn adjust_light_theme_contrast(cx: &mut App) {
+    let mode = {
+        let theme = Theme::global_mut(cx);
+        let mut config = (*theme.light_theme).clone();
+        config.colors.muted_foreground = Some("#525252".into());
+        theme.light_theme = std::rc::Rc::new(config);
+        theme.mode
+    };
+    Theme::change(mode, None, cx);
+}
 
 struct AppState {
     server: Option<ServerInfo>,
