@@ -384,6 +384,16 @@ pub(super) fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
     }
 }
 
+/// Shift 范围选择锚点的优先级：已有同作用域多选的锚点（允许连续
+/// 扩展）> 键盘光标 > 本次目标行。
+pub(super) fn range_anchor(
+    multi_anchor: Option<usize>,
+    cursor: Option<usize>,
+    fallback: usize,
+) -> usize {
+    multi_anchor.or(cursor).unwrap_or(fallback)
+}
+
 /// Shift+点击的范围选择集合（锚点到点击行的闭区间，升序）。
 pub(super) fn selection_range(anchor: usize, clicked: usize) -> std::collections::BTreeSet<usize> {
     if anchor <= clicked {

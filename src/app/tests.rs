@@ -8,8 +8,9 @@ use super::{
     accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
     extract_cover_palette, format_file_size, history_index_after_insert, loudness_gain_factor,
     match_shortcut, normalize_volume, playback_technical_info, queue_index_after_move,
-    queue_index_after_remove, readable_accent, replay_gain_factor, restored_volume, seek_target,
-    selection_range, should_scrobble, sort_album_songs, sort_artists, Shortcut, ShuffleHistory,
+    queue_index_after_remove, range_anchor, readable_accent, replay_gain_factor, restored_volume,
+    seek_target, selection_range, should_scrobble, sort_album_songs, sort_artists, Shortcut,
+    ShuffleHistory,
 };
 use crate::models::{
     Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
@@ -738,4 +739,14 @@ fn history_index_shifts_only_from_insert_point() {
         let single = if index >= 3 { index + 1 } else { index };
         assert_eq!(history_index_after_insert(index, 3, 1), single);
     }
+}
+
+#[test]
+fn range_anchor_prefers_multi_anchor_then_cursor_then_fallback() {
+    // 已有多选锚点优先：Shift 操作可围绕固定锚点连续扩展。
+    assert_eq!(range_anchor(Some(4), Some(9), 2), 4);
+    // 无多选时用键盘光标（Shift+点击 从光标拉范围）。
+    assert_eq!(range_anchor(None, Some(9), 2), 9);
+    // 两者皆无（新开多选）：锚点即本次目标行。
+    assert_eq!(range_anchor(None, None, 2), 2);
 }

@@ -82,6 +82,16 @@ pub fn adjust_light_theme_contrast(cx: &mut App) {
     Theme::change(mode, None, cx);
 }
 
+/// 歌曲列表多选状态：作用域 + Shift 范围选择锚点 + 升序索引集合。
+/// 锚点是范围选择的固定端点（Ctrl+点击或首个范围操作的落点），
+/// Shift+点击 / Shift+↑↓ 都从锚点重新计算范围。
+#[derive(Debug, Clone)]
+pub(crate) struct SongListMulti {
+    scope: &'static str,
+    anchor: usize,
+    indices: std::collections::BTreeSet<usize>,
+}
+
 struct AppState {
     server: Option<ServerInfo>,
     view: View,
@@ -144,9 +154,11 @@ struct AppState {
     settings_open: bool,
     /// 键盘导航选中的歌曲行：作用域 + 行号。
     song_list_selected: Option<(&'static str, usize)>,
-    /// 歌曲列表多选集合（scope + 行索引升序集合）。索引只在该 scope
-    /// 当前列表内有效；列表数据变化处负责清空（见 clear_song_multi）。
-    song_list_multi: Option<(&'static str, std::collections::BTreeSet<usize>)>,
+    /// 歌曲列表多选集合。索引只在该 scope 当前列表内有效；列表数据
+    /// 变化处负责清空（见 clear_song_multi）。
+    song_list_multi: Option<SongListMulti>,
+    /// “曲目信息”对话框当前展示的歌曲。
+    song_info: Option<Song>,
     view_before_now_playing: View,
     playback_modes: PlayModes,
     shuffle_history: ShuffleHistory,
@@ -222,6 +234,7 @@ impl Default for AppState {
             settings_open: false,
             song_list_selected: None,
             song_list_multi: None,
+            song_info: None,
             view_before_now_playing: View::Home,
             playback_modes: PlayModes::default(),
             shuffle_history: ShuffleHistory::default(),

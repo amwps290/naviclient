@@ -82,6 +82,10 @@ JavaScript runtime.
   playlist / favorite (smart direction) for the whole selection, and Enter
   plays it. Queue rows keep in-place semantics: batch play just jumps to the
   first selected position instead of rebuilding the queue
+- Shift+Up/Down extends the multi-selection around its anchor (folding back past
+  the anchor shrinks it naturally), and “Song info…” in the song menu opens a
+  read-only dialog with track, disc, duration, format (suffix, bit rate, file
+  size), file path and server id
 - Song actions are available from right-click and the “…” button in song lists,
   search results, playlists, and the queue
 - Linux MPRIS media session for desktop media controls: track metadata, local cover

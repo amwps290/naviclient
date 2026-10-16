@@ -92,6 +92,13 @@ impl NavidromeApp {
             }
         };
         self.state.song_list_selected = Some((scope, next));
+        // 多选活跃时 Shift+↑/↓ 从锚点重新计算范围（越过锚点再折回时
+        // 自然收缩）；无多选时保持纯光标移动。
+        if let Some(multi) = &mut self.state.song_list_multi {
+            if multi.scope == scope {
+                multi.indices = selection_range(multi.anchor, next);
+            }
+        }
         self.song_list_scroll(scope)
             .scroll_to_item(next, gpui_kit::ScrollStrategy::Nearest);
         cx.notify();
@@ -123,27 +130,43 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    /// Ctrl+点击：切换该行选中态并把光标移到该行；集合收空时退出多选。
+    /// Ctrl+点击：切换该行选中态并把光标与锚点移到该行；集合收空时退出多选。
     pub(super) fn toggle_song_multi(&mut self, scope: &'static str, index: usize) {
         let mut set = match &self.state.song_list_multi {
-            Some((selected_scope, set)) if *selected_scope == scope => set.clone(),
+            Some(multi) if multi.scope == scope => multi.indices.clone(),
             _ => std::collections::BTreeSet::new(),
         };
         if !set.remove(&index) {
             set.insert(index);
         }
         self.state.song_list_selected = Some((scope, index));
-        self.state.song_list_multi = (!set.is_empty()).then_some((scope, set));
+        self.state.song_list_multi = (!set.is_empty()).then_some(SongListMulti {
+            scope,
+            anchor: index,
+            indices: set,
+        });
     }
 
-    /// Shift+点击：从光标（锚点）到点击行做范围选择；无光标时锚点即点击行。
+    /// Shift+点击：从锚点到点击行做范围选择。锚点优先级：已有同作用域
+    /// 多选的锚点（可连续扩展）> 键盘光标 > 点击行本身。
     pub(super) fn range_song_multi(&mut self, scope: &'static str, index: usize) {
-        let anchor = match self.state.song_list_selected {
-            Some((selected_scope, selected_index)) if selected_scope == scope => selected_index,
-            _ => index,
+        let multi_anchor = match &self.state.song_list_multi {
+            Some(multi) if multi.scope == scope => Some(multi.anchor),
+            _ => None,
         };
+        let cursor = match self.state.song_list_selected {
+            Some((selected_scope, selected_index)) if selected_scope == scope => {
+                Some(selected_index)
+            }
+            _ => None,
+        };
+        let anchor = range_anchor(multi_anchor, cursor, index);
         self.state.song_list_selected = Some((scope, index));
-        self.state.song_list_multi = Some((scope, selection_range(anchor, index)));
+        self.state.song_list_multi = Some(SongListMulti {
+            scope,
+            anchor,
+            indices: selection_range(anchor, index),
+        });
     }
 
     /// Ctrl+A：全选当前作用域的全部歌曲。
@@ -158,8 +181,11 @@ impl NavidromeApp {
         if len == 0 {
             return;
         }
-        let set = (0..len).collect();
-        self.state.song_list_multi = Some((scope, set));
+        self.state.song_list_multi = Some(SongListMulti {
+            scope,
+            anchor: 0,
+            indices: (0..len).collect(),
+        });
         cx.notify();
     }
 
@@ -171,16 +197,17 @@ impl NavidromeApp {
     /// 当前作用域多选中有效的歌曲（按行索引升序）；scope 不匹配或
     /// 索引越界（列表已缩短）时被过滤，集合为空则返回空列表。
     pub(super) fn selected_songs(&self, scope: &str) -> Vec<Song> {
-        let Some((selected_scope, indices)) = &self.state.song_list_multi else {
+        let Some(multi) = &self.state.song_list_multi else {
             return Vec::new();
         };
-        if *selected_scope != scope {
+        if multi.scope != scope {
             return Vec::new();
         }
         let Some(songs) = self.songs_for_scope(scope) else {
             return Vec::new();
         };
-        indices
+        multi
+            .indices
             .iter()
             .filter_map(|index| songs.get(*index).cloned())
             .collect()
@@ -212,14 +239,14 @@ impl NavidromeApp {
 
     /// 所选集合的第一行索引（集合升序，越界索引已过滤）。
     pub(super) fn first_selected_index(&self, scope: &str) -> Option<usize> {
-        let Some((selected_scope, indices)) = &self.state.song_list_multi else {
+        let Some(multi) = &self.state.song_list_multi else {
             return None;
         };
-        if *selected_scope != scope {
+        if multi.scope != scope {
             return None;
         }
         let len = self.songs_for_scope(scope).map_or(0, <[Song]>::len);
-        indices.iter().copied().find(|index| *index < len)
+        multi.indices.iter().copied().find(|index| *index < len)
     }
 
     /// 所选集合插入到当前播放歌曲之后，按块插入、一次历史重映射，保持所选顺序。

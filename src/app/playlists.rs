@@ -537,6 +537,14 @@ impl NavidromeApp {
                     cx.notify();
                 })),
         );
+        let song_for_info = song.clone();
+        menu = menu
+            .separator()
+            .item(PopupMenuItem::new("Song info…").on_click(cx.listener(
+                move |this, _, window, cx| {
+                    this.open_song_info(song_for_info.clone(), window, cx);
+                },
+            )));
         if let Some(playlist) = context.playlist {
             let disabled = self.playlist_ui.busy
                 || self.playlist_ui.detail_loading
