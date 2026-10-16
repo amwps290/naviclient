@@ -97,7 +97,10 @@ JavaScript runtime.
   over the window adjusts volume and briefly flashes it on the progress line
 - Server settings persisted locally as JSON
 - Navidrome-synced favorites for artists, albums, and songs
-- Light theme by default, with light, dark, and system-following appearance options
+- Light theme by default, with light, dark, and system-following appearance
+  options; the light theme's secondary text (hints, subtitles, metadata) is
+  darkened from neutral-500 to neutral-600 so small text stays readable on
+  tinted cards, while the dark theme keeps the stock palette
 - Borderless client-drawn window with native minimize, maximize, resize, and close behavior
 - Cross-platform desktop support: Windows, macOS, and Linux
 
