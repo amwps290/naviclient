@@ -71,6 +71,11 @@ JavaScript runtime.
 - Create, rename, and delete Navidrome playlists; add songs or whole albums,
   save the current queue as a playlist, and move or remove individual entries.
   Duplicate tracks keep their order; shared playlists owned by others are read-only.
+- Artist and album names are clickable links everywhere they appear: song
+  rows (artist column and album subtitle), the player bar, the now-playing
+  header, album cards, and the album detail header all navigate to the
+  artist or album page on click, with a hover highlight to signal the link.
+  Items without a server-provided artist/album id fall back to static text
 - Song actions are available from right-click and the “…” button in song lists,
   search results, playlists, and the queue
 - Linux MPRIS media session for desktop media controls: track metadata, local cover

@@ -269,6 +269,38 @@ impl NavidromeApp {
         });
     }
 
+    /// 从歌曲元数据打开艺术家页；缺少 artist_id 时无操作。
+    pub(super) fn open_song_artist(&mut self, song: &Song) {
+        let Some(artist_id) = song.artist_id.clone() else {
+            return;
+        };
+        self.open_artist(Artist {
+            id: artist_id,
+            name: song.artist.clone(),
+            album_count: None,
+            cover_art: song.cover_art.clone(),
+        });
+    }
+
+    /// 从歌曲元数据打开专辑页；缺少 album_id 时无操作。
+    pub(super) fn open_song_album(&mut self, song: &Song) {
+        let Some(album_id) = song.album_id.clone() else {
+            return;
+        };
+        let name = if song.album.trim().is_empty() {
+            "Unknown album".to_string()
+        } else {
+            song.album.clone()
+        };
+        self.open_album(Album {
+            id: album_id,
+            name,
+            artist: song.artist.clone(),
+            cover_art: song.cover_art.clone(),
+            ..Album::default()
+        });
+    }
+
     pub(super) fn open_album(&mut self, album: Album) {
         self.state.current_album = Some(album.clone());
         self.state.current_songs.clear();

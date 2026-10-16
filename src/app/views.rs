@@ -374,6 +374,80 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    /// 可点击的元数据文本（艺术家/专辑名）：hover 变强调色，点击执行
+    /// 导航并阻止冒泡（行/卡片的整体点击是播放或打开详情）。
+    /// 注意这里只阻断鼠标冒泡，与键盘输入路径无关。
+    pub(super) fn clickable_meta(
+        &self,
+        id: impl Into<SharedString>,
+        text: String,
+        cx: &Context<Self>,
+        open: impl Fn(&mut Self) + 'static,
+    ) -> gpui_kit::AnyElement {
+        div()
+            .id(id.into())
+            .min_w_0()
+            .truncate()
+            .cursor_pointer()
+            .hover(|style| style.text_color(cx.theme().accent))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                open(this);
+                cx.notify();
+            }))
+            .child(text)
+            .into_any_element()
+    }
+
+    /// 艺术家名文本：有 artist_id 时可点导航到艺术家页，否则静态显示。
+    pub(super) fn artist_name_link(
+        &self,
+        id: impl Into<SharedString>,
+        name: String,
+        artist_id: Option<String>,
+        cover_art: Option<String>,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        match artist_id.filter(|id| !id.is_empty()) {
+            Some(artist_id) => self.clickable_meta(id, name.clone(), cx, move |this| {
+                this.open_artist(Artist {
+                    id: artist_id.clone(),
+                    name: name.clone(),
+                    album_count: None,
+                    cover_art: cover_art.clone(),
+                });
+            }),
+            None => div().min_w_0().truncate().child(name).into_any_element(),
+        }
+    }
+
+    /// 歌曲行的专辑名文本：可点导航到专辑页。
+    pub(super) fn song_album_link(
+        &self,
+        id: impl Into<SharedString>,
+        display_name: String,
+        song: &Song,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let song = song.clone();
+        self.clickable_meta(id, display_name, cx, move |this| {
+            this.open_song_album(&song);
+        })
+    }
+
+    /// 歌曲行的艺术家名文本：可点导航到艺术家页。
+    pub(super) fn song_artist_link(
+        &self,
+        id: impl Into<SharedString>,
+        song: &Song,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let song = song.clone();
+        self.clickable_meta(id, song.artist.clone(), cx, move |this| {
+            this.open_song_artist(&song);
+        })
+    }
+
     /// 流派卡片网格：卡片显示流派名与专辑/歌曲数，点击进入流派详情。
     pub(super) fn render_genre_grid(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         h_flex()
@@ -783,19 +857,22 @@ impl NavidromeApp {
                                 })),
                         )
                         .child(
-                            div()
+                            h_flex()
                                 .px_2()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(format!(
-                                    "{}{}",
-                                    album.artist,
-                                    album
-                                        .year
-                                        .map(|year| format!(" - {year}"))
-                                        .unwrap_or_default()
-                                )),
+                                .min_w_0()
+                                .gap_1()
+                                .child(self.artist_name_link(
+                                    SharedString::from(format!("album-grid-artist-{}", album.id)),
+                                    album.artist.clone(),
+                                    album.artist_id.clone(),
+                                    album.cover_art.clone(),
+                                    cx,
+                                ))
+                                .when_some(album.year, |this, year| {
+                                    this.child(format!("- {year}"))
+                                }),
                         )
                 }));
         let grid_elapsed = grid_start.elapsed();
@@ -1281,8 +1358,12 @@ impl NavidromeApp {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .line_height(rems(1.2))
-                                .truncate()
-                                .child(album),
+                                .child(self.song_album_link(
+                                    SharedString::from(format!("song-row-album-{key}")),
+                                    album,
+                                    song,
+                                    cx,
+                                )),
                         ),
                 ),
         )
@@ -1294,8 +1375,11 @@ impl NavidromeApp {
                 .min_w_0()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .truncate()
-                .child(song.artist.clone()),
+                .child(self.song_artist_link(
+                    SharedString::from(format!("song-row-artist-{key}")),
+                    song,
+                    cx,
+                )),
         )
         .child(
             div()
@@ -2217,14 +2301,29 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(song.artist.clone()),
+                                    .child(self.song_artist_link(
+                                        SharedString::from(format!(
+                                            "now-playing-artist-{}",
+                                            song.id
+                                        )),
+                                        song,
+                                        cx,
+                                    )),
                             )
                             .when(!song.album.is_empty(), |this| {
                                 this.child(
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(song.album.clone()),
+                                        .child(self.song_album_link(
+                                            SharedString::from(format!(
+                                                "now-playing-album-{}",
+                                                song.id
+                                            )),
+                                            song.album.clone(),
+                                            song,
+                                            cx,
+                                        )),
                                 )
                             }),
                     ),
@@ -2918,16 +3017,22 @@ impl NavidromeApp {
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .child(album.name.clone()),
                                     )
-                                    .child(div().text_color(cx.theme().muted_foreground).child(
-                                        format!(
-                                                "{}{}",
-                                                album.artist,
-                                                album
-                                                    .year
-                                                    .map(|year| format!(" - {year}"))
-                                                    .unwrap_or_default()
-                                            ),
-                                    ))
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .min_w_0()
+                                            .child(self.artist_name_link(
+                                                "album-detail-artist",
+                                                album.artist.clone(),
+                                                album.artist_id.clone(),
+                                                album.cover_art.clone(),
+                                                cx,
+                                            ))
+                                            .when_some(album.year, |this, year| {
+                                                this.child(format!("- {year}"))
+                                            }),
+                                    )
                                     .child(
                                         h_flex()
                                             .gap_2()
@@ -3539,8 +3644,11 @@ impl NavidromeApp {
                                 .min_w_0()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(song.artist.clone()),
+                                .child(self.song_artist_link(
+                                    SharedString::from(format!("player-bar-artist-{}", song.id)),
+                                    song,
+                                    cx,
+                                )),
                         ),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
