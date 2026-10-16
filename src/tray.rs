@@ -17,7 +17,9 @@ pub enum TrayCommand {
     Quit,
 }
 
-/// 启动托盘工作线程。Windows 上创建托盘图标与菜单并转发事件；其他平台暂为 no-op。
+/// 启动托盘服务。Windows：tray-icon + 独立消息泵线程；
+/// Linux：ksni（纯 Rust StatusNotifierItem over D-Bus，无需 GTK）。
+/// 其他平台 no-op。事件统一走 TrayCommand 通道，由应用 50ms 轮询消费。
 pub fn start_tray_worker(tx: Sender<TrayCommand>) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -32,11 +34,194 @@ pub fn start_tray_worker(tx: Sender<TrayCommand>) -> Result<()> {
             .map(|_| ())?;
         Ok(())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::start(tx)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = tx;
         log::warn!("system tray is not implemented on this platform");
         Ok(())
+    }
+}
+
+/// RGBA（R,G,B,A 每像素 4 字节）转 SNI 的 ARGB32 网络字节序
+/// （A,R,G,B 每像素 4 字节）。纯转换，便于测试。
+pub(crate) fn rgba_to_argb32(rgba: &[u8]) -> Vec<u8> {
+    let mut argb = Vec::with_capacity(rgba.len());
+    for pixel in rgba.chunks_exact(4) {
+        argb.extend_from_slice(&[pixel[3], pixel[0], pixel[1], pixel[2]]);
+    }
+    argb
+}
+
+/// 播放/暂停状态变化时同步托盘菜单文案；托盘未启用时为 no-op。
+#[cfg(target_os = "linux")]
+pub fn set_tray_paused(paused: bool) {
+    if let Some(handle) = linux::tray_handle() {
+        handle.update(|tray| tray.set_paused(paused));
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_tray_paused(_paused: bool) {}
+
+/// Linux 托盘（ksni / StatusNotifierItem over D-Bus）。
+/// ksni 自带服务线程，菜单回调只做通道转发，符合其文档建议。
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::{rgba_to_argb32, TrayCommand};
+    use ksni::blocking::TrayMethods as _;
+    use ksni::menu::StandardItem;
+    use ksni::{Icon, MenuItem, Tray};
+    use std::sync::OnceLock;
+
+    pub struct LinuxTray {
+        tx: std::sync::mpsc::Sender<TrayCommand>,
+        paused: bool,
+        icon: Vec<Icon>,
+    }
+
+    impl LinuxTray {
+        /// 应用同步播放/暂停状态（供托盘菜单文案使用）。
+        pub fn set_paused(&mut self, paused: bool) {
+            self.paused = paused;
+        }
+
+        /// 默认封面转 32x32 ARGB 托盘图标。
+        fn tray_icon() -> Vec<Icon> {
+            let bytes = include_bytes!("../assets/default-cover.png");
+            let image = image::load_from_memory(bytes)
+                .expect("embedded tray icon must decode")
+                .resize(32, 32, image::imageops::FilterType::Triangle)
+                .to_rgba8();
+            let (width, height) = image.dimensions();
+            vec![Icon {
+                width: width as i32,
+                height: height as i32,
+                data: rgba_to_argb32(&image.into_raw()),
+            }]
+        }
+    }
+
+    impl Tray for LinuxTray {
+        fn id(&self) -> String {
+            "navidrome-client".into()
+        }
+
+        fn title(&self) -> String {
+            "Navidrome Client".into()
+        }
+
+        fn icon_pixmap(&self) -> Vec<Icon> {
+            self.icon.clone()
+        }
+
+        /// 左键点击托盘图标 = 播放/暂停，与常见播放器一致。
+        fn activate(&mut self, _x: i32, _y: i32) {
+            let _ = self.tx.send(TrayCommand::TogglePlayback);
+        }
+
+        fn menu(&self) -> Vec<MenuItem<Self>> {
+            let paused = self.paused;
+            vec![
+                StandardItem {
+                    label: if paused { "Play" } else { "Pause" }.into(),
+                    icon_name: if paused {
+                        "media-playback-start"
+                    } else {
+                        "media-playback-pause"
+                    }
+                    .into(),
+                    activate: Box::new(|tray: &mut LinuxTray| {
+                        let _ = tray.tx.send(TrayCommand::TogglePlayback);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "Previous".into(),
+                    icon_name: "media-skip-backward".into(),
+                    activate: Box::new(|tray: &mut LinuxTray| {
+                        let _ = tray.tx.send(TrayCommand::Previous);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "Next".into(),
+                    icon_name: "media-skip-forward".into(),
+                    activate: Box::new(|tray: &mut LinuxTray| {
+                        let _ = tray.tx.send(TrayCommand::Next);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                ksni::menu::MenuItem::Separator,
+                StandardItem {
+                    label: "Show window".into(),
+                    icon_name: "window-new".into(),
+                    activate: Box::new(|tray: &mut LinuxTray| {
+                        let _ = tray.tx.send(TrayCommand::ShowWindow);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "Exit".into(),
+                    icon_name: "application-exit".into(),
+                    activate: Box::new(|tray: &mut LinuxTray| {
+                        let _ = tray.tx.send(TrayCommand::Quit);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            ]
+        }
+    }
+
+    static HANDLE: OnceLock<ksni::blocking::Handle<LinuxTray>> = OnceLock::new();
+
+    pub fn tray_handle() -> Option<&'static ksni::blocking::Handle<LinuxTray>> {
+        HANDLE.get()
+    }
+
+    pub fn start(tx: std::sync::mpsc::Sender<TrayCommand>) -> anyhow::Result<()> {
+        let tray = LinuxTray {
+            tx,
+            paused: false,
+            icon: LinuxTray::tray_icon(),
+        };
+        // 无 SNI 宿主（如未装扩展的 GNOME）时 spawn 可能失败——托盘是
+        // 纯增益，失败只记日志。
+        match tray.spawn() {
+            Ok(handle) => {
+                let _ = HANDLE.set(handle);
+                log::info!("system tray icon created (ksni/StatusNotifierItem)");
+                Ok(())
+            }
+            Err(error) => {
+                log::warn!("system tray unavailable: {error}");
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rgba_to_argb32;
+
+    #[test]
+    fn rgba_to_argb32_reorders_channels_per_pixel() {
+        // 单像素 R=1 G=2 B=3 A=4 → A=4 R=1 G=2 B=3
+        assert_eq!(rgba_to_argb32(&[1, 2, 3, 4]), vec![4, 1, 2, 3]);
+        // 多像素按 4 字节分组，互不串扰
+        assert_eq!(
+            rgba_to_argb32(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            vec![4, 1, 2, 3, 8, 5, 6, 7]
+        );
     }
 }
 

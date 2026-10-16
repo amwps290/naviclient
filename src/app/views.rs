@@ -2310,6 +2310,118 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
+                            .child("Desktop"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_5()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child("Now-playing notifications"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(
+                                                        "Send a desktop notification with the                                                          cover, title, artist and album when a                                                          track starts. Rapid switching replaces                                                          the previous notification.",
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex().gap_1().children(
+                                            [("On", true), ("Off", false)].map(
+                                                |(label, value)| {
+                                                    Button::new(SharedString::from(format!(
+                                                        "track-notifications-{label}"
+                                                    )))
+                                                    .label(label)
+                                                    .selected(
+                                                        self.config.show_track_notifications
+                                                            == value,
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.set_show_track_notifications(
+                                                                value, cx,
+                                                            );
+                                                        },
+                                                    ))
+                                                },
+                                            ),
+                                        ),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child("Close button minimizes"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(
+                                                        "The window close button minimizes to                                                          the taskbar instead of quitting; tray                                                          Exit still quits. Some Wayland                                                          compositors ignore minimize requests.",
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex().gap_1().children(
+                                            [("On", true), ("Off", false)].map(
+                                                |(label, value)| {
+                                                    Button::new(SharedString::from(format!(
+                                                        "close-minimizes-{label}"
+                                                    )))
+                                                    .label(label)
+                                                    .selected(
+                                                        self.config.close_minimizes == value,
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.set_close_minimizes(value, cx);
+                                                        },
+                                                    ))
+                                                },
+                                            ),
+                                        ),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .child("Appearance"),
                     )
                     .child(

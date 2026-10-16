@@ -46,6 +46,7 @@ use crate::models::{
     Song, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
+use crate::notify;
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
 use crate::vinyl::VinylCover;
@@ -287,6 +288,12 @@ pub struct NavidromeApp {
     cover_slots: Arc<tokio::sync::Semaphore>,
     title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
     tray_rx: Receiver<TrayCommand>,
+    /// 切歌系统通知发送器（同 ID 替换防堆积）。
+    track_notifier: notify::TrackNotifier,
+    /// 上一次通知过的曲目 id（曲目变化时才发通知）。
+    last_notified_track: Option<String>,
+    /// 上一次同步给托盘的暂停状态。
+    last_tray_paused: Option<bool>,
     main_hwnd: Option<isize>,
     quitting: Arc<AtomicBool>,
     last_shortcut_key: String,
@@ -419,6 +426,9 @@ impl NavidromeApp {
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             title_width_cache: RefCell::new(HashMap::new()),
             tray_rx: mpsc::channel().1,
+            track_notifier: notify::TrackNotifier::new(),
+            last_notified_track: None,
+            last_tray_paused: None,
             main_hwnd: None,
             quitting: Arc::new(AtomicBool::new(false)),
             last_shortcut_key: String::new(),
@@ -515,7 +525,17 @@ impl NavidromeApp {
                 hide_main_window(hwnd);
                 false
             } else {
-                true
+                // 平台层关闭（Alt+F4 等）：按设置决定退出还是最小化。
+                let close_minimizes = match window.root::<NavidromeApp>() {
+                    Some(Some(root)) => root.update(cx, |app, _| app.config.close_minimizes),
+                    _ => false,
+                };
+                if close_minimizes {
+                    window.minimize_window();
+                    false
+                } else {
+                    true
+                }
             }
         });
         app._subscriptions.push(
@@ -589,7 +609,7 @@ impl NavidromeApp {
                 if this
                     .update_in(cx, |this, window, cx| {
                         this.sync_gapless_transition();
-                        let mut changed = this.poll_tray_commands();
+                        let mut changed = this.poll_tray_commands(window);
                         changed |= this.poll_media_commands(window, cx);
                         // 单实例激活信号：显示并置前窗口。
                         if single_instance::poll_activation() {
@@ -615,6 +635,8 @@ impl NavidromeApp {
                         this.handle_playback_end();
                         this.maybe_preload_next();
                         this.maybe_scrobble_current();
+                        this.maybe_notify_track_started();
+                        this.sync_tray_paused();
                         let scrolling = this.lyrics_scroll_target.is_some();
                         this.update_active_lyric();
                         changed |= this.vinyl_cover.poll_ready();
@@ -1592,6 +1614,77 @@ impl NavidromeApp {
         self.lyrics_scroll_target = None;
     }
 
+    /// 切歌系统通知开关。
+    fn set_show_track_notifications(&mut self, show: bool, cx: &mut Context<Self>) {
+        self.config.show_track_notifications = show;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Notification setting save failed: {error:#}"));
+        }
+        cx.notify();
+    }
+
+    /// 关闭按钮最小化开关。
+    fn set_close_minimizes(&mut self, minimize: bool, cx: &mut Context<Self>) {
+        self.config.close_minimizes = minimize;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Close behavior save failed: {error:#}"));
+        }
+        cx.notify();
+    }
+
+    /// 标题栏 X 按钮（Linux CSD）的关闭处理：按设置最小化或退出。
+    /// on_close_window 仅 Linux 生效，其他平台维持默认行为。
+    fn close_button_handler(
+        cx: &Context<Self>,
+    ) -> impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static {
+        let app = cx.entity();
+        move |_, window, cx| {
+            app.update(cx, |this, _| {
+                if this.config.close_minimizes {
+                    window.minimize_window();
+                } else {
+                    window.remove_window();
+                }
+            });
+        }
+    }
+
+    /// 切歌系统通知：正在播放曲目变化且音频已接通时发送一次。
+    /// 音频未接通（切换瞬间）时先不记录，等下一次轮询再发。
+    fn maybe_notify_track_started(&mut self) {
+        if !self.config.show_track_notifications {
+            return;
+        }
+        let Some(song) = self.state.now_playing.clone() else {
+            self.last_notified_track = None;
+            return;
+        };
+        if self.last_notified_track.as_deref() == Some(song.id.as_str()) {
+            return;
+        }
+        if !self.audio.state().active {
+            return;
+        }
+        self.last_notified_track = Some(song.id.clone());
+        let cover = song.cover_art.as_deref().map(|id| {
+            config::cover_cache_dir(&self.config).join(config::cover_cache_file_name(id))
+        });
+        self.track_notifier.track_changed(
+            &song.title,
+            &notify::notification_body(&song.artist, &song.album),
+            cover.as_deref(),
+        );
+    }
+
+    /// 播放/暂停状态变化时同步托盘菜单文案（Play/Pause）。
+    fn sync_tray_paused(&mut self) {
+        let paused = self.audio.state().paused;
+        if self.last_tray_paused != Some(paused) {
+            self.last_tray_paused = Some(paused);
+            tray::set_tray_paused(paused);
+        }
+    }
+
     fn save_settings(&mut self, cx: &Context<Self>) {
         let new_config = Config {
             server_url: self.server_input.read(cx).value().trim().to_string(),
@@ -1609,6 +1702,8 @@ impl NavidromeApp {
             sidebar_collapsed: self.config.sidebar_collapsed,
             albums_sort: self.config.albums_sort,
             artists_sort: self.config.artists_sort,
+            show_track_notifications: self.config.show_track_notifications,
+            close_minimizes: self.config.close_minimizes,
         };
         self.config = new_config;
         if let Err(error) = config::save(&self.config) {
@@ -2208,6 +2303,7 @@ impl Render for NavidromeApp {
                 .text_color(cx.theme().foreground)
                 .child(
                     TitleBar::new()
+                        .on_close_window(Self::close_button_handler(cx))
                         .bg(linear_gradient(
                             90.0,
                             linear_color_stop(titlebar_start, 0.0),
@@ -2287,59 +2383,62 @@ impl Render for NavidromeApp {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                TitleBar::new().child(
-                    h_flex()
-                        .h_full()
-                        .w_full()
-                        .items_center()
-                        .justify_between()
-                        .pr_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Navidrome Client"),
-                        )
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap_1()
-                                // On Windows the title bar is a window drag area
-                                // (`WindowControlArea::Drag`). Without this the drag
-                                // area swallows the clicks on the buttons below it.
-                                .occlude()
-                                .child(
-                                    Button::new("toggle-mini-player")
-                                        .icon(AppIcon::MiniPlayer)
-                                        .tooltip(if self.mini_mode {
-                                            "Exit mini player"
-                                        } else {
-                                            "Switch to mini player"
-                                        })
-                                        .ghost()
-                                        .small()
-                                        .selected(self.mini_mode)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.toggle_mini_mode(window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new("title-settings")
-                                        .icon(AppIcon::Settings)
-                                        .tooltip("Settings")
-                                        .ghost()
-                                        .small()
-                                        .selected(self.state.settings_open)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.state.settings_open = !this.state.settings_open;
-                                            if this.state.settings_open {
-                                                this.refresh_output_devices(cx);
-                                            }
-                                            cx.notify();
-                                        })),
-                                ),
-                        ),
-                ),
+                TitleBar::new()
+                    .on_close_window(Self::close_button_handler(cx))
+                    .child(
+                        h_flex()
+                            .h_full()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .pr_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Navidrome Client"),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_1()
+                                    // On Windows the title bar is a window drag area
+                                    // (`WindowControlArea::Drag`). Without this the drag
+                                    // area swallows the clicks on the buttons below it.
+                                    .occlude()
+                                    .child(
+                                        Button::new("toggle-mini-player")
+                                            .icon(AppIcon::MiniPlayer)
+                                            .tooltip(if self.mini_mode {
+                                                "Exit mini player"
+                                            } else {
+                                                "Switch to mini player"
+                                            })
+                                            .ghost()
+                                            .small()
+                                            .selected(self.mini_mode)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.toggle_mini_mode(window, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("title-settings")
+                                            .icon(AppIcon::Settings)
+                                            .tooltip("Settings")
+                                            .ghost()
+                                            .small()
+                                            .selected(self.state.settings_open)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.state.settings_open =
+                                                    !this.state.settings_open;
+                                                if this.state.settings_open {
+                                                    this.refresh_output_devices(cx);
+                                                }
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    ),
             )
             .child(
                 h_flex()
@@ -2460,9 +2559,6 @@ fn request_window_close(hwnd: isize) {
         PostMessageW(hwnd as windows_sys::Win32::Foundation::HWND, WM_CLOSE, 0, 0);
     }
 }
-
-#[cfg(not(target_os = "windows"))]
-fn request_window_close(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
 fn set_always_on_top(window: &mut Window, on: bool) {

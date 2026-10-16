@@ -8,6 +8,7 @@ mod config;
 mod media_session;
 mod models;
 mod msg;
+mod notify;
 mod playlist;
 mod single_instance;
 mod tray;

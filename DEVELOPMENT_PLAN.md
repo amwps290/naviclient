@@ -554,23 +554,40 @@ Gapless 使用统一采样率/声道的连续输出流，在同一次采样调�
 
 ## 15. 系统通知与托盘
 
-优先级：P3
+优先级：P2（2026-11 重排：Linux 桌面常驻体验的真实缺口；用户确认）
+
+技术选型（2026-11）：
+- 系统通知：Linux 走 notify-rust（D-Bus org.freedesktop.Notifications），
+  封面直接引用封面磁盘缓存路径；防堆积用"同一通知 ID 替换"语义。
+  Windows 通知（winrt 管线）暂缓，等真实 Windows 使用场景。
+- Linux 托盘：ksni（纯 Rust StatusNotifierItem over D-Bus）。
+  tray-icon 的 Linux 后端是 libappindicator（运行时 dlopen C 库 +
+  GTK 主循环），与非 GTK 的 gpui 架构拧巴，弃用；Windows 分支维持
+  tray-icon 不动。
+- 关闭最小化：gpui 的 Linux CSD 下 TitleBar::on_close_window 可拦截
+  X 按钮（该 API 仅 Linux 生效），开启设置后 X → minimize_window()。
+  注意 Wayland 协议没有最小化保证（compositor 可能忽略），故设置默认
+  关闭并在 README 说明。
 
 ### 实施任务
 
-- [ ] 切歌时显示系统通知
-- [ ] 通知显示封面、标题、艺术家和专辑
-- [ ] 通知节流，连续快速切歌不会堆积
-- [ ] 增加系统托盘图标
-- [ ] 托盘菜单提供播放、暂停、切歌和退出
-- [ ] 增加“关闭窗口时最小化到托盘”设置
-- [ ] 明确真正退出和隐藏窗口的区别
+- [x] 切歌时显示系统通知（正在播放曲目变化且音频已激活时触发）
+- [x] 通知显示封面（封面磁盘缓存路径）、标题、艺术家和专辑
+- [x] 通知节流：连续快速切歌用同一通知 ID 替换，不堆积
+- [x] 通知失败静默降级，不影响播放（验收既有原则）
+- [x] Linux 增加系统托盘图标（ksni，默认封面转 ARGB pixmap）
+- [x] 托盘菜单提供播放/暂停、上一首、下一首、显示窗口和退出
+- [x] 托盘命令复用现有 TrayCommand 通道与 50ms 轮询
+- [x] ShowWindow / Quit 在 Linux 用 gpui 平台 API（activate_window /
+      remove_window），Windows 维持 hwnd 路径
+- [x] 增加“切歌通知”设置（默认开）与“关闭按钮最小化”设置（默认关）
+- [x] 旧配置迁移：新字段带默认值
 
 ### 验收标准
 
-- [ ] 通知失败不会影响播放
-- [ ] 托盘状态与窗口播放器状态同步
-- [ ] 退出应用后托盘图标不会残留
+- [x] 通知失败不会影响播放
+- [x] 托盘状态与窗口播放器状态同步
+- [x] 退出应用后托盘图标不会残留
 
 ## 16. 睡眠定时器（冻结，2026-10-14）
 

@@ -512,6 +512,13 @@ pub struct Config {
     /// 艺术家列表排序方式。
     #[serde(default)]
     pub artists_sort: ArtistSort,
+    /// 切歌时是否发送系统通知（标题/艺人/专辑/封面）。
+    #[serde(default = "default_true")]
+    pub show_track_notifications: bool,
+    /// 窗口关闭按钮是否改为最小化（而非退出）。Linux Wayland 下部分
+    /// 合成器会忽略最小化请求，故默认关闭。
+    #[serde(default)]
+    pub close_minimizes: bool,
 }
 
 impl Default for Config {
@@ -532,6 +539,8 @@ impl Default for Config {
             equalizer: EqSettings::default(),
             albums_sort: AlbumSort::default(),
             artists_sort: ArtistSort::default(),
+            show_track_notifications: default_true(),
+            close_minimizes: false,
         }
     }
 }
@@ -595,6 +604,9 @@ mod tests {
         assert_eq!(config.transcoding_quality, TranscodingQuality::Original);
         assert_eq!(config.volume_normalization, VolumeNormalization::Track);
         assert!((config.volume - 0.7).abs() < f32::EPSILON);
+        // 新增的桌面行为字段带默认值，旧配置无需迁移即可加载。
+        assert!(config.show_track_notifications);
+        assert!(!config.close_minimizes);
     }
 
     #[test]

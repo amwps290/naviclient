@@ -107,6 +107,16 @@ JavaScript runtime.
   over the window adjusts volume and briefly flashes it on the progress line
 - Server settings persisted locally as JSON
 - Navidrome-synced favorites for artists, albums, and songs
+- Track-change desktop notifications on Linux (D-Bus) with the cached cover,
+  title, artist and album; rapid switching replaces the previous notification
+  instead of stacking, and failures are silently ignored
+- Linux system tray (StatusNotifierItem via ksni): left click toggles
+  playback, the menu offers play/pause, previous, next, show window and exit,
+  with the play/pause label synced to the player state; Windows keeps its
+  tray-icon implementation
+- Optional "close button minimizes" setting (off by default): the window X
+  button and platform close minimize instead of quitting, while tray Exit
+  still quits; some Wayland compositors ignore minimize requests
 - Light theme by default, with light, dark, and system-following appearance
   options; the light theme's secondary text (hints, subtitles, metadata) is
   darkened from neutral-500 to neutral-600 so small text stays readable on

@@ -402,7 +402,7 @@ impl NavidromeApp {
         });
     }
 
-    pub(super) fn poll_tray_commands(&mut self) -> bool {
+    pub(super) fn poll_tray_commands(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
         while let Ok(command) = self.tray_rx.try_recv() {
             changed = true;
@@ -411,15 +411,22 @@ impl NavidromeApp {
                 TrayCommand::Previous => self.skip(-1),
                 TrayCommand::Next => self.skip(1),
                 TrayCommand::ShowWindow => {
+                    // Windows 经 hwnd 还原置前；其他平台走 gpui 平台 API。
+                    #[cfg(target_os = "windows")]
                     if let Some(hwnd) = self.main_hwnd {
                         show_main_window(hwnd);
                     }
+                    #[cfg(not(target_os = "windows"))]
+                    window.activate_window();
                 }
                 TrayCommand::Quit => {
                     self.quitting.store(true, Ordering::Relaxed);
+                    #[cfg(target_os = "windows")]
                     if let Some(hwnd) = self.main_hwnd {
                         request_window_close(hwnd);
                     }
+                    #[cfg(not(target_os = "windows"))]
+                    window.remove_window();
                 }
             }
         }
