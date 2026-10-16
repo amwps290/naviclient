@@ -1576,12 +1576,7 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Server URL"),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .on_key_down(|_, _, cx| cx.stop_propagation())
-                            .child(Input::new(&self.server_input).w_full()),
-                    ),
+                    .child(Input::new(&self.server_input).w_full()),
             )
             .child(
                 v_flex()
@@ -1592,12 +1587,7 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Username"),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .on_key_down(|_, _, cx| cx.stop_propagation())
-                            .child(Input::new(&self.username_input).w_full()),
-                    ),
+                    .child(Input::new(&self.username_input).w_full()),
             )
             .child(
                 v_flex()
@@ -1608,12 +1598,7 @@ impl NavidromeApp {
                             .font_weight(FontWeight::MEDIUM)
                             .child("Password"),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .on_key_down(|_, _, cx| cx.stop_propagation())
-                            .child(Input::new(&self.password_input).w_full()),
-                    ),
+                    .child(Input::new(&self.password_input).w_full()),
             )
             .child(
                 h_flex().justify_end().gap_2().child(
@@ -2770,7 +2755,6 @@ impl NavidromeApp {
                             .child(
                                 div()
                                     .flex_1()
-                                    .on_key_down(|_, _, cx| cx.stop_propagation())
                                     .child(Input::new(&self.search_input).w_full()),
                             )
                             .child(

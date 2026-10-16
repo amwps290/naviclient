@@ -36,3 +36,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [profile.release]
 opt-level = 2
+
+[dev-dependencies]
+gpui-pre = { package = "gpui-pre", version = "0.3.8", features = ["test-support"] }

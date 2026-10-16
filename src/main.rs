@@ -11,6 +11,8 @@ mod msg;
 mod playlist;
 mod single_instance;
 mod tray;
+#[cfg(test)]
+mod ui_input_tests;
 mod vinyl;
 
 use std::fs::{self, File, OpenOptions};
