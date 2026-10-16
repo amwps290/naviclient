@@ -112,7 +112,8 @@ JavaScript runtime.
   instead of stacking, and failures are silently ignored
 - Linux system tray (StatusNotifierItem via ksni): left click toggles
   playback, the menu offers play/pause, previous, next, show window and exit,
-  with the play/pause label synced to the player state; Windows keeps its
+  with both the play/pause label and the icon (eighth note / pause bars on a
+  dusk-gradient badge) synced to the player state; Windows keeps its
   tray-icon implementation
 - Optional "close button minimizes" setting (off by default): the window X
   button and platform close minimize instead of quitting, while tray Exit

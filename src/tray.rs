@@ -80,28 +80,40 @@ mod linux {
     pub struct LinuxTray {
         tx: std::sync::mpsc::Sender<TrayCommand>,
         paused: bool,
-        icon: Vec<Icon>,
+        /// 播放/暂停双态图标（assets/gen_tray_icon.py 生成的圆形暮色
+        /// 徽章：播放 = 八分音符，暂停 = 双竖条），各预置多个尺寸供
+        /// SNI 宿主挑选，避免宿主用低质量缩放。
+        icon_playing: Vec<Icon>,
+        icon_paused: Vec<Icon>,
     }
 
     impl LinuxTray {
-        /// 应用同步播放/暂停状态（供托盘菜单文案使用）。
+        /// 应用同步播放/暂停状态（菜单文案与图标一起切换）。
         pub fn set_paused(&mut self, paused: bool) {
             self.paused = paused;
         }
 
-        /// 默认封面转 32x32 ARGB 托盘图标。
-        fn tray_icon() -> Vec<Icon> {
-            let bytes = include_bytes!("../assets/default-cover.png");
-            let image = image::load_from_memory(bytes)
+        /// PNG 母版（256px）高质量缩放到常见托盘尺寸并转 ARGB32。
+        fn tray_icon(png: &'static [u8]) -> Vec<Icon> {
+            let image = image::load_from_memory(png)
                 .expect("embedded tray icon must decode")
-                .resize(32, 32, image::imageops::FilterType::Triangle)
                 .to_rgba8();
-            let (width, height) = image.dimensions();
-            vec![Icon {
-                width: width as i32,
-                height: height as i32,
-                data: rgba_to_argb32(&image.into_raw()),
-            }]
+            [16, 22, 24, 32, 48]
+                .into_iter()
+                .map(|size| {
+                    let resized = image::imageops::resize(
+                        &image,
+                        size,
+                        size,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                    Icon {
+                        width: size as i32,
+                        height: size as i32,
+                        data: rgba_to_argb32(&resized),
+                    }
+                })
+                .collect()
         }
     }
 
@@ -115,7 +127,11 @@ mod linux {
         }
 
         fn icon_pixmap(&self) -> Vec<Icon> {
-            self.icon.clone()
+            if self.paused {
+                self.icon_paused.clone()
+            } else {
+                self.icon_playing.clone()
+            }
         }
 
         /// 左键点击托盘图标 = 播放/暂停，与常见播放器一致。
@@ -191,7 +207,8 @@ mod linux {
         let tray = LinuxTray {
             tx,
             paused: false,
-            icon: LinuxTray::tray_icon(),
+            icon_playing: LinuxTray::tray_icon(include_bytes!("../assets/tray-playing.png")),
+            icon_paused: LinuxTray::tray_icon(include_bytes!("../assets/tray-paused.png")),
         };
         // 无 SNI 宿主（如未装扩展的 GNOME）时 spawn 可能失败——托盘是
         // 纯增益，失败只记日志。
