@@ -100,6 +100,7 @@ impl OutputTrack {
         gain: f32,
         channels: ChannelCount,
         rate: SampleRate,
+        eq: crate::audio::eq::EqHandle,
     ) -> Self {
         let info = TrackInfo {
             duration: stream.duration,
@@ -109,12 +110,11 @@ impl OutputTrack {
             loudness: Arc::new(Mutex::new(None)),
         };
         let metered = LoudnessMeter::new(stream.source, info.loudness.clone());
+        // 均衡插在 ReplayGain 增益之后、输出归一化之前：
+        // 音轨原生采样率下滤波，且不影响响度测量。
+        let equalized = crate::audio::eq::Equalizer::new(metered.amplify(gain.clamp(0.1, 4.0)), eq);
         Self {
-            source: Box::new(normalize_for_output(
-                metered.amplify(gain.clamp(0.1, 4.0)),
-                channels,
-                rate,
-            )),
+            source: Box::new(normalize_for_output(equalized, channels, rate)),
             info,
         }
     }

@@ -19,11 +19,15 @@ use rodio::{
 };
 use url::Url;
 
+use crate::models::EqSettings;
+
 mod preload;
 use preload::{Preloader, StreamControl};
 mod gapless;
 pub use gapless::TrackTransition;
 use gapless::{ArmedTrack, AutoTrack, GaplessSource, OutputTrack, Transition};
+mod eq;
+use eq::{new_eq_handle, EqHandle};
 
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 const DECODED_CHUNK_FRAMES: usize = 4096;
@@ -93,6 +97,8 @@ enum Command {
     SetCacheDirectory(PathBuf),
     /// 切换输出设备；None 表示跟随系统默认。
     SetOutputDevice(Option<String>),
+    /// 更新均衡器设置。
+    SetEqualizer(EqSettings),
     Seek(Duration),
 }
 
@@ -219,6 +225,14 @@ impl AudioHandle {
         self.cancel_transition();
         if self.tx.send(Command::SetOutputDevice(name)).is_err() {
             log::error!("failed to switch output device: audio worker is unavailable");
+        }
+    }
+
+    /// 更新均衡器设置；音频线程内重算系数，正在播放的曲目在下一个
+    /// 版本检查点（约千帧）生效。
+    pub fn set_equalizer(&self, settings: EqSettings) {
+        if self.tx.send(Command::SetEqualizer(settings)).is_err() {
+            log::error!("failed to update equalizer: audio worker is unavailable");
         }
     }
 
@@ -391,6 +405,7 @@ fn run_worker(
         channels: output_channels,
         sample_rate: output_sample_rate,
         handoff: Arc::new(Mutex::new(None)),
+        eq: new_eq_handle(EqSettings::default()),
     };
     run_playback(rx, state, initial_cache_dir, client, output);
 }
@@ -516,6 +531,8 @@ struct AudioOutput {
     channels: ChannelCount,
     sample_rate: SampleRate,
     handoff: gapless::Slot,
+    /// 均衡器共享状态（设置 + 版本号）。
+    eq: EqHandle,
 }
 
 fn run_playback(
@@ -535,6 +552,7 @@ fn run_playback(
         channels: mut output_channels,
         sample_rate: mut output_sample_rate,
         handoff,
+        eq: eq_shared,
     } = output;
     let (preparation_tx, preparation_rx) = mpsc::channel::<PreparationResult>();
     let mut preloader = Preloader::new(client.clone())
@@ -816,6 +834,13 @@ fn run_playback(
                         }
                     }
                 }
+                Command::SetEqualizer(settings) => {
+                    // 共享状态 + 版本号：滤波器在下一个检查点重算系数。
+                    if let Ok(mut guard) = eq_shared.lock() {
+                        guard.settings = settings;
+                        guard.version = guard.version.wrapping_add(1);
+                    }
+                }
                 Command::Seek(position) => {
                     handoff.lock().unwrap().take();
                     next_request = None;
@@ -889,7 +914,13 @@ fn run_playback(
                     ready_output = Some((
                         prepared.kind,
                         prepared.start_position,
-                        OutputTrack::new(stream, current_gain, output_channels, output_sample_rate),
+                        OutputTrack::new(
+                            stream,
+                            current_gain,
+                            output_channels,
+                            output_sample_rate,
+                            eq_shared.clone(),
+                        ),
                     ));
                 }
                 Err(error) => {
@@ -988,8 +1019,13 @@ fn run_playback(
             if let Some((url, cache_key, gain, transition)) = next_request.as_ref() {
                 if transition.pending() {
                     if let Some(stream) = preloader.as_mut().and_then(Preloader::take_ready) {
-                        let track =
-                            OutputTrack::new(stream, *gain, output_channels, output_sample_rate);
+                        let track = OutputTrack::new(
+                            stream,
+                            *gain,
+                            output_channels,
+                            output_sample_rate,
+                            eq_shared.clone(),
+                        );
                         armed = Some(AutoTrack {
                             transition: transition.clone(),
                             url: url.clone(),

@@ -25,6 +25,7 @@ smol = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 url = "2"
 tray-icon = "0.24.2"
+biquad = "0.6.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5.19"

@@ -37,6 +37,7 @@ fn track(frames: usize, hz: u32, channels: u16, value: f32, gain: f32) -> Output
         gain,
         stereo(),
         rate(48_000),
+        crate::audio::eq::new_eq_handle(crate::models::EqSettings::default()),
     )
 }
 
@@ -254,6 +255,7 @@ impl Engine {
             channels: stereo(),
             sample_rate: rate(48_000),
             handoff: slot.clone(),
+            eq: crate::audio::eq::new_eq_handle(crate::models::EqSettings::default()),
         };
         let path = cache.0.clone();
         let worker = thread::spawn(move || run_playback(rx, state, path, client(), device));

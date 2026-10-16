@@ -1787,6 +1787,116 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
+                            .child("Equalizer"),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_4()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                div().text_xs().text_color(cx.theme().muted_foreground).child(
+                                    "10-band graphic equalizer (31 Hz to 16 kHz, ±12 dB). \
+                                    Changes take effect on the playing track within ~20 ms; \
+                                    adjustments are saved automatically.",
+                                ),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("eq-enabled-on")
+                                            .label("On")
+                                            .selected(self.config.equalizer.enabled)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.set_eq_enabled(true, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("eq-enabled-off")
+                                            .label("Off")
+                                            .selected(!self.config.equalizer.enabled)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.set_eq_enabled(false, cx);
+                                            })),
+                                    ),
+                            )
+                            .child(
+                                h_flex().gap_2().flex_wrap().children(
+                                    EqSettings::PRESETS.iter().map(|(name, gains)| {
+                                        let gains = *gains;
+                                        Button::new(SharedString::from(format!(
+                                            "eq-preset-{name}"
+                                        )))
+                                        .label(*name)
+                                        .selected(
+                                            self.config.equalizer.enabled
+                                                && self.config.equalizer.gains_db == gains,
+                                        )
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.apply_eq_preset(gains, window, cx);
+                                        }))
+                                    }),
+                                ),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_4()
+                                    .children(
+                                        self.eq_sliders
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(band, slider)| {
+                                                let center_hz = EqSettings::BANDS[band];
+                                                let label = if center_hz >= 1000.0 {
+                                                    format!("{}k", (center_hz / 1000.0) as u32)
+                                                } else {
+                                                    format!("{}", center_hz as u32)
+                                                };
+                                                v_flex()
+                                                    .items_center()
+                                                    .gap_1()
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(cx.theme().foreground)
+                                                            .child(format!(
+                                                                "{:+.0}",
+                                                                self.config
+                                                                    .equalizer
+                                                                    .gains_db[band]
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        Slider::new(slider)
+                                                            .vertical()
+                                                            .h(px(96.0))
+                                                            .bg(cx.theme().accent),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(
+                                                                cx.theme().muted_foreground
+                                                            )
+                                                            .child(label),
+                                                    )
+                                            }),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .child("Volume normalization"),
                     )
                     .child(

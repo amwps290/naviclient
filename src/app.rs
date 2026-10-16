@@ -41,9 +41,9 @@ use crate::audio::{format_playback, AudioHandle, PlaybackState, TrackTransition}
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
-    Album, AlbumSort, Artist, ArtistSort, Config, FavoriteKey, FavoriteKind, Favorites, Genre,
-    Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode, SearchResults, ServerInfo, Song,
-    ThemePreference, TranscodingQuality, VolumeNormalization,
+    Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
+    Genre, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode, SearchResults, ServerInfo,
+    Song, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::single_instance;
@@ -265,6 +265,10 @@ pub struct NavidromeApp {
     /// 迷你窗口滚轮调音量的闪光：进度线短暂显示音量，约 1 秒后恢复进度。
     mini_volume_flash: Option<std::time::Instant>,
     mini_volume_flash_generation: u64,
+    /// 均衡器 10 段滑杆状态（设置页）。
+    eq_sliders: Vec<Entity<SliderState>>,
+    /// 均衡器配置保存的防抖代次。
+    eq_save_generation: u64,
 }
 
 impl Drop for NavidromeApp {
@@ -285,6 +289,7 @@ impl NavidromeApp {
         let audio_cache_dir = config::audio_cache_dir(&config);
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
+        audio.set_equalizer(config.equalizer.clone());
         let default_cover = Arc::new(GpuiImage::from_bytes(
             GpuiImageFormat::Png,
             include_bytes!("../assets/default-cover.png").to_vec(),
@@ -325,6 +330,18 @@ impl NavidromeApp {
                 .default_value(config.volume * 100.0)
         });
         let initial_volume = config.volume;
+        let eq_sliders: Vec<Entity<SliderState>> = (0..EqSettings::BANDS.len())
+            .map(|band| {
+                let gain = config.equalizer.gains_db[band];
+                cx.new(move |_| {
+                    SliderState::new()
+                        .min(-12.0)
+                        .max(12.0)
+                        .step(1.0)
+                        .default_value(gain)
+                })
+            })
+            .collect();
 
         let mut app = Self {
             runtime,
@@ -379,6 +396,8 @@ impl NavidromeApp {
             mini_target_size: None,
             mini_volume_flash: None,
             mini_volume_flash_generation: 0,
+            eq_sliders,
+            eq_save_generation: 0,
         };
         app.state.loudness_cache = config::load_loudness();
         app.state.playback_modes = app.config.playback_modes;
@@ -493,6 +512,18 @@ impl NavidromeApp {
                 this.set_volume(*value / 100.0, cx);
             },
         ));
+        let eq_sliders = app.eq_sliders.clone();
+        for (band, slider) in eq_sliders.iter().enumerate() {
+            app._subscriptions.push(cx.subscribe(
+                slider,
+                move |this, _, event: &SliderEvent, cx| {
+                    let SliderEvent::Change(SliderValue::Single(value)) = event else {
+                        return;
+                    };
+                    this.set_eq_band(band, *value, cx);
+                },
+            ));
+        }
         app._subscriptions
             .push(cx.observe_window_appearance(window, |this, window, cx| {
                 if this.config.theme == ThemePreference::System {
@@ -1530,6 +1561,7 @@ impl NavidromeApp {
             playback_modes: self.config.playback_modes,
             show_lyrics_translation: self.config.show_lyrics_translation,
             output_device: self.config.output_device.clone(),
+            equalizer: self.config.equalizer.clone(),
             volume_normalization: self.config.volume_normalization,
             sidebar_collapsed: self.config.sidebar_collapsed,
             albums_sort: self.config.albums_sort,
@@ -1650,6 +1682,70 @@ impl NavidromeApp {
             let _ = tx.send(Msg::OutputDevices(result));
         });
         cx.notify();
+    }
+
+    /// 单段均衡增益变化（滑杆拖动）：更新配置、推送音频线程、防抖保存。
+    /// 任何拖动都会开启均衡器（与预设一致的心智模型）。
+    fn set_eq_band(&mut self, band: usize, gain_db: f32, cx: &mut Context<Self>) {
+        let Some(current) = self.config.equalizer.gains_db.get_mut(band) else {
+            return;
+        };
+        if (*current - gain_db).abs() < f32::EPSILON && self.config.equalizer.enabled {
+            return;
+        }
+        *current = gain_db;
+        self.config.equalizer.clamp_gains();
+        self.config.equalizer.enabled = true;
+        self.push_equalizer_to_audio();
+        self.schedule_eq_save(cx);
+        cx.notify();
+    }
+
+    /// 均衡器开关。
+    fn set_eq_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.config.equalizer.enabled == enabled {
+            return;
+        }
+        self.config.equalizer.enabled = enabled;
+        self.push_equalizer_to_audio();
+        self.schedule_eq_save(cx);
+        cx.notify();
+    }
+
+    /// 应用预设：同步配置、滑杆显示与音频线程，并开启均衡器。
+    fn apply_eq_preset(&mut self, gains: [f32; 10], window: &mut Window, cx: &mut Context<Self>) {
+        self.config.equalizer.gains_db = gains;
+        self.config.equalizer.enabled = true;
+        for (band, slider) in self.eq_sliders.iter().enumerate() {
+            slider.update(cx, |state, cx| state.set_value(gains[band], window, cx));
+        }
+        self.push_equalizer_to_audio();
+        self.schedule_eq_save(cx);
+        cx.notify();
+    }
+
+    fn push_equalizer_to_audio(&self) {
+        self.audio.set_equalizer(self.config.equalizer.clone());
+    }
+
+    /// 均衡器保存防抖（拖动滑杆时避免频繁写盘，500ms）。
+    fn schedule_eq_save(&mut self, cx: &mut Context<Self>) {
+        self.eq_save_generation = self.eq_save_generation.wrapping_add(1);
+        let generation = self.eq_save_generation;
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(500)).await;
+            this.update(cx, |this, cx| {
+                if this.eq_save_generation != generation {
+                    return;
+                }
+                if let Err(error) = config::save(&this.config) {
+                    this.notify_error(format!("Equalizer save failed: {error:#}"));
+                }
+                cx.notify();
+            })?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
     }
 
     /// 切换输出设备：持久化选择并通知音频线程；正在播放时

@@ -310,6 +310,64 @@ impl RepeatMode {
     }
 }
 
+/// 均衡器设置：10 段图形均衡（31.25 Hz…16 kHz），每段 -12..+12 dB；
+/// 关闭时音频直通。设置由音频工作线程在链路中应用（ReplayGain 增益
+/// 之后、输出归一化之前），不影响响度测量。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EqSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub gains_db: [f32; 10],
+}
+
+impl Default for EqSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gains_db: [0.0; 10],
+        }
+    }
+}
+
+impl EqSettings {
+    /// 10 段中心频率（Hz，1/3 十倍频程排列）。
+    pub const BANDS: [f32; 10] = [
+        31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+    ];
+
+    /// 内置预设：(名称, 10 段增益 dB)。
+    pub const PRESETS: [(&'static str, [f32; 10]); 8] = [
+        ("Flat", [0.0; 10]),
+        (
+            "Bass boost",
+            [7.0, 6.0, 4.5, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "Treble boost",
+            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.5, 5.0, 6.5],
+        ),
+        (
+            "Vocal",
+            [-2.0, -1.5, 0.0, 2.0, 4.0, 4.0, 3.0, 1.5, 0.0, -1.0],
+        ),
+        ("Rock", [5.0, 4.0, 3.0, 1.0, -0.5, -1.0, 0.5, 2.5, 3.5, 4.0]),
+        ("Pop", [-1.0, 0.5, 3.0, 4.0, 3.0, 0.5, -1.0, -1.0, 0.0, 1.0]),
+        ("Jazz", [4.0, 3.0, 1.0, 2.0, -1.0, -1.0, 0.0, 1.0, 2.5, 3.5]),
+        (
+            "Classical",
+            [4.0, 3.0, 2.0, 0.0, -1.0, -1.0, 0.0, 2.5, 3.5, 4.5],
+        ),
+    ];
+
+    /// 把可能越界的滑杆值夹回 [-12, 12] dB。
+    pub fn clamp_gains(&mut self) {
+        for gain in &mut self.gains_db {
+            *gain = gain.clamp(-12.0, 12.0);
+        }
+    }
+}
+
 /// 播放模式：随机开关与循环模式相互独立（与 MPRIS 及常见播放器的
 /// 二维模型一致）。旧版单枚举 [`PlaybackMode`] 仅用于配置/会话迁移。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -445,6 +503,9 @@ pub struct Config {
     /// 音频输出设备名；None 表示跟随系统默认设备。
     #[serde(default)]
     pub output_device: Option<String>,
+    /// 均衡器设置。
+    #[serde(default)]
+    pub equalizer: EqSettings,
     /// 专辑列表排序方式。
     #[serde(default)]
     pub albums_sort: AlbumSort,
@@ -468,6 +529,7 @@ impl Default for Config {
             sidebar_collapsed: false,
             show_lyrics_translation: default_true(),
             output_device: None,
+            equalizer: EqSettings::default(),
             albums_sort: AlbumSort::default(),
             artists_sort: ArtistSort::default(),
         }
