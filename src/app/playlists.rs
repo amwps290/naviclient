@@ -515,6 +515,28 @@ impl NavidromeApp {
                     cx.notify();
                 })),
         );
+        // 与行内可点击的艺术家/专辑名一致：菜单也提供导航入口，
+        // 缺少服务器 id（如整理过的杂项曲库）时禁用。
+        let song_for_artist = song.clone();
+        let artist_available = song.artist_id.as_deref().is_some_and(|id| !id.is_empty());
+        menu = menu.item(
+            PopupMenuItem::new("Go to artist")
+                .disabled(!artist_available)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_song_artist(&song_for_artist);
+                    cx.notify();
+                })),
+        );
+        let song_for_album = song.clone();
+        let album_available = song.album_id.as_deref().is_some_and(|id| !id.is_empty());
+        menu = menu.item(
+            PopupMenuItem::new("Go to album")
+                .disabled(!album_available)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_song_album(&song_for_album);
+                    cx.notify();
+                })),
+        );
         if let Some(playlist) = context.playlist {
             let disabled = self.playlist_ui.busy
                 || self.playlist_ui.detail_loading

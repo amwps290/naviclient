@@ -1222,6 +1222,9 @@ impl NavidromeApp {
             .rounded_lg()
             .overflow_hidden()
             .when(fill, |this| this.flex_1().min_h_0())
+            .when(self.multi_selection_count(scope) > 0, |this| {
+                this.child(self.render_multi_action_bar(scope, cx))
+            })
             .child(
                 h_flex()
                     .h(px(36.0))
@@ -1246,6 +1249,120 @@ impl NavidromeApp {
             )
             .child(list)
             .child(Scrollbar::vertical(&handle))
+            .into_any_element()
+    }
+
+    /// 多选操作条：显示所选数量与批量动作。收藏按钮按“是否全部
+    /// 已收藏”智能切换方向。所有动作复用单曲操作的批量版本。
+    pub(super) fn render_multi_action_bar(
+        &self,
+        scope: &'static str,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let songs = self.selected_songs(scope);
+        let all_favorited = songs.iter().all(|song| {
+            self.state
+                .favorite_ids
+                .contains(&FavoriteKey::new(FavoriteKind::Song, &song.id))
+        });
+        let favorite_icon = if all_favorited {
+            AppIcon::HeartFilled
+        } else {
+            AppIcon::Heart
+        };
+        let favorite_label = if all_favorited {
+            "Unfavorite selected"
+        } else {
+            "Favorite selected"
+        };
+        let add_disabled = self.playlist_ui.busy || self.api.is_none();
+        h_flex()
+            .h(px(44.0))
+            .flex_none()
+            .w_full()
+            .px_3()
+            .gap_2()
+            .items_center()
+            .bg(cx.theme().accent.opacity(0.16))
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("{} selected", songs.len())),
+            )
+            .child(div().flex_1())
+            .child(
+                Button::new(SharedString::from(format!("multi-play-{scope}")))
+                    .icon(PlayerIcon::Play)
+                    .tooltip("Play selected (Enter)")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.play_selected_songs(scope);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("multi-next-{scope}")))
+                    .icon(PlayerIcon::Next)
+                    .tooltip("Play selected next")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.selected_play_next(scope);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("multi-queue-{scope}")))
+                    .icon(AppIcon::Queue)
+                    .tooltip("Add selected to queue")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.selected_to_queue(scope);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("multi-playlist-{scope}")))
+                    .label("Add to playlist…")
+                    .disabled(add_disabled)
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let ids: Vec<String> = this
+                            .selected_songs(scope)
+                            .iter()
+                            .map(|song| song.id.clone())
+                            .collect();
+                        this.choose_playlist(ids, window, cx);
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("multi-favorite-{scope}")))
+                    .icon(favorite_icon)
+                    .tooltip(favorite_label)
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.favorite_selected(scope);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new(SharedString::from(format!("multi-clear-{scope}")))
+                    .icon(AppIcon::Close)
+                    .tooltip("Clear selection (Esc)")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.clear_song_multi();
+                        cx.notify();
+                    })),
+            )
             .into_any_element()
     }
 
@@ -1298,7 +1415,17 @@ impl NavidromeApp {
                 .is_some_and(|(selected_scope, selected_index)| {
                     selected_scope == scope && selected_index == index
                 });
-        let row = if keyboard_selected {
+        let multi_selected =
+            self.state
+                .song_list_multi
+                .as_ref()
+                .is_some_and(|(selected_scope, indices)| {
+                    *selected_scope == scope && indices.contains(&index)
+                });
+        // 高亮优先级：多选 > 键盘光标 > 正在播放。
+        let row = if multi_selected {
+            row.bg(cx.theme().accent.opacity(0.28))
+        } else if keyboard_selected {
             row.bg(cx.theme().accent.opacity(0.16))
         } else if current {
             row.bg(cx.theme().info.opacity(0.1))
@@ -1495,11 +1622,21 @@ impl NavidromeApp {
                         ),
                 ),
         )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            // 单击立即播放该歌曲
-            this.play_song_at_scope(scope, index);
-            cx.notify();
-        }))
+        .on_click(
+            cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
+                let modifiers = event.modifiers();
+                if modifiers.control && !modifiers.alt && !modifiers.platform {
+                    this.toggle_song_multi(scope, index);
+                } else if modifiers.shift && !modifiers.alt && !modifiers.platform {
+                    this.range_song_multi(scope, index);
+                } else {
+                    // 普通单击：退出多选并立即播放该歌曲
+                    this.clear_song_multi();
+                    this.play_song_at_scope(scope, index);
+                }
+                cx.notify();
+            }),
+        )
         .context_menu(move |menu, _, cx| {
             menu_app
                 .update(cx, |this, cx| {

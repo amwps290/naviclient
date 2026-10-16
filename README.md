@@ -76,6 +76,12 @@ JavaScript runtime.
   header, album cards, and the album detail header all navigate to the
   artist or album page on click, with a hover highlight to signal the link.
   Items without a server-provided artist/album id fall back to static text
+- Song lists support batch selection: Ctrl+click toggles rows, Shift+click
+  selects a range from the keyboard cursor, Ctrl+A selects all, Esc clears.
+  A floating action bar offers play / play-next / add-to-queue / add-to-
+  playlist / favorite (smart direction) for the whole selection, and Enter
+  plays it. Queue rows keep in-place semantics: batch play just jumps to the
+  first selected position instead of rebuilding the queue
 - Song actions are available from right-click and the “…” button in song lists,
   search results, playlists, and the queue
 - Linux MPRIS media session for desktop media controls: track metadata, local cover

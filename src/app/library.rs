@@ -255,6 +255,7 @@ impl NavidromeApp {
     }
 
     pub(super) fn open_artist(&mut self, artist: Artist) {
+        self.clear_song_multi();
         self.state.current_artist = Some(artist.clone());
         self.state.artist_albums.clear();
         self.state.view = View::ArtistDetail;
@@ -302,6 +303,7 @@ impl NavidromeApp {
     }
 
     pub(super) fn open_album(&mut self, album: Album) {
+        self.clear_song_multi();
         self.state.current_album = Some(album.clone());
         self.state.current_songs.clear();
         self.state.view = View::AlbumDetail;
@@ -361,6 +363,7 @@ impl NavidromeApp {
     }
 
     pub(super) fn submit_search(&mut self, cx: &Context<Self>) {
+        self.clear_song_multi();
         let query = self.search_input.read(cx).value().trim().to_string();
         if query.is_empty() {
             self.state.search_results = None;
@@ -687,6 +690,7 @@ impl NavidromeApp {
                 }
                 Msg::Favorites(result) => match result {
                     Ok(favorites) => {
+                        self.clear_song_multi();
                         let mut favorite_ids = HashSet::new();
                         favorite_ids.extend(
                             favorites

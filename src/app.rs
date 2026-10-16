@@ -144,6 +144,9 @@ struct AppState {
     settings_open: bool,
     /// 键盘导航选中的歌曲行：作用域 + 行号。
     song_list_selected: Option<(&'static str, usize)>,
+    /// 歌曲列表多选集合（scope + 行索引升序集合）。索引只在该 scope
+    /// 当前列表内有效；列表数据变化处负责清空（见 clear_song_multi）。
+    song_list_multi: Option<(&'static str, std::collections::BTreeSet<usize>)>,
     view_before_now_playing: View,
     playback_modes: PlayModes,
     shuffle_history: ShuffleHistory,
@@ -218,6 +221,7 @@ impl Default for AppState {
             status: "Not connected".to_string(),
             settings_open: false,
             song_list_selected: None,
+            song_list_multi: None,
             view_before_now_playing: View::Home,
             playback_modes: PlayModes::default(),
             shuffle_history: ShuffleHistory::default(),
@@ -1140,6 +1144,9 @@ impl NavidromeApp {
             Shortcut::SelectNext => {
                 self.move_song_selection(1, cx);
             }
+            Shortcut::SelectAll => {
+                self.select_all_songs(cx);
+            }
             Shortcut::PlaySelected => {
                 self.play_selected_song(cx);
             }
@@ -1186,7 +1193,10 @@ impl NavidromeApp {
                 cx.notify();
             }
             Shortcut::CloseOverlays => {
-                if self.state.settings_open {
+                if self.state.song_list_multi.is_some() {
+                    // 多选活跃时 Esc 只清空多选，不连带关闭页面/设置。
+                    self.clear_song_multi();
+                } else if self.state.settings_open {
                     self.state.settings_open = false;
                 } else if self.state.view == View::NowPlaying {
                     self.leave_now_playing();

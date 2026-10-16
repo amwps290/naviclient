@@ -6,10 +6,10 @@ use gpui_kit::hsla;
 
 use super::{
     accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
-    extract_cover_palette, format_file_size, loudness_gain_factor, match_shortcut,
-    normalize_volume, playback_technical_info, queue_index_after_move, queue_index_after_remove,
-    readable_accent, replay_gain_factor, restored_volume, seek_target, should_scrobble,
-    sort_album_songs, sort_artists, Shortcut, ShuffleHistory,
+    extract_cover_palette, format_file_size, history_index_after_insert, loudness_gain_factor,
+    match_shortcut, normalize_volume, playback_technical_info, queue_index_after_move,
+    queue_index_after_remove, readable_accent, replay_gain_factor, restored_volume, seek_target,
+    selection_range, should_scrobble, sort_album_songs, sort_artists, Shortcut, ShuffleHistory,
 };
 use crate::models::{
     Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
@@ -682,4 +682,60 @@ fn light_theme_hint_contrast_is_darkened_for_readability(cx: &mut gpui_kit::Test
             after
         );
     });
+}
+
+#[test]
+fn shortcut_mapping_selects_all_with_ctrl_a_only() {
+    let ctrl = Modifiers {
+        control: true,
+        ..Modifiers::default()
+    };
+    let none = Modifiers::default();
+    assert_eq!(match_shortcut("a", ctrl), Shortcut::SelectAll);
+    // 无修饰或 Shift 组合不触发全选。
+    assert_eq!(match_shortcut("a", none), Shortcut::None);
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    assert_eq!(match_shortcut("a", shift), Shortcut::None);
+    // 既有 Ctrl 快捷键不受影响。
+    assert_eq!(match_shortcut("f", ctrl), Shortcut::FocusSearch);
+}
+
+#[test]
+fn selection_range_covers_anchor_to_clicked_in_order() {
+    // 正向
+    assert_eq!(
+        selection_range(2, 5),
+        [2, 3, 4, 5]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+    // 反向（点击行在锚点之前）
+    assert_eq!(
+        selection_range(7, 3),
+        [3, 4, 5, 6, 7]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+    // 同一行
+    assert_eq!(
+        selection_range(4, 4),
+        [4].into_iter().collect::<std::collections::BTreeSet<_>>()
+    );
+}
+
+#[test]
+fn history_index_shifts_only_from_insert_point() {
+    assert_eq!(history_index_after_insert(0, 3, 2), 0);
+    assert_eq!(history_index_after_insert(1, 3, 2), 1);
+    // 插入点及之后平移 count
+    assert_eq!(history_index_after_insert(3, 3, 2), 5);
+    assert_eq!(history_index_after_insert(9, 3, 2), 11);
+    // 与逐首插入（count=1）的既有语义一致
+    for index in [0, 3, 5, 9] {
+        let single = if index >= 3 { index + 1 } else { index };
+        assert_eq!(history_index_after_insert(index, 3, 1), single);
+    }
 }

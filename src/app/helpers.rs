@@ -343,6 +343,7 @@ pub(super) enum Shortcut {
     SelectPrevious,
     SelectNext,
     PlaySelected,
+    SelectAll,
     None,
 }
 
@@ -353,6 +354,7 @@ pub(super) fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
             "f" => return Shortcut::FocusSearch,
             "left" => return Shortcut::Previous,
             "right" => return Shortcut::Next,
+            "a" => return Shortcut::SelectAll,
             _ => {}
         }
     }
@@ -379,6 +381,25 @@ pub(super) fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
         "enter" => Shortcut::PlaySelected,
         "escape" => Shortcut::CloseOverlays,
         _ => Shortcut::None,
+    }
+}
+
+/// Shift+点击的范围选择集合（锚点到点击行的闭区间，升序）。
+pub(super) fn selection_range(anchor: usize, clicked: usize) -> std::collections::BTreeSet<usize> {
+    if anchor <= clicked {
+        (anchor..=clicked).collect()
+    } else {
+        (clicked..=anchor).collect()
+    }
+}
+
+/// 块插入后随机播放历史索引的平移：插入点及之后平移 count，之前的
+/// 保持不变。与逐首插入（count = 1）的语义一致。
+pub(super) fn history_index_after_insert(index: usize, insert_at: usize, count: usize) -> usize {
+    if index >= insert_at {
+        index + count
+    } else {
+        index
     }
 }
 
