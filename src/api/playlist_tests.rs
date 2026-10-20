@@ -72,6 +72,11 @@ impl Drop for Server {
 }
 
 fn respond(mut stream: TcpStream, state: &Mutex<State>) {
+    // The listener is non-blocking so the worker can poll, and Windows lets an
+    // accepted socket inherit that mode: read() would then fail with WouldBlock
+    // instead of waiting for the request body. Requests are handled one at a
+    // time, so switch the accepted stream back to blocking.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
