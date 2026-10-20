@@ -8,10 +8,11 @@ use super::{
     accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
     extract_cover_palette, format_file_size, history_index_after_insert, loudness_gain_factor,
     match_shortcut, normalize_volume, playback_technical_info, queue_index_after_move,
-    queue_index_after_remove, range_anchor, readable_accent, replay_gain_factor, restored_volume,
-    seek_target, selection_range, should_scrobble, sort_album_songs, sort_artists, Shortcut,
-    ShuffleHistory,
+    queue_index_after_remove, range_anchor, readable_accent, reconnect_decision,
+    replay_gain_factor, restored_volume, seek_target, selection_range, should_scrobble,
+    sort_album_songs, sort_artists, ReconnectDecision, Shortcut, ShuffleHistory,
 };
+use crate::audio::StreamFailure;
 use crate::models::{
     Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
 };
@@ -749,4 +750,54 @@ fn range_anchor_prefers_multi_anchor_then_cursor_then_fallback() {
     assert_eq!(range_anchor(None, Some(9), 2), 9);
     // 两者皆无（新开多选）：锚点即本次目标行。
     assert_eq!(range_anchor(None, None, 2), 2);
+}
+
+#[test]
+fn reconnect_only_retries_network_and_server_failures() {
+    // 解码失败、本地输出问题重试也不会变好，直接交给用户。
+    for kind in [
+        StreamFailure::Decode,
+        StreamFailure::Output,
+        StreamFailure::Http(404),
+        StreamFailure::Http(401),
+    ] {
+        assert!(matches!(
+            reconnect_decision(Some(kind), 0, 2),
+            ReconnectDecision::DoNotRetry
+        ));
+    }
+    // 没有分类信息时不猜，保持原有「直接报错」行为。
+    assert!(matches!(
+        reconnect_decision(None, 0, 2),
+        ReconnectDecision::DoNotRetry
+    ));
+    for kind in [
+        StreamFailure::Connect,
+        StreamFailure::Timeout,
+        StreamFailure::NoData,
+        StreamFailure::Truncated,
+        StreamFailure::Http(503),
+    ] {
+        assert!(matches!(
+            reconnect_decision(Some(kind), 0, 2),
+            ReconnectDecision::Retry { attempt: 1, .. }
+        ));
+    }
+}
+
+#[test]
+fn reconnect_backs_off_and_stops_after_the_limit() {
+    assert!(matches!(
+        reconnect_decision(Some(StreamFailure::Timeout), 0, 2),
+        ReconnectDecision::Retry { attempt: 1, delay } if delay == Duration::from_millis(1500)
+    ));
+    assert!(matches!(
+        reconnect_decision(Some(StreamFailure::Timeout), 1, 2),
+        ReconnectDecision::Retry { attempt: 2, delay } if delay == Duration::from_secs(4)
+    ));
+    // 次数用尽后必须停下来，否则会无限重连。
+    assert!(matches!(
+        reconnect_decision(Some(StreamFailure::Timeout), 2, 2),
+        ReconnectDecision::Exhausted
+    ));
 }

@@ -153,7 +153,10 @@ fn a_failed_current_stream_does_not_autoplay_the_prepared_track() {
     let slot = Slot::default();
     let next = arm(&slot, 1, track(100, 48_000, 2, -0.5, 1.0));
     let first = track(100, 48_000, 2, 0.25, 1.0);
-    *first.info.error.lock().unwrap() = Some("network truncated".into());
+    *first.info.error.lock().unwrap() = Some(FailureError::new(
+        StreamFailure::Truncated,
+        "network truncated",
+    ));
     let output = GaplessSource::new(first, slot, stereo(), rate(48_000));
     assert_eq!(output.count(), 200);
     assert!(next.event().is_none());

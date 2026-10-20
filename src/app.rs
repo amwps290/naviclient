@@ -37,7 +37,10 @@ use tokio::runtime::Runtime;
 
 use crate::api::{format_duration, Api};
 use crate::assets::{AppIcon, PlayerIcon};
-use crate::audio::{format_playback, AudioHandle, PlaybackState, TrackTransition};
+use crate::audio::{
+    format_playback, AudioHandle, PlaybackState, StreamFailure, TrackTransition,
+    PLAYBACK_RECONNECT_ATTEMPTS,
+};
 use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
@@ -91,6 +94,18 @@ pub(crate) struct SongListMulti {
     scope: &'static str,
     anchor: usize,
     indices: std::collections::BTreeSet<usize>,
+}
+
+/// 重连后需要前进这么多才认为真的恢复，避免刚发出 Play 就清零计数。
+const RECOVERY_CONFIRMATION: Duration = Duration::from_secs(5);
+
+/// 一次自动重连计划：到点后从 `position` 重新拉流。
+struct Reconnect {
+    at: std::time::Instant,
+    /// 已尝试次数（1 = 第一次重试）。
+    attempt: u8,
+    position: Duration,
+    song_id: String,
 }
 
 struct AppState {
@@ -299,6 +314,10 @@ pub struct NavidromeApp {
     last_shortcut_key: String,
     last_shortcut_at: std::time::Instant,
     resume_position: Option<Duration>,
+    /// 播放因网络/服务端问题中断后的自动重连计划。
+    reconnect: Option<Reconnect>,
+    /// 当前曲目已用掉的自动重连次数，以及断点位置；播放确实恢复前进后清零。
+    reconnect_attempts: Option<(String, u8, Duration)>,
     last_session_save: std::time::Instant,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
@@ -434,6 +453,8 @@ impl NavidromeApp {
             last_shortcut_key: String::new(),
             last_shortcut_at: std::time::Instant::now(),
             resume_position: None,
+            reconnect: None,
+            reconnect_attempts: None,
             last_session_save: std::time::Instant::now(),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
@@ -633,6 +654,7 @@ impl NavidromeApp {
                             );
                         }
                         this.handle_playback_end();
+                        this.poll_playback_reconnect();
                         this.maybe_preload_next();
                         this.maybe_scrobble_current();
                         this.maybe_notify_track_started();
@@ -713,6 +735,11 @@ impl NavidromeApp {
     fn notify_error(&mut self, message: impl Into<SharedString>) {
         self.pending_notifications
             .push((NotificationType::Error, message.into()));
+    }
+
+    fn notify_warning(&mut self, message: impl Into<SharedString>) {
+        self.pending_notifications
+            .push((NotificationType::Warning, message.into()));
     }
 
     fn load_lyrics(&mut self, song: &Song) {
@@ -1255,6 +1282,27 @@ impl NavidromeApp {
             }
             Shortcut::None => {}
         }
+    }
+
+    /// 手动重试当前由：从出错位置（有位置时）重新拉流，并重置自动重连计数。
+    pub(crate) fn retry_current_track(&mut self) {
+        let Some(index) = self.state.queue_index else {
+            return;
+        };
+        let playback = self.audio.state();
+        let position = if playback.error.is_some() {
+            self.resume_position.unwrap_or(playback.position)
+        } else {
+            playback.position
+        };
+        log::info!(
+            "manual playback retry requested; index={index} position_ms={}",
+            position.as_millis()
+        );
+        self.reconnect = None;
+        self.reconnect_attempts = None;
+        self.state.ended_handled = false;
+        self.play_queue_index_at(index, position);
     }
 
     pub fn toggle_playback(&mut self) {
@@ -1973,12 +2021,114 @@ impl NavidromeApp {
             self.cancel_next_preload();
             log::error!("playback error reported to UI: {error}");
             self.state.ended_handled = true;
+            if self.schedule_reconnect(playback.failure, playback.position) {
+                return;
+            }
             self.notify_error(error);
         } else if playback.ended {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
             self.cache_measured_loudness(playback.loudness_db, playback.loudness_peak);
             self.play_next(true);
+        }
+    }
+
+    /// 播放中断后安排一次自动重连。只有网络/服务端类失败才重试；
+    /// 解码、本地输出问题以及重试次数用尽时返回 false。
+    fn schedule_reconnect(
+        &mut self,
+        failure: Option<StreamFailure>,
+        position: Duration,
+    ) -> bool {
+        let Some(song) = self.state.now_playing.clone() else {
+            return false;
+        };
+        let Some(kind) = failure else {
+            return false;
+        };
+        let previous = self
+            .reconnect_attempts
+            .as_ref()
+            .filter(|(id, _, _)| id == &song.id)
+            .map_or(0, |(_, count, _)| *count);
+        let (attempt, delay) =
+            match reconnect_decision(failure, previous, PLAYBACK_RECONNECT_ATTEMPTS) {
+                ReconnectDecision::DoNotRetry => return false,
+                ReconnectDecision::Exhausted => {
+                    self.reconnect = None;
+                    self.reconnect_attempts = None;
+                    self.notify_error(format!(
+                        "{} — gave up after {PLAYBACK_RECONNECT_ATTEMPTS} retries. {}",
+                        kind.summary(),
+                        kind.cause()
+                    ));
+                    return true;
+                }
+                ReconnectDecision::Retry { attempt, delay } => (attempt, delay),
+            };
+        log::warn!(
+            "playback interrupted ({kind:?}); scheduling reconnect {attempt}/{PLAYBACK_RECONNECT_ATTEMPTS} in {}ms from {}ms",
+            delay.as_millis(),
+            position.as_millis()
+        );
+        self.notify_warning(format!(
+            "{} — reconnecting ({attempt}/{PLAYBACK_RECONNECT_ATTEMPTS})…",
+            kind.summary()
+        ));
+        self.reconnect_attempts = Some((song.id.clone(), attempt, position));
+        self.reconnect = Some(Reconnect {
+            at: std::time::Instant::now() + delay,
+            attempt,
+            position,
+            song_id: song.id,
+        });
+        true
+    }
+
+    /// 由 UI 循环调用：到点后从断点重新拉流，并在播放恢复正常后清零计数。
+    fn poll_playback_reconnect(&mut self) {
+        let playback = self.audio.state();
+        // 只有播放真的重新前进了一段（而不是刚发出 Play 就被当成成功）才清零
+        // 重试计数，否则连续失败会被无限重试。
+        if self.reconnect.is_none() && playback.error.is_none() {
+            let recovered = self.reconnect_attempts.as_ref().is_some_and(
+                |(id, _, failed_at)| {
+                    self.state.now_playing.as_ref().is_some_and(|song| &song.id == id)
+                        && playback.position > failed_at.saturating_add(RECOVERY_CONFIRMATION)
+                },
+            );
+            if recovered {
+                log::info!("playback recovered; clearing reconnect attempts");
+                self.reconnect_attempts = None;
+            }
+        }
+        let Some(plan) = self.reconnect.as_ref() else {
+            return;
+        };
+        if std::time::Instant::now() < plan.at {
+            return;
+        }
+        let Some(plan) = self.reconnect.take() else {
+            return;
+        };
+        // 用户已经切歌或停止时宁可不重连。
+        let still_current = self
+            .state
+            .now_playing
+            .as_ref()
+            .is_some_and(|song| song.id == plan.song_id);
+        if !still_current || self.api.is_none() {
+            self.reconnect_attempts = None;
+            return;
+        }
+        if let Some(index) = self.state.queue_index {
+            log::info!(
+                "reconnecting playback; attempt={} index={index} position_ms={}",
+                plan.attempt,
+                plan.position.as_millis()
+            );
+            self.play_queue_index_at(index, plan.position);
+            self.state.ended_handled = false;
         }
     }
 

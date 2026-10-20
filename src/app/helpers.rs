@@ -8,7 +8,7 @@ use gpui_kit::{
     hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Modifiers, Pixels,
 };
 
-use crate::audio::PlaybackState;
+use crate::audio::{PlaybackState, StreamFailure};
 use crate::models::{
     Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
 };
@@ -144,6 +144,37 @@ pub(super) struct NextPreload {
     pub(super) id: u64,
     pub(super) index: usize,
     pub(super) quality: TranscodingQuality,
+}
+
+/// 一次自动重连的决策结果。
+pub(super) enum ReconnectDecision {
+    /// 这类失败重试也无用（解码 / 本地输出 / 4xx）。
+    DoNotRetry,
+    /// 重试次数已用尽。
+    Exhausted,
+    /// 等 `delay` 后从断点重试，这是第 `attempt` 次。
+    Retry { attempt: u8, delay: Duration },
+}
+
+/// 根据之前的重试计数和失败类型决定下一步。纯函数，方便回归测试。
+pub(super) fn reconnect_decision(
+    failure: Option<StreamFailure>,
+    previous_attempts: u8,
+    max_attempts: u8,
+) -> ReconnectDecision {
+    if !failure.is_some_and(StreamFailure::is_retryable) {
+        return ReconnectDecision::DoNotRetry;
+    }
+    let attempt = previous_attempts.saturating_add(1);
+    if attempt > max_attempts {
+        return ReconnectDecision::Exhausted;
+    }
+    // 退避：第 1 次 1.5s，之后 4s；与失败类型无关，保持可预测。
+    let delay = match attempt {
+        1 => Duration::from_millis(1500),
+        _ => Duration::from_secs(4),
+    };
+    ReconnectDecision::Retry { attempt, delay }
 }
 
 pub(super) fn should_preload_next(playback: &PlaybackState) -> bool {

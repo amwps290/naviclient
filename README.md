@@ -15,6 +15,13 @@ JavaScript runtime.
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, seek, and queue
   progression
+- Stall detection and recovery: when audio stops arriving (bad Wi-Fi, overloaded
+  server, idle-timeout proxy) the player bar and mini player switch to a
+  "Buffering Ns" state instead of looking frozen, and playback resumes from the
+  interrupted position. Failures are classified as network, server, decode, or
+  local output problems so users can tell whose fault it is; network and 5xx
+  failures reconnect automatically twice with backoff before reporting an error,
+  and a Retry button re-opens the stream at the exact failure point on demand
 - Next-track preloading near the end of a fully buffered track. Prepares a
   bounded startup buffer, then sleeps until needed; supports shuffle and repeat,
   cancels stale queue/quality/seek requests, and falls back to ordinary playback.

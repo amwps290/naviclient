@@ -34,7 +34,11 @@ const DECODED_CHUNK_FRAMES: usize = 4096;
 const DECODED_BUFFER_CHUNKS: usize = 512;
 const STARTUP_BUFFER_CHUNKS: usize = 16;
 const STARTUP_BUFFER_TIMEOUT: Duration = Duration::from_secs(20);
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(20);
+/// 音频数据停止流入多久后在界面上显示「缓冲中」。
+const STALL_VISIBLE_AFTER: Duration = Duration::from_secs(3);
+/// 一条曲目在一次播放中最多自动重连几次（用尽后向用户报错）。
+pub(crate) const PLAYBACK_RECONNECT_ATTEMPTS: u8 = 2;
 const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(12);
 const OUTPUT_BUFFER_FRAMES: u32 = 4096;
 const HTTP_READ_RETRIES: usize = 3;
@@ -42,7 +46,164 @@ const TRANSCODE_END_RETRIES: usize = 1;
 const SEEK_DEBOUNCE: Duration = Duration::from_millis(180);
 const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-type SharedStreamError = Arc<Mutex<Option<String>>>;
+type SharedStreamError = Arc<Mutex<Option<FailureError>>>;
+
+/// 播放失败的结构化原因，用来在界面上区分「本地网络」「服务端」「解码」三类问题。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamFailure {
+    /// 无法建立连接：DNS 失败、拒绝连接、无路由。
+    Connect,
+    /// 连接已建立但迟迟没有响应，或读取中途超时。
+    Timeout,
+    /// 服务端返回了错误状态码。
+    Http(u16),
+    /// 连接还在，但长时间没有音频数据到达。
+    NoData,
+    /// 数据提前结束，通常是代理/转码截断了响应。
+    Truncated,
+    /// 下载到的内容无法解码。
+    Decode,
+    /// 本地音频输出设备问题。
+    Output,
+}
+
+impl StreamFailure {
+    /// 界面上的短标题。
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::Connect => "Cannot reach the server",
+            Self::Timeout => "Server is not responding",
+            Self::Http(_) => "Server returned an error",
+            Self::NoData => "Server stopped sending audio",
+            Self::Truncated => "Audio stream was cut off",
+            Self::Decode => "Cannot decode this track",
+            Self::Output => "Audio output failed",
+        }
+    }
+
+    /// 归因提示：帮助用户判断是网络还是服务端的问题。
+    pub fn cause(self) -> &'static str {
+        match self {
+            Self::Connect => {
+                "Networking: the server could not be reached. Check Wi-Fi/VPN and the server URL."
+            }
+            Self::Timeout => {
+                "Networking or server: the connection opened but the reply timed out."
+            }
+            Self::Http(status) if status >= 500 => {
+                "Server: the server reported an internal error. Retry later."
+            }
+            Self::Http(_) => "Server: the request was rejected by the server.",
+            Self::NoData => {
+                "Server: the connection is alive but no audio is arriving (transcoding or overloaded)."
+            }
+            Self::Truncated => {
+                "Networking or server: the stream ended early, usually a proxy or idle timeout."
+            }
+            Self::Decode => "Client: the received data is not decodable audio.",
+            Self::Output => "Local: the audio device failed; unrelated to the network.",
+        }
+    }
+
+    /// 是否可以自动重连。网络抖动、超时、服务端 5xx、流被截断都值得重试；
+    /// 解码失败与本地输出问题重试无意义。
+    pub fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            Self::Connect | Self::Timeout | Self::NoData | Self::Truncated
+        ) || matches!(self, Self::Http(status) if status >= 500 || status == 408 || status == 429)
+    }
+}
+
+/// 携带分类的播放错误；`Display` 只输出人类可读的细节，分类通过 downcast 取回。
+#[derive(Clone, Debug)]
+pub(crate) struct FailureError {
+    pub(crate) kind: StreamFailure,
+    pub(crate) detail: String,
+}
+
+impl FailureError {
+    fn new(kind: StreamFailure, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+        }
+    }
+
+    /// 完整的单行描述，形如「Server stopped sending audio: no data for 30s」。
+    pub(crate) fn message(&self) -> String {
+        format!("{}: {}", self.kind.summary(), self.detail)
+    }
+}
+
+impl std::fmt::Display for FailureError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for FailureError {}
+
+/// 把带分类的错误包成 `io::Error`，让 reader 的调用链不丢失原因。
+fn failure_io(kind: StreamFailure, detail: impl Into<String>) -> io::Error {
+    io::Error::other(FailureError::new(kind, detail))
+}
+
+fn classify_reqwest(error: &reqwest::Error) -> StreamFailure {
+    if let Some(status) = error.status() {
+        return StreamFailure::Http(status.as_u16());
+    }
+    if error.is_timeout() {
+        return StreamFailure::Timeout;
+    }
+    if error.is_connect() {
+        return StreamFailure::Connect;
+    }
+    if error.is_body() || error.is_decode() {
+        return StreamFailure::Truncated;
+    }
+    StreamFailure::Connect
+}
+
+fn classify_io(error: &io::Error) -> StreamFailure {
+    if let Some(failure) = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<FailureError>())
+    {
+        return failure.kind;
+    }
+    match error.kind() {
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => StreamFailure::Timeout,
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrNotAvailable => StreamFailure::Connect,
+        io::ErrorKind::UnexpectedEof => StreamFailure::Truncated,
+        _ => StreamFailure::Decode,
+    }
+}
+
+/// 从 anyhow 错误里尽可能还原分类。
+fn classify_anyhow(error: &anyhow::Error) -> StreamFailure {
+    if let Some(failure) = error.downcast_ref::<FailureError>() {
+        return failure.kind;
+    }
+    if let Some(io) = error.downcast_ref::<io::Error>() {
+        return classify_io(io);
+    }
+    if let Some(reqwest) = error.downcast_ref::<reqwest::Error>() {
+        return classify_reqwest(reqwest);
+    }
+    let text = format!("{error:#}").to_ascii_lowercase();
+    if text.contains("timed out") || text.contains("timeout") {
+        StreamFailure::Timeout
+    } else if text.contains("connect") || text.contains("dns") || text.contains("resolve") {
+        StreamFailure::Connect
+    } else {
+        StreamFailure::Decode
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlaybackState {
@@ -56,6 +217,10 @@ pub struct PlaybackState {
     pub transition_id: Option<u64>,
     pub duration: Option<Duration>,
     pub error: Option<String>,
+    /// 最近一次失败的结构化原因；与 `error` 同时出现。
+    pub failure: Option<StreamFailure>,
+    /// 播放中音频数据停止流入的时长；`None` 表示数据正常到达。
+    pub stall: Option<Duration>,
     /// Incremented after a seek completes, for system media-session notifications.
     pub seek_serial: u64,
     /// 当前歌曲已测响度（RMS，dB），未测时为 0.0。
@@ -569,7 +734,7 @@ fn run_playback(
     let mut stream_error: Option<SharedStreamError> = None;
     let mut buffer_progress: Option<Arc<BufferProgress>> = None;
     let mut decode_progress: Option<Arc<StreamControl>> = None;
-    let mut startup_error: Option<String> = None;
+    let mut startup_error: Option<FailureError> = None;
     let mut cache_dir = initial_cache_dir;
     if let Err(error) = prepare_cache_dir(&cache_dir) {
         log::warn!("audio cache is unavailable: {error:#}");
@@ -584,6 +749,8 @@ fn run_playback(
     let mut pending_commands = VecDeque::new();
     let mut preparation_generation = 0_u64;
     let mut preparing = false;
+    // 最近一次进入「准备播放」的时刻，用于在启动缓冲阶段显示等待时长。
+    let mut preparing_since: Option<Instant> = None;
     let mut desired_paused = false;
     let mut pending_preload = None;
     let mut next_request = None;
@@ -649,6 +816,7 @@ fn run_playback(
                     current_gain = gain.clamp(0.1, 4.0);
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
+                    preparing_since = Some(Instant::now());
                     desired_paused = false;
                     terminal_state_logged = false;
                     player.stop();
@@ -745,6 +913,7 @@ fn run_playback(
                     log::debug!("playback stop requested");
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = false;
+                    preparing_since = None;
                     desired_paused = false;
                     terminal_state_logged = true;
                     player.stop();
@@ -829,8 +998,10 @@ fn run_playback(
                         Err(error) => {
                             // 保留原输出继续播放；空闲时错误会经由启动错误显示。
                             log::warn!("failed to switch audio output to {target:?}: {error:#}");
-                            startup_error =
-                                Some(format!("Unable to switch audio output: {error:#}"));
+                            startup_error = Some(FailureError::new(
+                                StreamFailure::Output,
+                                format!("unable to switch audio output: {error:#}"),
+                            ));
                         }
                     }
                 }
@@ -866,6 +1037,7 @@ fn run_playback(
                     );
                     preparation_generation = preparation_generation.wrapping_add(1);
                     preparing = true;
+                    preparing_since = Some(Instant::now());
                     // clear()/stop() can pause the sink during preparation. Only
                     // explicit user commands determine the intended transport state.
                     terminal_state_logged = false;
@@ -926,19 +1098,18 @@ fn run_playback(
                 Err(error) => {
                     stream_error = None;
                     buffer_progress = None;
-                    let message = match prepared.kind {
-                        PreparationKind::Play => {
-                            format!("Unable to start playback: {error:#}")
-                        }
-                        PreparationKind::Seek => {
-                            format!("Unable to seek audio stream: {error:#}")
-                        }
+                    let kind = classify_anyhow(&error);
+                    let detail = match prepared.kind {
+                        PreparationKind::Play => format!("could not start playback: {error:#}"),
+                        PreparationKind::Seek => format!("could not seek: {error:#}"),
                     };
                     log::warn!(
                         "audio preparation failed; kind={:?}: {error:#}",
                         prepared.kind
                     );
-                    startup_error = Some(message.clone());
+                    let failure = FailureError::new(kind, detail);
+                    let message = failure.message();
+                    startup_error = Some(failure);
                     set_state(&state, |s| {
                         s.active = false;
                         s.ended = false;
@@ -950,6 +1121,7 @@ fn run_playback(
 
         if let Some((kind, start_position, track)) = ready_output {
             preparing = false;
+            preparing_since = None;
             duration = track.info.duration;
             stream_error = Some(track.info.error.clone());
             buffer_progress = Some(track.info.buffer.clone());
@@ -1057,6 +1229,8 @@ fn run_playback(
         } else {
             None
         };
+        let failure = error.as_ref().map(|failure| failure.kind);
+        let error = error.map(|failure| failure.message());
         // An idle sink after launch/Stop is not a track reaching its end. In
         // particular, restoring a queue must not automatically skip and play it.
         let ended = current_url.is_some() && empty && !preparing && error.is_none();
@@ -1072,6 +1246,21 @@ fn run_playback(
             .zip(buffer_progress.as_ref())
             .map(|(duration, progress)| progress.buffered_duration(duration))
             .unwrap_or_default();
+        // 数据不再到达时界面要能看出「在等网络」而不是「卡死」。只在确实
+        // 播放中、且本地缓冲已耗尽时才算停滞。
+        // 只按整秒对外暴露，避免界面因为毫秒级变化而整窗重绘。
+        let stall = if preparing {
+            // 启动缓冲：只要拉流迟迟没就绪就让界面显示等待时长，而不是一片寂静。
+            preparing_since
+                .map(|since| since.elapsed())
+                .filter(|elapsed| *elapsed >= STALL_VISIBLE_AFTER)
+        } else {
+            decode_progress.as_ref().and_then(|control| {
+                let idle = control.idle();
+                (!empty && !paused && idle >= STALL_VISIBLE_AFTER).then_some(idle)
+            })
+        }
+        .map(|elapsed| Duration::from_secs(elapsed.as_secs()));
         let (loudness_db, loudness_peak) = loudness_shared
             .lock()
             .ok()
@@ -1087,6 +1276,8 @@ fn run_playback(
             s.ended = ended;
             s.active = preparing || !empty;
             s.error = error;
+            s.failure = failure;
+            s.stall = stall;
             s.loudness_db = loudness_db;
             s.loudness_peak = loudness_peak;
         });
@@ -1266,7 +1457,7 @@ struct PreparedStream {
 enum StreamMessage {
     Samples(Vec<Sample>),
     End,
-    Error(String),
+    Error(FailureError),
 }
 
 struct BufferedStreamSource {
@@ -1278,7 +1469,7 @@ struct BufferedStreamSource {
     sample_rate: SampleRate,
     duration: Option<Duration>,
     producer_finished: bool,
-    terminal_error: Option<String>,
+    terminal_error: Option<FailureError>,
     shared_error: SharedStreamError,
     last_data: Instant,
     silence_remaining: usize,
@@ -1331,7 +1522,10 @@ impl BufferedStreamSource {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    terminal_error = Some("Audio decoder stopped unexpectedly".to_string());
+                    terminal_error = Some(FailureError::new(
+                        StreamFailure::Decode,
+                        "audio decoder stopped unexpectedly",
+                    ));
                     producer_finished = true;
                 }
             }
@@ -1346,7 +1540,13 @@ impl BufferedStreamSource {
                 "audio startup buffer timed out; timeout_ms={}",
                 STARTUP_BUFFER_TIMEOUT.as_millis()
             );
-            return Err(anyhow!("timed out while buffering the audio stream"));
+            return Err(anyhow!(FailureError::new(
+                StreamFailure::NoData,
+                format!(
+                    "no audio arrived within {}s while buffering",
+                    STARTUP_BUFFER_TIMEOUT.as_secs()
+                ),
+            )));
         }
         log::info!(
             "audio startup buffer ready; chunks={} target_chunks={} producer_finished={producer_finished}",
@@ -1380,9 +1580,9 @@ impl BufferedStreamSource {
         None
     }
 
-    fn fail(&mut self, error: impl Into<String>) -> Option<Sample> {
+    fn fail(&mut self, error: FailureError) -> Option<Sample> {
         self.producer_finished = true;
-        self.terminal_error = Some(error.into());
+        self.terminal_error = Some(error);
         self.finish()
     }
 }
@@ -1403,6 +1603,7 @@ impl Iterator for BufferedStreamSource {
             }
             if let Some(samples) = self.queued.pop_front() {
                 self.last_data = Instant::now();
+                self.control.mark_data();
                 self.current = samples.into_iter();
                 continue;
             }
@@ -1417,22 +1618,36 @@ impl Iterator for BufferedStreamSource {
             match self.receiver.try_recv() {
                 Ok(StreamMessage::Samples(samples)) => {
                     self.last_data = Instant::now();
+                    self.control.mark_data();
                     self.current = samples.into_iter();
                 }
                 Ok(StreamMessage::End) => self.producer_finished = true,
                 Ok(StreamMessage::Error(error)) => {
-                    self.terminal_error = Some(error);
+                    // 解码器在 I/O 失败时会静默结束；reader 记下的原因更接近真相。
+                    self.terminal_error = Some(self.control.take_io_error().unwrap_or(error));
                     self.producer_finished = true;
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     if self.last_data.elapsed() >= STREAM_STALL_TIMEOUT {
-                        return self.fail("Audio stream stalled for more than 30 seconds");
+                        let error = self.control.take_io_error().unwrap_or_else(|| {
+                            FailureError::new(
+                                StreamFailure::NoData,
+                                format!(
+                                    "no audio data for {}s while playback was running",
+                                    STREAM_STALL_TIMEOUT.as_secs()
+                                ),
+                            )
+                        });
+                        return self.fail(error);
                     }
                     self.silence_remaining = usize::from(self.channels.get()).saturating_sub(1);
                     return Some(0.0);
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    return self.fail("Audio decoder stopped unexpectedly");
+                    return self.fail(FailureError::new(
+                        StreamFailure::Decode,
+                        "audio decoder stopped unexpectedly",
+                    ));
                 }
             }
         }
@@ -1501,10 +1716,13 @@ fn decode_stream(
     );
     let message = if stream_ended_too_early(decoded_samples, channels, sample_rate, duration) {
         let decoded_duration = decoded_duration(decoded_samples, channels, sample_rate);
-        StreamMessage::Error(format!(
-            "Audio stream ended unexpectedly at {}, expected about {}",
-            format_playback(decoded_duration),
-            format_playback(duration.unwrap_or_default())
+        StreamMessage::Error(FailureError::new(
+            StreamFailure::Truncated,
+            format!(
+                "stream ended at {}, expected about {}",
+                format_playback(decoded_duration),
+                format_playback(duration.unwrap_or_default())
+            ),
         ))
     } else {
         StreamMessage::End
@@ -1792,8 +2010,8 @@ impl HttpRangeReader {
     fn reopen_at(&mut self, position: u64) -> io::Result<()> {
         self.control.check()?;
         if position != 0 && !self.range_supported {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
+            return Err(failure_io(
+                StreamFailure::Truncated,
                 "audio server does not support HTTP range requests",
             ));
         }
@@ -1802,10 +2020,15 @@ impl HttpRangeReader {
             "reopening audio HTTP stream; endpoint={} byte_position={position}",
             stream_endpoint(&self.url)
         );
-        let response = request_range(&self.client, &self.url, position).map_err(io_error)?;
+        let response = request_range(&self.client, &self.url, position).map_err(|error| {
+            let io = io_error(error);
+            self.control
+                .record_io_error(FailureError::new(classify_io(&io), io.to_string()));
+            io
+        })?;
         if position != 0 && response.status() != StatusCode::PARTIAL_CONTENT {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
+            return Err(failure_io(
+                StreamFailure::Truncated,
                 "audio server ignored the requested byte range",
             ));
         }
@@ -1928,7 +2151,7 @@ impl Read for HttpRangeReader {
             let result = self
                 .response
                 .as_mut()
-                .ok_or_else(|| io::Error::other("audio HTTP response is unavailable"))?
+                .ok_or_else(|| failure_io(StreamFailure::Connect, "audio HTTP response is unavailable"))?
                 .read(buffer);
             self.control.check()?;
             match result {
@@ -1938,10 +2161,19 @@ impl Read for HttpRangeReader {
                 }
                 Ok(0) if self.len.is_some_and(|len| self.position < len) => {
                     if !self.range_supported || attempt == HTTP_READ_RETRIES {
-                        return Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "audio stream ended before the advertised content length",
+                        let error = failure_io(
+                            StreamFailure::Truncated,
+                            format!(
+                                "stream ended at byte {} of {}",
+                                self.position,
+                                self.len.unwrap_or_default()
+                            ),
+                        );
+                        self.control.record_io_error(FailureError::new(
+                            StreamFailure::Truncated,
+                            error.to_string(),
                         ));
+                        return Err(error);
                     }
                     thread::sleep(Duration::from_millis(250 * (attempt as u64 + 1)));
                     self.reopen_at(self.position)?;
@@ -1958,6 +2190,13 @@ impl Read for HttpRangeReader {
                         return Ok(0);
                     }
                     if !self.range_supported || attempt == HTTP_READ_RETRIES {
+                        let kind = classify_io(&error);
+                        log::warn!(
+                            "audio stream read failed permanently; byte={} kind={kind:?}: {error}",
+                            self.position
+                        );
+                        self.control
+                            .record_io_error(FailureError::new(kind, error.to_string()));
                         return Err(error);
                     }
                     if self.near_estimated_end() {
@@ -2018,12 +2257,17 @@ impl Drop for HttpRangeReader {
     }
 }
 
-fn request_range(client: &Client, url: &str, position: u64) -> reqwest::Result<Response> {
+fn request_range(client: &Client, url: &str, position: u64) -> Result<Response> {
     let response = client
         .get(url)
         .header(RANGE, format!("bytes={position}-"))
         .send()
-        .map_err(reqwest::Error::without_url)?;
+        .map_err(|error| {
+            anyhow!(FailureError::new(
+                classify_reqwest(&error),
+                format!("requesting the audio stream failed: {error}")
+            ))
+        })?;
     log::debug!(
         "audio HTTP response; endpoint={} range_start={position} status={} content_length={:?} content_range={:?} content_type={:?}",
         stream_endpoint(url),
@@ -2038,9 +2282,14 @@ fn request_range(client: &Client, url: &str, position: u64) -> reqwest::Result<R
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
     );
-    response
-        .error_for_status()
-        .map_err(reqwest::Error::without_url)
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!(FailureError::new(
+            StreamFailure::Http(status.as_u16()),
+            format!("audio request returned HTTP {status}")
+        )));
+    }
+    Ok(response)
 }
 
 fn content_range_len(response: &Response) -> Option<u64> {
@@ -2082,8 +2331,11 @@ fn seek_target(current: u64, len: Option<u64>, from: SeekFrom) -> io::Result<u64
     Ok(target)
 }
 
-fn io_error(error: reqwest::Error) -> io::Error {
-    io::Error::other(error)
+fn io_error(error: anyhow::Error) -> io::Error {
+    match error.downcast::<FailureError>() {
+        Ok(failure) => failure_io(failure.kind, failure.detail),
+        Err(other) => io::Error::other(other),
+    }
 }
 
 fn set_state(state: &Arc<Mutex<PlaybackState>>, update: impl FnOnce(&mut PlaybackState)) {
@@ -2107,6 +2359,63 @@ pub fn format_playback(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_failures_are_retryable_but_decode_and_output_are_not() {
+        for kind in [
+            StreamFailure::Connect,
+            StreamFailure::Timeout,
+            StreamFailure::NoData,
+            StreamFailure::Truncated,
+            StreamFailure::Http(503),
+            StreamFailure::Http(429),
+        ] {
+            assert!(kind.is_retryable(), "{kind:?} should be retried");
+        }
+        for kind in [
+            StreamFailure::Decode,
+            StreamFailure::Output,
+            StreamFailure::Http(404),
+        ] {
+            assert!(!kind.is_retryable(), "{kind:?} should not be retried");
+        }
+    }
+
+    #[test]
+    fn failure_messages_keep_the_summary_and_the_detail() {
+        let failure = FailureError::new(StreamFailure::Http(502), "audio request returned HTTP 502");
+        assert_eq!(
+            failure.message(),
+            "Server returned an error: audio request returned HTTP 502"
+        );
+        // 归因提示要能把网络与服务端区分开，而不是只说「失败」。
+        assert!(StreamFailure::Connect.cause().starts_with("Networking"));
+        assert!(StreamFailure::Http(500).cause().starts_with("Server"));
+        assert!(StreamFailure::Output.cause().starts_with("Local"));
+    }
+
+    #[test]
+    fn io_errors_carry_their_classification_through_the_reader_chain() {
+        let wrapped = failure_io(StreamFailure::Truncated, "stream ended at byte 10 of 90");
+        assert_eq!(classify_io(&wrapped), StreamFailure::Truncated);
+        assert_eq!(classify_io(&io::Error::from(io::ErrorKind::TimedOut)), StreamFailure::Timeout);
+        assert_eq!(
+            classify_io(&io::Error::from(io::ErrorKind::ConnectionRefused)),
+            StreamFailure::Connect
+        );
+        assert_eq!(
+            classify_io(&io::Error::from(io::ErrorKind::UnexpectedEof)),
+            StreamFailure::Truncated
+        );
+    }
+
+    #[test]
+    fn anyhow_wrapping_preserves_the_failure_kind() {
+        let anyhow_error = anyhow!(FailureError::new(StreamFailure::NoData, "no audio"));
+        assert_eq!(classify_anyhow(&anyhow_error), StreamFailure::NoData);
+        let contexted = anyhow_error.context("failed to prepare stream");
+        assert_eq!(classify_anyhow(&contexted), StreamFailure::NoData);
+    }
 
     #[test]
     fn restoring_playback_sends_one_command_with_the_saved_position() {

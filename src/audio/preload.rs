@@ -1,6 +1,13 @@
 use super::*;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Condvar;
+
+/// 单调递增的毫秒时钟，用于在多个线程间比较「数据上次到达」的时间。
+fn now_ms() -> u64 {
+    static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let origin = ORIGIN.get_or_init(Instant::now);
+    u64::try_from(origin.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
 
 /// Shared by HTTP, the decoder and its consumer. A prepared decoder sleeps
 /// after its startup buffer; promotion wakes it without reopening the stream.
@@ -10,6 +17,10 @@ pub(super) struct StreamControl {
     wake: Condvar,
     pub(super) fully_decoded: AtomicBool,
     pub(super) speculative: bool,
+    /// 最近一次向播放器交付解码数据的时刻（`now_ms`），用于检测播放停滞。
+    last_data_ms: AtomicU64,
+    /// 读取链路上最后一次失败的原因；解码器吞掉 I/O 错误时靠它还原现场。
+    last_io_error: Mutex<Option<FailureError>>,
 }
 
 struct DecodeState {
@@ -37,7 +48,32 @@ impl StreamControl {
             wake: Condvar::new(),
             fully_decoded: AtomicBool::new(false),
             speculative,
+            last_data_ms: AtomicU64::new(now_ms()),
+            last_io_error: Mutex::new(None),
         })
+    }
+
+    /// 记录一次数据交付；播放器只要拿到数据，停滞计时就归零。
+    pub(super) fn mark_data(&self) {
+        self.last_data_ms.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// 数据已经停止流入多久。
+    pub(super) fn idle(&self) -> Duration {
+        Duration::from_millis(now_ms().saturating_sub(self.last_data_ms.load(Ordering::Relaxed)))
+    }
+
+    /// 供读取链路上报失败原因；保留第一次（通常最接近根因）。
+    pub(super) fn record_io_error(&self, error: FailureError) {
+        if let Ok(mut slot) = self.last_io_error.lock() {
+            if slot.is_none() {
+                *slot = Some(error);
+            }
+        }
+    }
+
+    pub(super) fn take_io_error(&self) -> Option<FailureError> {
+        self.last_io_error.lock().ok().and_then(|mut slot| slot.take())
     }
 
     pub(super) fn check(&self) -> io::Result<()> {
@@ -56,6 +92,9 @@ impl StreamControl {
 
     pub(super) fn promote(&self) {
         self.state.lock().unwrap().active = true;
+        // 预加载可能已经等了一会儿；从「开始播放」重新计时，避免刚 promot
+        // 就显示成停滞。
+        self.mark_data();
         self.wake.notify_all();
     }
 
