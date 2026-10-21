@@ -1789,11 +1789,17 @@ impl NavidromeApp {
                 .flatten(),
         })
     }
-    /// 服务器设置卡：上半部分是服务器列表（选择），下半部分是当前条目的
-    /// 编辑表单（改名 / 地址 / 账号）。两者分开是为了让“切到哪台”和
-    /// “改哪台”互不干扰——之前混在一起，改完一台再切换很容易改错对象。
+    /// 服务器设置卡：上半部分是服务器列表（选择/切换/删除），下半部分
+    /// 是当前条目的连接详情。两者分开是为了让“切到哪台”和“改哪台”
+    /// 互不干扰。已配置的条目默认只显示摘要行（编辑入口，断线时附重试）；
+    /// 表单只在用户主动点开编辑、或条目尚未配置（首次运行/刚新增）时展开，
+    /// 避免四个输入框和保存按钮在没有编辑意图时直接铺开。
     pub(super) fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let connected = self.state.server.is_some();
+        let active_configured = self
+            .config
+            .active_profile()
+            .is_some_and(|profile| profile.is_configured());
         let status = if self.state.loading {
             t!("Connecting…").to_string()
         } else if connected {
@@ -1806,17 +1812,25 @@ impl NavidromeApp {
                 .to_string(),
                 None => t!("Connected").to_string(),
             }
-        } else if self.config.servers.len() > 1 {
-            t!("Not connected — pick a server below").to_string()
-        } else {
+        } else if !active_configured {
+            // 未配置的条目表单直接展开，提示语指向表单。
             t!("Not connected — fill in the address and account").to_string()
+        } else if self.config.servers.len() > 1 {
+            // 列表就在状态行上方，措辞指向列表而不是方位。
+            t!("Not connected — pick a server in the list").to_string()
+        } else {
+            t!("Not connected").to_string()
         };
         let status_color = if connected {
             cx.theme().accent
         } else {
             cx.theme().muted_foreground
         };
-        let editing = self.active_server_label();
+        let editing_label = self.active_server_label();
+        // 表单只在两种情况下展开：用户点了「Edit connection」，或当前
+        // 条目还没有连接信息可展示（首次运行、刚新增）。已配置的服务器
+        // 默认只给一个编辑入口，避免四个输入框和保存按钮不请自来。
+        let form_open = self.state.server_editing || !active_configured;
         // 密码存储位置提示（里程碑 #17）：已迁入系统凭据库的条目不再
         // 往配置文件里写明文，用户需要在设置页能确认当前状态。
         let credential_note = if self
@@ -1856,51 +1870,144 @@ impl NavidromeApp {
             )
             // ---- 分隔线：明确“编辑区”只作用于上面选中的那台 ----
             .child(div().h(px(1.0)).bg(cx.theme().border))
-            // ---- 下：当前条目的编辑表单 ----
+            // ---- 下：已配置 = 摘要行（编辑入口 + 断线重试）；
+            //      未配置或点开编辑 = 连接表单 ----
+            .child(if form_open {
+                self.render_server_edit_form(active_configured, &editing_label, cx)
+            } else {
+                self.render_server_summary_row(connected, cx)
+            })
+            .into_any_element()
+    }
+
+    /// 已配置服务器的摘要态：不展示表单，只留一个编辑入口；
+    /// 断线时附一个重试按钮（重连不需要先改地址账号）。
+    fn render_server_summary_row(
+        &self,
+        connected: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        h_flex()
+            .w_full()
+            .items_center()
+            .gap_2()
+            // 与表单态同规格的内边距，分隔线上下视觉重量一致。
+            .p_4()
             .child(
-                v_flex()
-                    .w_full()
-                    .gap_3()
-                    .p_4()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Editing “%{editing}”", editing = editing)),
-                            )
-                            .when(self.config.servers.len() > 1, |this| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(t!("switch servers in the list above")),
-                                )
-                            }),
-                    )
-                    .child(self.render_server_field(t!("Display name"), &self.name_input, cx))
-                    .child(self.render_server_field(t!("Server URL"), &self.server_input, cx))
-                    .child(self.render_server_field(t!("Username"), &self.username_input, cx))
-                    .child(self.render_server_field(t!("Password"), &self.password_input, cx))
+                Button::new("edit-server-connection")
+                    .icon(KitIcon::Pencil)
+                    .label(t!("Edit connection"))
+                    .tooltip(t!(
+                        "Change the address, account, or display name of this server."
+                    ))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.server_editing = true;
+                        cx.notify();
+                    })),
+            )
+            .when(!connected, |row| {
+                row.child(
+                    Button::new("retry-server-connection")
+                        .label(t!("Retry"))
+                        .tooltip(t!("Reconnect to the selected server"))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.reconnect_active_server();
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// 连接表单：未配置条目（首次运行 / 刚新增）或用户主动点开编辑时
+    /// 展示。保存按钮的文案随改动内容变化：动了地址/账号/密码才是
+    /// “保存并连接”，只改显示名时就是普通“保存”。
+    fn render_server_edit_form(
+        &self,
+        cancelable: bool,
+        editing_label: &str,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let url = self.server_input.read(cx).value().trim().to_string();
+        let username = self.username_input.read(cx).value().trim().to_string();
+        let password = self.password_input.read(cx).value().to_string();
+        let identity_dirty = self
+            .config
+            .active_profile()
+            .map(|profile| {
+                profile.url.trim() != url
+                    || profile.username.trim() != username
+                    || profile.resolved_password() != password
+            })
+            .unwrap_or(true);
+        v_flex()
+            .w_full()
+            .gap_3()
+            .p_4()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.state.status.clone()),
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(if cancelable {
+                                t!("Editing “%{editing}”", editing = editing_label)
+                            } else {
+                                t!("Configure your Navidrome server")
+                            }),
                     )
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("save-settings")
-                                .label(t!("Save and connect"))
-                                .primary()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.save_settings(cx);
-                                    cx.notify();
+                    .when(self.config.servers.len() > 1, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("switch servers in the list above")),
+                        )
+                    }),
+            )
+            .child(self.render_server_field(t!("Display name"), &self.name_input, cx))
+            .child(self.render_server_field(t!("Server URL"), &self.server_input, cx))
+            .child(self.render_server_field(t!("Username"), &self.username_input, cx))
+            .child(self.render_server_field(t!("Password"), &self.password_input, cx))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.state.status.clone()),
+            )
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    // 未配置的条目没有可取消回去的东西，不给退路按钮。
+                    .when(cancelable, |row| {
+                        row.child(
+                            Button::new("cancel-server-edit")
+                                .label(t!("Cancel"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.cancel_server_edit(window, cx);
                                 })),
-                        ),
+                        )
+                    })
+                    .child(
+                        Button::new("save-settings")
+                            .label(if identity_dirty || !cancelable {
+                                // 未配置条目的保存意图就是建立连接。
+                                t!("Save and connect")
+                            } else {
+                                t!("Save")
+                            })
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_settings(cx);
+                                cx.notify();
+                            })),
                     ),
             )
             .into_any_element()

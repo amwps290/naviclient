@@ -170,6 +170,11 @@ struct AppState {
     requested_covers: HashSet<String>,
     status: String,
     settings_open: bool,
+    /// 设置页的服务器编辑表单是否展开。默认收起：已配置的服务器只
+    /// 显示「Edit connection」入口，避免编辑表单和保存按钮不请自来；
+    /// 未配置的条目（首次运行、刚新增）始终直接展示表单。
+    /// 保存或切换/删除服务器会经 reconnect 重置 state，表单随之收起。
+    server_editing: bool,
     /// 键盘导航选中的歌曲行：作用域 + 行号。
     song_list_selected: Option<(&'static str, usize)>,
     /// 歌曲列表多选集合。索引只在该 scope 当前列表内有效；列表数据
@@ -250,6 +255,7 @@ impl Default for AppState {
             requested_covers: HashSet::new(),
             status: t!("Not connected").to_string(),
             settings_open: false,
+            server_editing: false,
             song_list_selected: None,
             song_list_multi: None,
             song_info: None,
@@ -744,6 +750,11 @@ impl NavidromeApp {
     fn notify_warning(&mut self, message: impl Into<SharedString>) {
         self.pending_notifications
             .push((NotificationType::Warning, message.into()));
+    }
+
+    fn notify_success(&mut self, message: impl Into<SharedString>) {
+        self.pending_notifications
+            .push((NotificationType::Success, message.into()));
     }
 
     fn load_lyrics(&mut self, song: &Song) {
@@ -1958,6 +1969,8 @@ impl NavidromeApp {
         log::info!("added server entry; id={id}");
         self.reconnect_active_server();
         self.sync_server_inputs(window, cx);
+        // 新条目直接展开表单：新增的意图就是填写连接信息。
+        self.state.server_editing = true;
         self.state.status = t!("Enter the address and account for the new server").to_string();
     }
 
@@ -2087,6 +2100,18 @@ impl NavidromeApp {
         let username = self.username_input.read(cx).value().trim().to_string();
         let password = self.password_input.read(cx).value().to_string();
         let display_name = self.name_input.read(cx).value().trim().to_string();
+        // 地址/账号/密码任一变化才需要断开重连；只改显示名时正在播放的
+        // 音乐不应被打断。输入框在同步时回填的是解析后的密码，
+        // 因此未改动时两者相等，能可靠地识别“没改连接身份”。
+        let identity_changed = self
+            .config
+            .active_profile()
+            .map(|profile| {
+                profile.url.trim() != url
+                    || profile.username.trim() != username
+                    || profile.resolved_password() != password
+            })
+            .unwrap_or(true);
         // 写回当前服务器条目，而不是另外造一份配置：多服务器列表是唯一真源。
         let active_id = self.config.store_active(&url, &username, &password);
         if let Some(profile) = self
@@ -2130,7 +2155,28 @@ impl NavidromeApp {
             self.state.status =
                 t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
         }
-        self.reconnect_active_server();
+        // 未配置的条目（首次运行、刚新增还没填）不能走“仅保存”分支：
+        // 保存后仍连不上，重连会给出正确的引导文案并保持表单展开。
+        let still_unconfigured = self
+            .config
+            .active_profile()
+            .is_none_or(|profile| !profile.is_configured());
+        if identity_changed || still_unconfigured {
+            self.reconnect_active_server();
+        } else {
+            // 只改了显示名：保留当前连接与设置页，收起表单回到摘要态。
+            // “已保存”用 Toast：表单收起后状态行已不在可见区。
+            self.state.server_editing = false;
+            self.notify_success(t!("Saved"));
+        }
+    }
+
+    /// 放弃编辑：把四个输入框恢复为当前条目的已保存值并收起表单。
+    /// 未配置的条目没有可恢复的内容，调用方负责不显示取消按钮。
+    fn cancel_server_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.server_editing = false;
+        self.sync_server_inputs(window, cx);
+        cx.notify();
     }
 
     fn apply_cache_directory(&mut self, cache_dir: Option<PathBuf>) {
