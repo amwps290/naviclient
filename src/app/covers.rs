@@ -5,6 +5,18 @@ use super::*;
 impl NavidromeApp {
     pub(super) fn ensure_cover(&mut self, cover_id: Option<&str>, want_palette: bool) {
         let Some(id) = cover_id else { return };
+        // 已有可用数据就不请求：图像已在、或这次不需要调色板且调色板
+        // 也在（见 cover_request_needed）。这让网格预取过的封面在之后
+        // 播放时仍能补提调色板。
+        if !cover_request_needed(
+            self.state.covers.contains_key(id),
+            self.state.cover_palettes.contains_key(id),
+            want_palette,
+        ) {
+            return;
+        }
+        // requested_covers 表示“在途请求”，请求完成后由 Msg::Cover
+        // 处理移除；同一时刻对同一封面只保留一个请求。
         if !self.state.requested_covers.insert(id.to_string()) {
             return;
         }

@@ -838,11 +838,30 @@ impl NavidromeApp {
                 }
                 Msg::Cover { id, result } => {
                     if let Ok(decoded) = result {
+                        let decoded_ok = decoded.image.is_some() || decoded.palette.is_some();
                         if let Some(palette) = decoded.palette {
                             self.state.cover_palettes.insert(id.clone(), palette);
                         }
                         if let Some(image) = decoded.image {
-                            self.state.covers.insert(id, image);
+                            self.state.covers.insert(id.clone(), image);
+                        }
+                        // 只有真正解出了内容才解除在途标记；失败保持标记，
+                        // 避免坏封面在队列/网格渲染中每帧重试。
+                        if decoded_ok {
+                            self.state.requested_covers.remove(&id);
+                        }
+                        // 正在播放曲目的封面若被网格档（无调色板）抢先
+                        // 解码，立刻补提一次调色板——命中封面磁盘缓存，
+                        // 不再走网络。播放页与侧边栏胶囊的动态配色靠它。
+                        if decoded_ok && decoded.palette.is_none() {
+                            let current = self
+                                .state
+                                .now_playing
+                                .as_ref()
+                                .and_then(|song| song.cover_art.as_deref());
+                            if current == Some(id.as_str()) {
+                                self.ensure_cover(Some(&id), true);
+                            }
                         }
                     }
                 }

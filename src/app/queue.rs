@@ -327,7 +327,10 @@ impl NavidromeApp {
         let pending: Vec<String> = songs[first..last]
             .iter()
             .filter_map(|song| song.cover_art.clone())
-            .filter(|cover| !self.state.requested_covers.contains(cover))
+            .filter(|cover| {
+                !self.state.covers.contains_key(cover)
+                    && !self.state.requested_covers.contains(cover)
+            })
             .collect();
         if pending.is_empty() {
             return;

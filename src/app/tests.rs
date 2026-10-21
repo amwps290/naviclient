@@ -5,12 +5,12 @@ use std::time::Duration;
 use gpui_kit::hsla;
 
 use super::{
-    accent_foreground, advance_index, album_page_offset, contrast_ratio, effective_volume,
-    extract_cover_palette, format_file_size, history_index_after_insert, loudness_gain_factor,
-    match_shortcut, normalize_volume, playback_technical_info, queue_index_after_move,
-    queue_index_after_remove, range_anchor, readable_accent, reconnect_decision,
-    replay_gain_factor, restored_volume, seek_target, selection_range, should_scrobble,
-    sort_album_songs, sort_artists, ReconnectDecision, Shortcut, ShuffleHistory,
+    accent_foreground, advance_index, album_page_offset, contrast_ratio, cover_request_needed,
+    effective_volume, extract_cover_palette, format_file_size, history_index_after_insert,
+    loudness_gain_factor, match_shortcut, normalize_volume, playback_technical_info,
+    queue_index_after_move, queue_index_after_remove, range_anchor, readable_accent,
+    reconnect_decision, replay_gain_factor, restored_volume, seek_target, selection_range,
+    should_scrobble, sort_album_songs, sort_artists, ReconnectDecision, Shortcut, ShuffleHistory,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
@@ -800,4 +800,20 @@ fn reconnect_backs_off_and_stops_after_the_limit() {
         reconnect_decision(Some(StreamFailure::Timeout), 2, 2),
         ReconnectDecision::Exhausted
     ));
+}
+
+#[test]
+fn cover_request_needed_never_burns_an_id_against_a_palette_revisit() {
+    // 网格/队列预取：已有图像、不需要调色板 → 不请求。
+    assert!(!cover_request_needed(true, false, false));
+    assert!(!cover_request_needed(true, true, false));
+    // 预取过的封面在播放时必须能补提调色板（历史 bug：只增不减的
+    // 请求集合把 id 永久“烧掉”，播放页/侧边栏动态配色拿不到数据）。
+    assert!(cover_request_needed(true, false, true));
+    // 调色板已在 → 不重复请求。
+    assert!(!cover_request_needed(true, true, true));
+    // 图像还没有 → 总要请求。
+    assert!(cover_request_needed(false, false, false));
+    assert!(cover_request_needed(false, false, true));
+    assert!(cover_request_needed(false, true, false));
 }

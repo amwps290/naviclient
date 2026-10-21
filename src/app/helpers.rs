@@ -459,6 +459,24 @@ pub(super) fn seek_target(
 }
 
 /// 在后台线程解码封面：按需提取调色板并构造 GPUI 图片对象，避免阻塞 UI 线程。
+/// 封面是否需要发起请求：
+/// - 已有图像且这次不需要调色板 → 不需要（网格/队列预取的常规情形）；
+/// - 已有图像但调色板还没提取、这次又需要（播放该专辑）→ 需要（补提，
+///   走封面磁盘缓存，不重新走网络）；
+/// - 图像还没有 → 需要。
+///
+/// 调色板提取耗时明显，只有播放页/侧边栏配色等少数场景需要它；
+/// 网格与队列预取始终用 `want_palette = false`。关键约束：一次
+/// 无调色板的预取绝不能永久“烧掉”这个封面 id，否则该专辑永远
+/// 拿不到动态配色（历史上正是这只 bug：`requested_covers` 只增不减）。
+pub(super) fn cover_request_needed(
+    have_image: bool,
+    have_palette: bool,
+    want_palette: bool,
+) -> bool {
+    !(have_image && (!want_palette || have_palette))
+}
+
 pub(super) fn decode_cover(bytes: Vec<u8>, want_palette: bool) -> DecodedCover {
     let decode_start = std::time::Instant::now();
     let palette = if want_palette {
