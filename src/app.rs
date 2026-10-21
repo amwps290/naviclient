@@ -2614,6 +2614,131 @@ impl NavidromeApp {
         }
     }
 
+    /// 侧边栏顶部的服务器胶囊：单行全圆角胶囊（状态圆点 + 当前
+    /// 服务器名 + 下拉箭头），点击打开设置（切换/新增/删除都在
+    /// 那里）。折叠态只显示图标按钮。
+    fn render_sidebar_server(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let connected = self.state.server.is_some();
+        let label = self.active_server_label();
+        let status = if self.state.loading {
+            "Connecting…"
+        } else if connected {
+            "Connected"
+        } else {
+            "Offline"
+        };
+        let server_count = self.config.servers.len();
+        let tooltip = if server_count > 1 {
+            format!("{label} — {status}\n{server_count} servers configured · click to switch")
+        } else {
+            format!("{label} — {status}\nClick to manage servers")
+        };
+        let icon = if connected {
+            AppIcon::Server
+        } else {
+            AppIcon::ServerOff
+        };
+
+        if self.config.sidebar_collapsed {
+            return div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .py_1()
+                .child(
+                    Button::new("sidebar-server")
+                        .icon(icon)
+                        .tooltip(tooltip)
+                        .ghost()
+                        .selected(self.state.settings_open)
+                        .w_full()
+                        .h(px(32.0))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.state.settings_open = true;
+                            this.refresh_output_devices(cx);
+                            cx.notify();
+                        })),
+                )
+                .into_any_element();
+        }
+
+        // 已连接：整颗填充当前播放专辑的主色（与“正在播放”页播放按钮
+        // 完全同一套配色管线：now_playing_accent 从封面提取、无封面时
+        // 回退 theme().info——注意默认主题的 accent token 是灰，直接用
+        // 它只会得到灰色胶囊；文字用 accent_foreground 按对比度自动选
+        // 黑/白）。连接中/离线是瞬态，保持中性灰底 + 边框。
+        let (pill_bg, pill_hover_bg, pill_border, pill_fg, dot_color) = if connected {
+            let accent = self.now_playing_accent(cx);
+            let fg = accent_foreground(accent);
+            (
+                accent,
+                adjust_lightness(accent, 0.05),
+                hsla(0.0, 0.0, 0.0, 0.0),
+                fg,
+                fg,
+            )
+        } else if self.state.loading {
+            (
+                cx.theme().secondary,
+                cx.theme().accent.opacity(0.10),
+                cx.theme().border,
+                cx.theme().foreground,
+                cx.theme().accent.opacity(0.45),
+            )
+        } else {
+            (
+                cx.theme().secondary,
+                cx.theme().accent.opacity(0.10),
+                cx.theme().border,
+                cx.theme().foreground,
+                cx.theme().border,
+            )
+        };
+
+        // 胶囊包在整行居中的容器里：名字短时胶囊贴合内容（不像以前那样
+        // 撑满整行），长名在整行宽度内截断。
+        h_flex()
+            .w_full()
+            .justify_center()
+            .py_1()
+            .child(
+                h_flex()
+                    .id("sidebar-server")
+                    .max_w_full()
+                    .h(px(30.0))
+                    .items_center()
+                    .gap_2()
+                    .px_4()
+                    .rounded_full()
+                    .when(!connected, |this| this.border_1().border_color(pill_border))
+                    .bg(pill_bg)
+                    .cursor_pointer()
+                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                    .hover(move |style| style.bg(pill_hover_bg))
+                    .child(div().flex_none().size(px(6.0)).rounded_full().bg(dot_color))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(pill_fg)
+                            .truncate()
+                            .child(label),
+                    )
+                    .child(
+                        Icon::new(AppIcon::ChevronDown)
+                            .with_size(px(12.0))
+                            .text_color(pill_fg.opacity(0.85)),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_open = true;
+                        this.refresh_output_devices(cx);
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
     fn favorite_button(&self, kind: FavoriteKind, id: &str, cx: &Context<Self>) -> Button {
         let key = FavoriteKey::new(kind, id);
         let starred = self.state.favorite_ids.contains(&key);
