@@ -17,6 +17,7 @@ use rodio::{
     cpal::BufferSize, source::UniformSourceIterator, ChannelCount, Decoder, DeviceSinkBuilder,
     Player, Sample, SampleRate, Source,
 };
+use rust_i18n::t;
 use url::Url;
 
 use crate::models::EqSettings;
@@ -68,40 +69,35 @@ pub enum StreamFailure {
 }
 
 impl StreamFailure {
-    /// 界面上的短标题。
-    pub fn summary(self) -> &'static str {
+    /// 界面上的短标题（翻译键）。
+    pub fn summary(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Connect => "Cannot reach the server",
-            Self::Timeout => "Server is not responding",
-            Self::Http(_) => "Server returned an error",
-            Self::NoData => "Server stopped sending audio",
-            Self::Truncated => "Audio stream was cut off",
-            Self::Decode => "Cannot decode this track",
-            Self::Output => "Audio output failed",
+            Self::Connect => t!("Cannot reach the server"),
+            Self::Timeout => t!("Server is not responding"),
+            Self::Http(_) => t!("Server returned an error"),
+            Self::NoData => t!("Server stopped sending audio"),
+            Self::Truncated => t!("Audio stream was cut off"),
+            Self::Decode => t!("Cannot decode this track"),
+            Self::Output => t!("Audio output failed"),
         }
     }
 
-    /// 归因提示：帮助用户判断是网络还是服务端的问题。
-    pub fn cause(self) -> &'static str {
+    /// 归因提示：帮助用户判断是网络还是服务端的问题（翻译键）。
+    pub fn cause(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Connect => {
-                "Networking: the server could not be reached. Check Wi-Fi/VPN and the server URL."
-            }
-            Self::Timeout => {
-                "Networking or server: the connection opened but the reply timed out."
-            }
-            Self::Http(status) if status >= 500 => {
-                "Server: the server reported an internal error. Retry later."
-            }
-            Self::Http(_) => "Server: the request was rejected by the server.",
-            Self::NoData => {
-                "Server: the connection is alive but no audio is arriving (transcoding or overloaded)."
-            }
-            Self::Truncated => {
-                "Networking or server: the stream ended early, usually a proxy or idle timeout."
-            }
-            Self::Decode => "Client: the received data is not decodable audio.",
-            Self::Output => "Local: the audio device failed; unrelated to the network.",
+            Self::Connect => t!("Networking: the server could not be reached. Check Wi-Fi/VPN and the server URL."
+            ),
+            Self::Timeout => t!("Networking or server: the connection opened but the reply timed out."
+            ),
+            Self::Http(status) if status >= 500 => t!("Server: the server reported an internal error. Retry later."
+            ),
+            Self::Http(_) => t!("Server: the request was rejected by the server."),
+            Self::NoData => t!("Server: the connection is alive but no audio is arriving (transcoding or overloaded)."
+            ),
+            Self::Truncated => t!("Networking or server: the stream ended early, usually a proxy or idle timeout."
+            ),
+            Self::Decode => t!("Client: the received data is not decodable audio."),
+            Self::Output => t!("Local: the audio device failed; unrelated to the network."),
         }
     }
 
@@ -528,7 +524,13 @@ fn run_worker(
             set_state(&state, |s| {
                 s.active = false;
                 s.ended = false;
-                s.error = Some(format!("Failed to open the audio output device: {error:#}"));
+                s.error = Some(
+                    t!(
+                        "Failed to open the audio output device: %{error}",
+                        error = format!("{error:#}")
+                    )
+                    .to_string(),
+                );
             });
             return;
         }
@@ -552,7 +554,13 @@ fn run_worker(
             set_state(&state, |s| {
                 s.active = false;
                 s.ended = false;
-                s.error = Some(format!("Failed to create the audio HTTP client: {error}"));
+                s.error = Some(
+                    t!(
+                        "Failed to create the audio HTTP client: %{error}",
+                        error = error
+                    )
+                    .to_string(),
+                );
             });
             return;
         }
@@ -1000,7 +1008,11 @@ fn run_playback(
                             log::warn!("failed to switch audio output to {target:?}: {error:#}");
                             startup_error = Some(FailureError::new(
                                 StreamFailure::Output,
-                                format!("unable to switch audio output: {error:#}"),
+                                t!(
+                                    "unable to switch audio output: %{error}",
+                                    error = format!("{error:#}")
+                                )
+                                .to_string(),
                             ));
                         }
                     }
@@ -1100,8 +1112,14 @@ fn run_playback(
                     buffer_progress = None;
                     let kind = classify_anyhow(&error);
                     let detail = match prepared.kind {
-                        PreparationKind::Play => format!("could not start playback: {error:#}"),
-                        PreparationKind::Seek => format!("could not seek: {error:#}"),
+                        PreparationKind::Play => t!(
+                            "could not start playback: %{error}",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                        PreparationKind::Seek => {
+                            t!("could not seek: %{error}", error = format!("{error:#}")).to_string()
+                        }
                     };
                     log::warn!(
                         "audio preparation failed; kind={:?}: {error:#}",
@@ -1542,10 +1560,11 @@ impl BufferedStreamSource {
             );
             return Err(anyhow!(FailureError::new(
                 StreamFailure::NoData,
-                format!(
-                    "no audio arrived within {}s while buffering",
-                    STARTUP_BUFFER_TIMEOUT.as_secs()
-                ),
+                t!(
+                    "no audio arrived within %{seconds}s while buffering",
+                    seconds = STARTUP_BUFFER_TIMEOUT.as_secs()
+                )
+                .to_string(),
             )));
         }
         log::info!(
@@ -1632,10 +1651,11 @@ impl Iterator for BufferedStreamSource {
                         let error = self.control.take_io_error().unwrap_or_else(|| {
                             FailureError::new(
                                 StreamFailure::NoData,
-                                format!(
-                                    "no audio data for {}s while playback was running",
-                                    STREAM_STALL_TIMEOUT.as_secs()
-                                ),
+                                t!(
+                                    "no audio data for %{seconds}s while playback was running",
+                                    seconds = STREAM_STALL_TIMEOUT.as_secs()
+                                )
+                                .to_string(),
                             )
                         });
                         return self.fail(error);
@@ -1718,11 +1738,12 @@ fn decode_stream(
         let decoded_duration = decoded_duration(decoded_samples, channels, sample_rate);
         StreamMessage::Error(FailureError::new(
             StreamFailure::Truncated,
-            format!(
-                "stream ended at {}, expected about {}",
-                format_playback(decoded_duration),
-                format_playback(duration.unwrap_or_default())
-            ),
+            t!(
+                "stream ended at %{actual}, expected about %{expected}",
+                actual = format_playback(decoded_duration),
+                expected = format_playback(duration.unwrap_or_default())
+            )
+            .to_string(),
         ))
     } else {
         StreamMessage::End
@@ -2267,7 +2288,10 @@ fn request_range(client: &Client, url: &str, position: u64) -> Result<Response> 
         .map_err(|error| {
             anyhow!(FailureError::new(
                 classify_reqwest(&error),
-                format!("requesting the audio stream failed: {error}")
+                t!(
+                    "requesting the audio stream failed: %{error}",
+                    error = error
+                )
             ))
         })?;
     log::debug!(
@@ -2288,7 +2312,7 @@ fn request_range(client: &Client, url: &str, position: u64) -> Result<Response> 
     if !status.is_success() {
         return Err(anyhow!(FailureError::new(
             StreamFailure::Http(status.as_u16()),
-            format!("audio request returned HTTP {status}")
+            t!("audio request returned HTTP %{status}", status = status)
         )));
     }
     // stream 端点正常必须返回音频二进制；HTTP 200 却给出 JSON/text
@@ -2316,7 +2340,10 @@ fn request_range(client: &Client, url: &str, position: u64) -> Result<Response> 
         );
         return Err(anyhow!(FailureError::new(
             StreamFailure::Http(status.as_u16()),
-            format!("server refused the stream request: {detail}"),
+            t!(
+                "server refused the stream request: %{detail}",
+                detail = detail
+            ),
         )));
     }
     Ok(response)
@@ -2344,7 +2371,7 @@ fn subsonic_error_detail(body: &str) -> String {
     let trimmed = body.trim();
     let raw = || {
         if trimmed.is_empty() {
-            "the server returned an empty response".to_string()
+            t!("the server returned an empty response").to_string()
         } else {
             let prefix: String = trimmed.chars().take(200).collect();
             if prefix.chars().count() < trimmed.chars().count() {
@@ -2370,8 +2397,13 @@ fn subsonic_error_detail(body: &str) -> String {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     match (code, message.is_empty()) {
-        (Some(code), false) => format!("{message} (Subsonic error {code})"),
-        (Some(code), true) => format!("Subsonic error {code}"),
+        (Some(code), false) => t!(
+            "%{message} (Subsonic error %{code})",
+            message = message,
+            code = code
+        )
+        .to_string(),
+        (Some(code), true) => t!("Subsonic error %{code}", code = code).to_string(),
         (None, false) => message.to_string(),
         (None, true) => raw(),
     }

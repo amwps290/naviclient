@@ -17,10 +17,10 @@ pub(crate) fn notification_body(artist: &str, album: &str) -> String {
     let artist = artist.trim();
     let album = album.trim();
     match (artist.is_empty(), album.is_empty()) {
-        (false, false) => format!("{artist} — {album}"),
+        (false, false) => t!("%{artist} — %{album}", artist = artist, album = album).to_string(),
         (false, true) => artist.to_string(),
         (true, false) => album.to_string(),
-        (true, true) => "Now playing".to_string(),
+        (true, true) => t!("Now playing").to_string(),
     }
 }
 
@@ -78,7 +78,9 @@ pub(crate) use imp::TrackNotifier;
 #[cfg(not(target_os = "linux"))]
 pub(crate) struct TrackNotifier;
 
-#[cfg(not(target_os = "linux"))]
+// `notification_body` 在所有平台都要取词（测试也会走它），因此这个
+// import 不能跟着 Linux 实现一起 cfg 掉。
+use rust_i18n::t;
 use std::path::Path;
 
 #[cfg(not(target_os = "linux"))]

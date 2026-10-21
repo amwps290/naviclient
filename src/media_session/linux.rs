@@ -3,6 +3,7 @@ use std::sync::{mpsc, Arc, RwLock};
 use std::time::Duration;
 
 use gpui_kit::Image;
+use rust_i18n::t;
 use tokio::{runtime::Handle, sync::watch, task::JoinHandle};
 use zbus::{
     fdo,
@@ -327,7 +328,7 @@ impl PlayerInterface {
     }
     fn open_uri(&self, _uri: &str) -> fdo::Result<()> {
         Err(fdo::Error::NotSupported(
-            "Choose a song from the library".into(),
+            t!("Choose a song from the library").to_string(),
         ))
     }
     #[zbus(property)]

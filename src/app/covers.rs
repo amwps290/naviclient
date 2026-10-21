@@ -24,7 +24,10 @@ impl NavidromeApp {
         let url = match api.cover_url(id, 500) {
             Ok(url) => url,
             Err(error) => {
-                self.notify_error(format!("Cover request failed: {error:#}"));
+                self.notify_error(t!(
+                    "Cover request failed: %{error}",
+                    error = format!("{error:#}")
+                ));
                 return;
             }
         };

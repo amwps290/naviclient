@@ -7,7 +7,7 @@ impl NavidromeApp {
     pub(super) fn refresh_library(&mut self) {
         let Some(api) = self.api.clone() else { return };
         self.state.loading = true;
-        self.state.status = "Connecting to server...".to_string();
+        self.state.status = t!("Connecting to server...").to_string();
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let _ = tx.send(Msg::Ping(api.ping().await.map_err(error_message)));
@@ -184,7 +184,10 @@ impl NavidromeApp {
         self.state.albums_sort = sort;
         self.config.albums_sort = sort;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Album sort save failed: {error:#}"));
+            self.notify_error(t!(
+                "Album sort save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         self.load_albums();
         cx.notify();
@@ -198,7 +201,10 @@ impl NavidromeApp {
         self.state.artists_sort = sort;
         self.config.artists_sort = sort;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Artist sort save failed: {error:#}"));
+            self.notify_error(t!(
+                "Artist sort save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         sort_artists(&mut self.state.artists, sort);
         self.state.artists_visible = self.state.artists.len().min(300);
@@ -289,7 +295,7 @@ impl NavidromeApp {
             return;
         };
         let name = if song.album.trim().is_empty() {
-            "Unknown album".to_string()
+            t!("Unknown album").to_string()
         } else {
             song.album.clone()
         };
@@ -458,8 +464,8 @@ impl NavidromeApp {
                             self.state.server = Some(info);
                         }
                         Err(error) => {
-                            self.state.status = "Connection failed".to_string();
-                            self.notify_error(format!("Connection failed: {error}"));
+                            self.state.status = t!("Connection failed").to_string();
+                            self.notify_error(t!("Connection failed: %{error}", error = error));
                         }
                     }
                 }
@@ -765,8 +771,12 @@ impl NavidromeApp {
                         } else {
                             self.state.favorite_ids.insert(key);
                         }
-                        let action = if starred { "add" } else { "remove" };
-                        self.notify_error(format!("Failed to {action} favorite: {error}"));
+                        let action = if starred { t!("add") } else { t!("remove") };
+                        self.notify_error(t!(
+                            "Failed to %{action} favorite: %{error}",
+                            action = action,
+                            error = error
+                        ));
                     } else {
                         self.load_favorites();
                     }

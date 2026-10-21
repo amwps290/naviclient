@@ -1,6 +1,7 @@
 //! Playlist edits preserve occurrences: song IDs identify media, indexes identify
 //! entries. Never deduplicate an ordered playlist or a saved playback queue.
 use anyhow::{bail, Result};
+use rust_i18n::t;
 use serde::Deserialize;
 
 use crate::models::{Playlist, Song};
@@ -66,7 +67,9 @@ impl PlaylistEdit {
             _ => return Ok(()),
         };
         if expected != current || !valid {
-            bail!("This playlist changed on the server. Refresh it and try again.");
+            bail!(t!(
+                "This playlist changed on the server. Refresh it and try again."
+            ));
         }
         Ok(())
     }

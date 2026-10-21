@@ -32,6 +32,7 @@ use gpui_kit::{
     StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
 };
 use rand::{seq::SliceRandom, thread_rng};
+use rust_i18n::t;
 use smol::Timer;
 use tokio::runtime::Runtime;
 
@@ -45,8 +46,8 @@ use crate::config;
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
-    Genre, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode, SearchResults, ServerInfo,
-    Song, ThemePreference, TranscodingQuality, VolumeNormalization,
+    Genre, LanguagePreference, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode,
+    SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
@@ -247,7 +248,7 @@ impl Default for AppState {
             covers: HashMap::new(),
             cover_palettes: HashMap::new(),
             requested_covers: HashSet::new(),
-            status: "Not connected".to_string(),
+            status: t!("Not connected").to_string(),
             settings_open: false,
             song_list_selected: None,
             song_list_multi: None,
@@ -350,6 +351,9 @@ impl Drop for NavidromeApp {
 impl NavidromeApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut config = config::load();
+        // 界面语言：System 跟随操作系统。渲染处每次 t! 都查询当前
+        // locale，因此运行时 set_locale 即时生效，无需重启。
+        rust_i18n::set_locale(config.language.resolve());
         // 一次性迁移（里程碑 #17）：把旧版明文密码移入系统凭据库，
         // 迁移成功的条目在配置里只留空引用；凭据库不可用时保持明文，
         // 每轮启动重试，绝不丢密码。
@@ -384,29 +388,29 @@ impl NavidromeApp {
         ));
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search songs, albums, and artists")
+                .placeholder(t!("Search songs, albums, and artists"))
                 .clean_on_escape()
         });
         let server_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("http://localhost:4533")
+                .placeholder(t!("http://localhost:4533"))
                 .default_value(config.server_url.clone())
         });
         let username_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Username")
+                .placeholder(t!("Username"))
                 .default_value(config.username.clone())
         });
         let password_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Password")
+                .placeholder(t!("Password"))
                 .default_value(active_password)
                 .masked(true)
         });
         // 服务器显示名（可选）：为空时界面回退到主机名。
         let name_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Optional — defaults to the host name")
+                .placeholder(t!("Optional — defaults to the host name"))
                 .default_value(
                     config
                         .active_profile()
@@ -613,10 +617,10 @@ impl NavidromeApp {
         if app.api.is_some() {
             app.refresh_library();
         } else {
-            app.state.status = "Open Settings to configure the server".to_string();
+            app.state.status = t!("Open Settings to configure the server").to_string();
         }
         if app.config.username.trim().is_empty() {
-            app.state.status = "Configure your Navidrome server".to_string();
+            app.state.status = t!("Configure your Navidrome server").to_string();
             app.state.settings_open = true;
         }
 
@@ -755,7 +759,7 @@ impl NavidromeApp {
         self.state.lyrics_error = None;
         let Some(api) = self.api.clone() else {
             self.state.lyrics_loading = false;
-            self.state.lyrics_error = Some("Configure a server to load lyrics".to_string());
+            self.state.lyrics_error = Some(t!("Configure a server to load lyrics").to_string());
             return;
         };
 
@@ -810,7 +814,7 @@ impl NavidromeApp {
         }
         self.select_playing(index, &song, quality);
         let Some(api) = self.api.clone() else {
-            self.notify_error("Configure a server before playing");
+            self.notify_error(t!("Configure a server before playing"));
             return;
         };
         let max_bit_rate = quality.max_bit_rate();
@@ -845,7 +849,10 @@ impl NavidromeApp {
                     .play(url, cache_key, duration, gain, start_position, preload_id);
                 self.report_now_playing(&song, start_position);
             }
-            Err(error) => self.notify_error(format!("Stream request failed: {error:#}")),
+            Err(error) => self.notify_error(t!(
+                "Stream request failed: %{error}",
+                error = format!("{error:#}")
+            )),
         }
     }
 
@@ -1156,7 +1163,10 @@ impl NavidromeApp {
         self.state.playback_modes.shuffle = !self.state.playback_modes.shuffle;
         self.config.playback_modes = self.state.playback_modes;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Playback mode save failed: {error:#}"));
+            self.notify_error(t!(
+                "Playback mode save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         self.save_session();
         cx.notify();
@@ -1168,7 +1178,10 @@ impl NavidromeApp {
         self.state.playback_modes.repeat = self.state.playback_modes.repeat.next();
         self.config.playback_modes = self.state.playback_modes;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Playback mode save failed: {error:#}"));
+            self.notify_error(t!(
+                "Playback mode save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         self.save_session();
         cx.notify();
@@ -1606,7 +1619,10 @@ impl NavidromeApp {
                     return;
                 }
                 if let Err(error) = config::save(&this.config) {
-                    this.notify_error(format!("Volume save failed: {error:#}"));
+                    this.notify_error(t!(
+                        "Volume save failed: %{error}",
+                        error = format!("{error:#}")
+                    ));
                 }
                 cx.notify();
             })?;
@@ -1690,7 +1706,10 @@ impl NavidromeApp {
     fn set_show_track_notifications(&mut self, show: bool, cx: &mut Context<Self>) {
         self.config.show_track_notifications = show;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Notification setting save failed: {error:#}"));
+            self.notify_error(t!(
+                "Notification setting save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         cx.notify();
     }
@@ -1699,7 +1718,10 @@ impl NavidromeApp {
     fn set_close_minimizes(&mut self, minimize: bool, cx: &mut Context<Self>) {
         self.config.close_minimizes = minimize;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Close behavior save failed: {error:#}"));
+            self.notify_error(t!(
+                "Close behavior save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         cx.notify();
     }
@@ -1857,7 +1879,7 @@ impl NavidromeApp {
             .is_some_and(|profile| profile.is_configured());
         if !configured {
             self.api = None;
-            self.state.status = "Enter the server address and account".to_string();
+            self.state.status = t!("Enter the server address and account").to_string();
             self.state.settings_open = true;
             return;
         }
@@ -1875,7 +1897,7 @@ impl NavidromeApp {
             }
             Err(error) => {
                 self.api = None;
-                self.state.status = "Invalid server URL".to_string();
+                self.state.status = t!("Invalid server URL").to_string();
                 self.notify_error(format!("{error:#}"));
                 self.state.settings_open = true;
             }
@@ -1901,14 +1923,18 @@ impl NavidromeApp {
             return;
         }
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Config save failed: {error:#}"));
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         log::info!(
             "switched server; id={id} url={} user={}",
             self.config.server_url,
             self.config.username
         );
-        self.state.status = format!("Switched to {}", self.active_server_label());
+        self.state.status =
+            t!("Switched to %{server}", server = self.active_server_label()).to_string();
         self.reconnect_active_server();
         self.sync_server_inputs(window, cx);
     }
@@ -1924,12 +1950,15 @@ impl NavidromeApp {
         }
         let id = self.config.add_server();
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Config save failed: {error:#}"));
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         log::info!("added server entry; id={id}");
         self.reconnect_active_server();
         self.sync_server_inputs(window, cx);
-        self.state.status = "Enter the address and account for the new server".to_string();
+        self.state.status = t!("Enter the address and account for the new server").to_string();
     }
 
     /// 删除一台服务器；正在使用的条目被删除时自动切到相邻条目。
@@ -1963,7 +1992,7 @@ impl NavidromeApp {
             }
         }
         if !self.config.remove_server(id) {
-            self.notify_error("Keep at least one server configured");
+            self.notify_error(t!("Keep at least one server configured"));
             return;
         }
         if clean_data {
@@ -1974,14 +2003,17 @@ impl NavidromeApp {
             log::info!("removed {removed} scoped cache file(s) of server {id}");
         }
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Config save failed: {error:#}"));
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         log::info!("removed server entry; id={id}");
         if removing_active {
             self.reconnect_active_server();
             self.sync_server_inputs(window, cx);
         }
-        self.state.status = format!("Removed {}", profile.label());
+        self.state.status = t!("Removed %{server}", server = profile.label()).to_string();
     }
 
     /// 删除服务器前的确认弹窗（可选连同清理这台服务器的本地数据）。
@@ -2047,7 +2079,7 @@ impl NavidromeApp {
         self.config
             .active_profile()
             .map(|profile| profile.label())
-            .unwrap_or_else(|| "No server".to_string())
+            .unwrap_or_else(|| t!("No server").to_string())
     }
 
     fn save_settings(&mut self, cx: &Context<Self>) {
@@ -2095,7 +2127,8 @@ impl NavidromeApp {
         // 重建在新字段加入时极易漏拷而静默丢失设置。
         self.config.sync_active_profile();
         if let Err(error) = config::save(&self.config) {
-            self.state.status = format!("Config save failed: {error}");
+            self.state.status =
+                t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
         }
         self.reconnect_active_server();
     }
@@ -2105,21 +2138,25 @@ impl NavidromeApp {
             .clone()
             .unwrap_or_else(config::default_audio_cache_dir);
         if let Err(error) = fs::create_dir_all(&effective_dir) {
-            self.notify_error(format!(
-                "Unable to use cache directory {}: {error}",
-                effective_dir.display()
+            self.notify_error(t!(
+                "Unable to use cache directory %{dir}: %{error}",
+                dir = effective_dir.display(),
+                error = error
             ));
             return;
         }
 
         self.config.cache_dir = cache_dir;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Cache directory save failed: {error:#}"));
+            self.notify_error(t!(
+                "Cache directory save failed: %{error}",
+                error = format!("{error:#}")
+            ));
             return;
         }
         self.cancel_next_preload();
         self.audio.set_cache_directory(effective_dir.clone());
-        self.state.status = format!("Audio cache: {}", effective_dir.display());
+        self.state.status = t!("Audio cache: %{dir}", dir = effective_dir.display()).to_string();
     }
 
     fn choose_cache_directory(&mut self, cx: &mut Context<Self>) {
@@ -2127,7 +2164,7 @@ impl NavidromeApp {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Select audio cache folder".into()),
+            prompt: Some(t!("Select audio cache folder").into()),
         });
         cx.spawn(async move |this, cx| {
             let selected = receiver
@@ -2151,9 +2188,15 @@ impl NavidromeApp {
         self.cancel_next_preload();
         self.config.transcoding_quality = quality;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Playback quality save failed: {error:#}"));
+            self.notify_error(t!(
+                "Playback quality save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         } else {
-            log::info!("transcoding quality changed; quality={}", quality.label());
+            log::info!(
+                "transcoding quality changed; quality={}",
+                quality.cache_profile()
+            );
         }
         cx.notify();
     }
@@ -2162,7 +2205,10 @@ impl NavidromeApp {
         self.cancel_next_preload();
         self.config.volume_normalization = mode;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Volume normalization save failed: {error:#}"));
+            self.notify_error(t!(
+                "Volume normalization save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         cx.notify();
     }
@@ -2171,7 +2217,10 @@ impl NavidromeApp {
     fn set_show_lyrics_translation(&mut self, show: bool, cx: &mut Context<Self>) {
         self.config.show_lyrics_translation = show;
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Lyrics translation save failed: {error:#}"));
+            self.notify_error(t!(
+                "Lyrics translation save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         cx.notify();
     }
@@ -2243,7 +2292,10 @@ impl NavidromeApp {
                     return;
                 }
                 if let Err(error) = config::save(&this.config) {
-                    this.notify_error(format!("Equalizer save failed: {error:#}"));
+                    this.notify_error(t!(
+                        "Equalizer save failed: %{error}",
+                        error = format!("{error:#}")
+                    ));
                 }
                 cx.notify();
             })?;
@@ -2260,10 +2312,29 @@ impl NavidromeApp {
         }
         self.config.output_device = name.clone();
         if let Err(error) = config::save(&self.config) {
-            self.notify_error(format!("Audio output save failed: {error:#}"));
+            self.notify_error(t!(
+                "Audio output save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         self.cancel_next_preload();
         self.audio.set_output_device(name);
+        cx.notify();
+    }
+
+    /// 切换界面语言：写配置 + set_locale，下一次渲染整份 UI 文案生效。
+    fn set_language(&mut self, preference: LanguagePreference, cx: &mut Context<Self>) {
+        if self.config.language == preference {
+            return;
+        }
+        self.config.language = preference;
+        rust_i18n::set_locale(preference.resolve());
+        // 托盘菜单是原生控件：重建一次让它也换成新语言。
+        tray::refresh_labels();
+        if let Err(error) = config::save(&self.config) {
+            self.state.status =
+                t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
+        }
         cx.notify();
     }
 
@@ -2280,7 +2351,8 @@ impl NavidromeApp {
             ThemePreference::System => Theme::sync_system_appearance(Some(window), cx),
         }
         if let Err(error) = config::save(&self.config) {
-            self.state.status = format!("Theme save failed: {error:#}");
+            self.state.status =
+                t!("Theme save failed: %{error}", error = format!("{error:#}")).to_string();
         }
         cx.notify();
     }
@@ -2359,10 +2431,11 @@ impl NavidromeApp {
                 )
             });
             let error = if undecodable_source {
-                format!(
-                    "{error} Opus tracks must be transcoded by the server: enable transcoding \
-                     in Navidrome, or pick a lower playback quality."
+                t!(
+                    "%{error} Opus tracks must be transcoded by the server: enable transcoding in Navidrome, or pick a lower playback quality.",
+                    error = error
                 )
+                .to_string()
             } else {
                 error
             };
@@ -2395,10 +2468,11 @@ impl NavidromeApp {
                 ReconnectDecision::Exhausted => {
                     self.reconnect = None;
                     self.reconnect_attempts = None;
-                    self.notify_error(format!(
-                        "{} — gave up after {PLAYBACK_RECONNECT_ATTEMPTS} retries. {}",
-                        kind.summary(),
-                        kind.cause()
+                    self.notify_error(t!(
+                        "%{summary} — gave up after %{attempts} retries. %{cause}",
+                        summary = kind.summary(),
+                        attempts = PLAYBACK_RECONNECT_ATTEMPTS,
+                        cause = kind.cause()
                     ));
                     return true;
                 }
@@ -2409,9 +2483,11 @@ impl NavidromeApp {
             delay.as_millis(),
             position.as_millis()
         );
-        self.notify_warning(format!(
-            "{} — reconnecting ({attempt}/{PLAYBACK_RECONNECT_ATTEMPTS})…",
-            kind.summary()
+        self.notify_warning(t!(
+            "%{summary} — reconnecting (%{attempt}/%{attempts})…",
+            summary = kind.summary(),
+            attempt = attempt,
+            attempts = PLAYBACK_RECONNECT_ATTEMPTS
         ));
         self.reconnect_attempts = Some((song.id.clone(), attempt, position));
         self.reconnect = Some(Reconnect {
@@ -2525,16 +2601,19 @@ impl NavidromeApp {
                 KitIcon::PanelLeftClose
             })
             .tooltip(if collapsed {
-                "Expand sidebar"
+                t!("Expand sidebar")
             } else {
-                "Collapse sidebar"
+                t!("Collapse sidebar")
             })
             .ghost()
             .small()
             .on_click(cx.listener(|this, _, _, cx| {
                 this.config.sidebar_collapsed = !this.config.sidebar_collapsed;
                 if let Err(error) = config::save(&this.config) {
-                    this.notify_error(format!("Settings save failed: {error:#}"));
+                    this.notify_error(t!(
+                        "Settings save failed: %{error}",
+                        error = format!("{error:#}")
+                    ));
                 }
                 cx.notify();
             }));
@@ -2560,11 +2639,13 @@ impl NavidromeApp {
     fn nav_button(
         &self,
         view: View,
-        label: &'static str,
+        label: impl Into<SharedString>,
         icon: impl IconNamed,
         count: Option<usize>,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let label: SharedString = label.into();
+        let nav_id = view.nav_id();
         let selected = self.state.view == view
             || matches!(
                 (view, self.state.view),
@@ -2576,7 +2657,7 @@ impl NavidromeApp {
         let collapsed = self.config.sidebar_collapsed;
         if collapsed {
             // 折叠态：图标按钮居中、拉高加大点击区，标签退化为 tooltip。
-            let button = Button::new(SharedString::from(format!("nav-{label}")))
+            let button = Button::new(SharedString::from(format!("nav-{nav_id}")))
                 .icon(icon)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.state.settings_open = false;
@@ -2610,7 +2691,7 @@ impl NavidromeApp {
             // 每个入口自带规模信息（Artists 128、Playlists 6…）。
             // 选中态与设置页服务器列表一致：图标主题色 + 行底色。
             h_flex()
-                .id(SharedString::from(format!("nav-{label}")))
+                .id(SharedString::from(format!("nav-{nav_id}")))
                 .w_full()
                 .h(px(32.0))
                 .items_center()
@@ -2669,17 +2750,28 @@ impl NavidromeApp {
         let connected = self.state.server.is_some();
         let label = self.active_server_label();
         let status = if self.state.loading {
-            "Connecting…"
+            t!("Connecting…")
         } else if connected {
-            "Connected"
+            t!("Connected")
         } else {
-            "Offline"
+            t!("Offline")
         };
         let server_count = self.config.servers.len();
         let tooltip = if server_count > 1 {
-            format!("{label} — {status}\n{server_count} servers configured · click to switch")
+            t!(
+                "%{label} — %{status}\n%{server_count} servers configured · click to switch",
+                label = label,
+                status = status,
+                server_count = server_count
+            )
+            .to_string()
         } else {
-            format!("{label} — {status}\nClick to manage servers")
+            t!(
+                "%{label} — %{status}\nClick to manage servers",
+                label = label,
+                status = status
+            )
+            .to_string()
         };
         let icon = if connected {
             AppIcon::Server
@@ -2804,9 +2896,9 @@ impl NavidromeApp {
                 AppIcon::Heart
             })
             .tooltip(if starred {
-                "Remove from favorites"
+                t!("Remove from favorites")
             } else {
-                "Add to favorites"
+                t!("Add to favorites")
             })
             .ghost()
             .small()
@@ -2828,9 +2920,9 @@ impl NavidromeApp {
         Button::new("player-shuffle")
             .icon(AppIcon::Shuffle)
             .tooltip(if self.state.playback_modes.shuffle {
-                "Shuffle on"
+                t!("Shuffle on")
             } else {
-                "Shuffle off"
+                t!("Shuffle off")
             })
             .ghost()
             .with_size(px(30.0))
@@ -2992,7 +3084,7 @@ impl Render for NavidromeApp {
                                         .child(
                                             Button::new("leave-now-playing")
                                                 .icon(AppIcon::ArrowLeft)
-                                                .tooltip("Back to library")
+                                                .tooltip(t!("Back to library"))
                                                 .ghost()
                                                 .small()
                                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -3004,14 +3096,14 @@ impl Render for NavidromeApp {
                                             div()
                                                 .text_sm()
                                                 .font_weight(FontWeight::SEMIBOLD)
-                                                .child("Now Playing"),
+                                                .child(t!("Now Playing")),
                                         ),
                                 )
                                 .child(
                                     div().occlude().child(
                                         Button::new("now-playing-settings")
                                             .icon(AppIcon::Settings)
-                                            .tooltip("Settings")
+                                            .tooltip(t!("Settings"))
                                             .ghost()
                                             .small()
                                             .on_click(cx.listener(|this, _, _, cx| {
@@ -3075,9 +3167,9 @@ impl Render for NavidromeApp {
                                         Button::new("toggle-mini-player")
                                             .icon(AppIcon::MiniPlayer)
                                             .tooltip(if self.mini_mode {
-                                                "Exit mini player"
+                                                t!("Exit mini player")
                                             } else {
-                                                "Switch to mini player"
+                                                t!("Switch to mini player")
                                             })
                                             .ghost()
                                             .small()
@@ -3089,7 +3181,7 @@ impl Render for NavidromeApp {
                                     .child(
                                         Button::new("title-settings")
                                             .icon(AppIcon::Settings)
-                                            .tooltip("Settings")
+                                            .tooltip(t!("Settings"))
                                             .ghost()
                                             .small()
                                             .selected(self.state.settings_open)
@@ -3134,13 +3226,13 @@ impl Render for NavidromeApp {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(cx.theme().muted_foreground)
-                                        .child("LIBRARY"),
+                                        .child(t!("LIBRARY")),
                                 )
                             })
-                            .child(self.nav_button(View::Home, "Home", AppIcon::Home, None, cx))
+                            .child(self.nav_button(View::Home, t!("Home"), AppIcon::Home, None, cx))
                             .child(self.nav_button(
                                 View::Favorites,
-                                "Favorites",
+                                t!("Favorites"),
                                 AppIcon::Heart,
                                 Some(
                                     self.state.favorites.artists.len()
@@ -3151,7 +3243,7 @@ impl Render for NavidromeApp {
                             ))
                             .child(self.nav_button(
                                 View::Artists,
-                                "Artists",
+                                t!("Artists"),
                                 AppIcon::Artists,
                                 Some(self.state.artists.len()),
                                 cx,
@@ -3159,7 +3251,7 @@ impl Render for NavidromeApp {
                             .child(
                                 self.nav_button(
                                     View::Albums,
-                                    "Albums",
+                                    t!("Albums"),
                                     AppIcon::Albums,
                                     // 专辑列表是增量分页加载，只有拉尽后总数才可信；
                                     // 拉尽前不显示，避免给出误导性的“当前页数”。
@@ -3171,21 +3263,21 @@ impl Render for NavidromeApp {
                             )
                             .child(self.nav_button(
                                 View::Genres,
-                                "Genres",
+                                t!("Genres"),
                                 AppIcon::Genres,
                                 Some(self.state.genres.len()),
                                 cx,
                             ))
                             .child(self.nav_button(
                                 View::Playlists,
-                                "Playlists",
+                                t!("Playlists"),
                                 AppIcon::Playlists,
                                 Some(self.state.playlists.len()),
                                 cx,
                             ))
                             .child(self.nav_button(
                                 View::Search,
-                                "Search",
+                                t!("Search"),
                                 KitIcon::Search,
                                 None,
                                 cx,

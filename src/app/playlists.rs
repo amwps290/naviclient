@@ -130,9 +130,9 @@ impl NavidromeApp {
                             self.state.view = View::Playlists;
                         }
                     }
-                    window.push_notification(Notification::success("Playlist deleted"), cx);
+                    window.push_notification(Notification::success(t!("Playlist deleted")), cx);
                 } else {
-                    window.push_notification(Notification::success("Playlist saved"), cx);
+                    window.push_notification(Notification::success(t!("Playlist saved")), cx);
                 }
             }
             Err(error) => {
@@ -167,7 +167,7 @@ impl NavidromeApp {
             .to_string();
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Playlist name")
+                .placeholder(t!("Playlist name"))
                 .default_value(name)
         });
         self.playlist_ui.input_subscription =
@@ -229,11 +229,12 @@ impl NavidromeApp {
     ) {
         self.confirm_playlist_edit(
             PlaylistEdit::Delete { id: playlist.id },
-            "Delete playlist?".into(),
-            format!(
-                "Delete “{}” from Navidrome? The music files will be kept.",
-                playlist.name
-            ),
+            t!("Delete playlist?").to_string(),
+            t!(
+                "Delete “%{name}” from Navidrome? The music files will be kept.",
+                name = playlist.name
+            )
+            .to_string(),
             window,
             cx,
         );
@@ -270,7 +271,7 @@ impl NavidromeApp {
             }) => {
                 let name = input.read(cx).value().trim().to_string();
                 if name.is_empty() {
-                    self.playlist_ui.error = Some("Enter a playlist name.".into());
+                    self.playlist_ui.error = Some(t!("Enter a playlist name.").to_string());
                     cx.notify();
                     return;
                 }
@@ -302,33 +303,33 @@ impl NavidromeApp {
                 input,
             }) => {
                 if playlist.is_none() && !songs.is_empty() {
-                    content = content.child(format!(
-                        "Save {} tracks in their current order.",
-                        songs.len()
+                    content = content.child(t!(
+                        "Save %{count} tracks in their current order.",
+                        count = songs.len()
                     ));
                 }
                 content = content.child(Input::new(input).disabled(busy).w_full());
                 (
                     if playlist.is_some() {
-                        "Rename playlist"
+                        t!("Rename playlist")
                     } else {
-                        "New playlist"
+                        t!("New playlist")
                     }
                     .to_string(),
-                    Some("Save"),
+                    Some(t!("Save").to_string()),
                     false,
                 )
             }
             Some(PlaylistDialog::Choose { songs }) => {
                 let new_songs = songs.clone();
                 content = content
-                    .child(format!(
-                        "Add {} tracks. Existing copies will be kept.",
-                        songs.len()
+                    .child(t!(
+                        "Add %{count} tracks. Existing copies will be kept.",
+                        count = songs.len()
                     ))
                     .child(
                         Button::new("new-playlist-from-songs")
-                            .label("New playlist…")
+                            .label(t!("New playlist…"))
                             .outline()
                             .disabled(busy)
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -344,12 +345,12 @@ impl NavidromeApp {
                     .collect();
                 playlists.sort_by_key(|p| p.name.to_lowercase());
                 if self.playlist_ui.list_loading {
-                    content = content.child(div().text_sm().child("Loading playlists…"));
+                    content = content.child(div().text_sm().child(t!("Loading playlists…")));
                 } else if playlists.is_empty() {
                     content = content.child(
                         div()
                             .text_sm()
-                            .child("No editable playlists yet. Create one above."),
+                            .child(t!("No editable playlists yet. Create one above.")),
                     );
                 }
                 content = content.child(
@@ -382,7 +383,7 @@ impl NavidromeApp {
                             ))
                         })),
                 );
-                ("Add to playlist".into(), None, false)
+                (t!("Add to playlist").to_string(), None, false)
             }
             Some(PlaylistDialog::Confirm {
                 title,
@@ -393,9 +394,9 @@ impl NavidromeApp {
                 (
                     title.clone(),
                     Some(if matches!(edit, PlaylistEdit::Delete { .. }) {
-                        "Delete"
+                        t!("Delete").to_string()
                     } else {
-                        "Remove"
+                        t!("Remove").to_string()
                     }),
                     true,
                 )
@@ -411,14 +412,14 @@ impl NavidromeApp {
             );
         }
         if busy {
-            content = content.child(div().text_sm().child("Saving…"));
+            content = content.child(div().text_sm().child(t!("Saving…")));
         }
         let footer = h_flex()
             .justify_end()
             .gap_2()
             .child(
                 Button::new("cancel-playlist-dialog")
-                    .label("Cancel")
+                    .label(t!("Cancel"))
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.playlist_ui.dialog = None;
@@ -472,21 +473,21 @@ impl NavidromeApp {
         self.playlist_ui.menu_focus = Some(menu.focus_handle(cx));
         let song = context.songs[context.index].clone();
         let play = context.clone();
-        menu = menu.item(PopupMenuItem::new("Play now").on_click(cx.listener(
+        menu = menu.item(PopupMenuItem::new(t!("Play now")).on_click(cx.listener(
             move |this, _, _, cx| {
                 this.play_song_list(&play.songs, play.index);
                 cx.notify();
             },
         )));
         let next = song.clone();
-        menu = menu.item(PopupMenuItem::new("Play next").on_click(cx.listener(
+        menu = menu.item(PopupMenuItem::new(t!("Play next")).on_click(cx.listener(
             move |this, _, _, cx| {
                 this.insert_next(next.clone());
                 cx.notify();
             },
         )));
         let append = song.clone();
-        menu = menu.item(PopupMenuItem::new("Add to queue").on_click(cx.listener(
+        menu = menu.item(PopupMenuItem::new(t!("Add to queue")).on_click(cx.listener(
             move |this, _, _, cx| {
                 this.add_to_queue(append.clone());
                 cx.notify();
@@ -494,7 +495,7 @@ impl NavidromeApp {
         )));
         let add = song.id.clone();
         menu = menu.separator().item(
-            PopupMenuItem::new("Add to playlist…")
+            PopupMenuItem::new(t!("Add to playlist…"))
                 .disabled(self.playlist_ui.busy || self.api.is_none())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.choose_playlist(vec![add.clone()], window, cx)
@@ -502,9 +503,9 @@ impl NavidromeApp {
         );
         let key = FavoriteKey::new(FavoriteKind::Song, &song.id);
         let label = if self.state.favorite_ids.contains(&key) {
-            "Remove from favorites"
+            t!("Remove from favorites")
         } else {
-            "Add to favorites"
+            t!("Add to favorites")
         };
         let favorite_id = song.id.clone();
         menu = menu.item(
@@ -520,7 +521,7 @@ impl NavidromeApp {
         let song_for_artist = song.clone();
         let artist_available = song.artist_id.as_deref().is_some_and(|id| !id.is_empty());
         menu = menu.item(
-            PopupMenuItem::new("Go to artist")
+            PopupMenuItem::new(t!("Go to artist"))
                 .disabled(!artist_available)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_song_artist(&song_for_artist);
@@ -530,7 +531,7 @@ impl NavidromeApp {
         let song_for_album = song.clone();
         let album_available = song.album_id.as_deref().is_some_and(|id| !id.is_empty());
         menu = menu.item(
-            PopupMenuItem::new("Go to album")
+            PopupMenuItem::new(t!("Go to album"))
                 .disabled(!album_available)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_song_album(&song_for_album);
@@ -540,7 +541,7 @@ impl NavidromeApp {
         let song_for_info = song.clone();
         menu = menu
             .separator()
-            .item(PopupMenuItem::new("Song info…").on_click(cx.listener(
+            .item(PopupMenuItem::new(t!("Song info…")).on_click(cx.listener(
                 move |this, _, window, cx| {
                     this.open_song_info(song_for_info.clone(), window, cx);
                 },
@@ -552,9 +553,9 @@ impl NavidromeApp {
             let expected = song_ids(&context.songs);
             menu = menu.separator();
             for (label, to) in [
-                ("Move up", context.index.checked_sub(1)),
+                (t!("Move up"), context.index.checked_sub(1)),
                 (
-                    "Move down",
+                    t!("Move down"),
                     (context.index + 1 < expected.len()).then_some(context.index + 1),
                 ),
             ] {
@@ -577,19 +578,20 @@ impl NavidromeApp {
                 expected,
                 index: context.index,
             };
-            let message = format!(
-                "Remove “{}” (track {}) from “{}”?",
-                song.title,
-                context.index + 1,
-                playlist.name
-            );
+            let message = t!(
+                "Remove “%{title}” (track %{number}) from “%{playlist}”?",
+                title = song.title,
+                number = context.index + 1,
+                playlist = playlist.name
+            )
+            .to_string();
             menu = menu.item(
-                PopupMenuItem::new("Remove from playlist…")
+                PopupMenuItem::new(t!("Remove from playlist…"))
                     .disabled(disabled)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.confirm_playlist_edit(
                             edit.clone(),
-                            "Remove track?".into(),
+                            t!("Remove track?").to_string(),
                             message.clone(),
                             window,
                             cx,
@@ -601,7 +603,7 @@ impl NavidromeApp {
             menu = menu
                 .separator()
                 .item(
-                    PopupMenuItem::new("Remove from queue").on_click(cx.listener(
+                    PopupMenuItem::new(t!("Remove from queue")).on_click(cx.listener(
                         move |this, _, _, cx| {
                             if song_ids(&this.state.queue) == expected {
                                 this.remove_from_queue(context.index);

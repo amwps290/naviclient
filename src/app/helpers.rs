@@ -1,6 +1,7 @@
 //! 应用层纯逻辑：快捷键映射、队列索引计算、封面调色板提取、
 //! 增益/对比度/格式化等无副作用的函数与小型数据类型。
 
+use rust_i18n::t;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,6 +48,24 @@ pub(super) enum View {
     Queue,
 }
 
+impl View {
+    /// 侧边栏入口的稳定元素 ID 前缀。与显示文案解耦，切换界面语言时
+    /// 元素 ID 不变（否则 GPUI 会把整行当作新元素、丢掉悬停/焦点状态）。
+    pub(super) fn nav_id(self) -> &'static str {
+        match self {
+            Self::Home => "home",
+            Self::Favorites => "favorites",
+            Self::Artists | Self::ArtistDetail => "artists",
+            Self::Albums | Self::AlbumDetail => "albums",
+            Self::Genres | Self::GenreDetail => "genres",
+            Self::Playlists | Self::PlaylistDetail => "playlists",
+            Self::Search => "search",
+            Self::NowPlaying => "now-playing",
+            Self::Queue => "queue",
+        }
+    }
+}
+
 /// 搜索结果的显示过滤；会话内状态，不持久化。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SearchFilter {
@@ -58,12 +77,12 @@ pub(super) enum SearchFilter {
 }
 
 impl SearchFilter {
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::All => "All",
-            Self::Artists => "Artists",
-            Self::Albums => "Albums",
-            Self::Songs => "Songs",
+            Self::All => t!("All"),
+            Self::Artists => t!("Artists"),
+            Self::Albums => t!("Albums"),
+            Self::Songs => t!("Songs"),
         }
     }
 
@@ -545,18 +564,28 @@ pub(super) fn playback_technical_info(
         });
         let size = estimated_bytes
             .map(|bytes| format!("~{}", format_file_size(bytes)))
-            .unwrap_or_else(|| "Unknown size".to_string());
+            .unwrap_or_else(|| t!("Unknown size").to_string());
         let bit_rate = format!("{bit_rate} kbps");
-        let display = format!("MP3 · {bit_rate} · {size}");
+        let display = t!(
+            "MP3 · %{bit_rate} · %{size}",
+            bit_rate = bit_rate,
+            size = size
+        )
+        .to_string();
         return PlaybackTechnicalInfo {
             format: "MP3".to_string(),
-            tooltip: format!("Current stream: {display}\nSource file: {}", source.display),
+            tooltip: t!(
+                "Current stream: %{display}\nSource file: %{source}",
+                display = display,
+                source = source.display
+            )
+            .to_string(),
         };
     }
 
     PlaybackTechnicalInfo {
         format: source.format,
-        tooltip: format!("Current stream: {}", source.display),
+        tooltip: t!("Current stream: %{display}", display = source.display).to_string(),
     }
 }
 
@@ -583,12 +612,12 @@ pub(super) fn source_technical_info(song: &Song) -> SourceTechnicalInfo {
         .filter(|bit_rate| *bit_rate > 0)
         .map(|bit_rate| format!("{bit_rate} kbps"))
         .or_else(|| estimated_bit_rate(song).map(|bit_rate| format!("~{bit_rate} kbps")))
-        .unwrap_or_else(|| "Unknown rate".to_string());
+        .unwrap_or_else(|| t!("Unknown rate").to_string());
     let size = song
         .size
         .and_then(|size| u64::try_from(size).ok())
         .map(format_file_size)
-        .unwrap_or_else(|| "Unknown size".to_string());
+        .unwrap_or_else(|| t!("Unknown size").to_string());
     let display = format!("{format} · {bit_rate} · {size}");
 
     SourceTechnicalInfo { format, display }

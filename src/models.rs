@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use md5::{Digest, Md5};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -35,12 +36,82 @@ pub enum ThemePreference {
 }
 
 impl ThemePreference {
-    pub fn label(self) -> &'static str {
+    /// 展示名（翻译键）。
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-            Self::System => "System",
+            Self::Light => t!("Light"),
+            Self::Dark => t!("Dark"),
+            Self::System => t!("System"),
         }
+    }
+}
+
+/// 界面语言偏好。`System` 跟随操作系统：Windows 经 `sys-locale` 检测，
+/// 中文环境自动落到简体，繁体区域（TW/HK/MO/Hant）落到繁体；
+/// 检测失败时回退英文。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LanguagePreference {
+    #[default]
+    System,
+    English,
+    ChineseSimplified,
+    ChineseTraditional,
+}
+
+impl LanguagePreference {
+    pub const ALL: [Self; 4] = [
+        Self::System,
+        Self::English,
+        Self::ChineseSimplified,
+        Self::ChineseTraditional,
+    ];
+
+    /// rust-i18n 的 locale 代码；`System` 在这里返回哨兵值，
+    /// 实际生效代码用 [`Self::resolve`]。
+    pub fn locale_code(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::English => "en",
+            Self::ChineseSimplified => "zh-CN",
+            Self::ChineseTraditional => "zh-TW",
+        }
+    }
+
+    /// 设置页按钮上的自称名：语言用自己的名字（英文不译、中文用中文原文），
+    /// `System` 走翻译键（跟随当前界面语言）。
+    pub fn native_label(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            Self::System => rust_i18n::t!("System"),
+            Self::English => std::borrow::Cow::Borrowed("English"),
+            Self::ChineseSimplified => std::borrow::Cow::Borrowed("简体中文"),
+            Self::ChineseTraditional => std::borrow::Cow::Borrowed("繁體中文"),
+        }
+    }
+
+    /// 解析成实际生效的 locale 代码（`System` 探测操作系统语言）。
+    pub fn resolve(self) -> &'static str {
+        match self {
+            Self::System => locale_from_os_tag(&sys_locale::get_locale().unwrap_or_default()),
+            other => other.locale_code(),
+        }
+    }
+}
+
+/// 由操作系统语言标签推断本应用支持的 locale。
+/// 纯函数便于测试：zh-TW/HK/MO/Hant 系繁体，其余 zh 简体，其他英文。
+pub fn locale_from_os_tag(tag: &str) -> &'static str {
+    let lower = tag.trim().to_lowercase();
+    if !lower.starts_with("zh") {
+        return "en";
+    }
+    let traditional = ["zh-tw", "zh-hk", "zh-mo", "zh-hant", "zh-tw_"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix) || lower.contains("hant"));
+    if traditional {
+        "zh-TW"
+    } else {
+        "zh-CN"
     }
 }
 
@@ -64,13 +135,14 @@ impl TranscodingQuality {
         Self::Kbps320,
     ];
 
-    pub fn label(self) -> &'static str {
+    /// 展示名（kbps 档位是技术记号，无对应翻译时回退原文）。
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Original => "Original",
-            Self::Kbps128 => "128 kbps",
-            Self::Kbps192 => "192 kbps",
-            Self::Kbps256 => "256 kbps",
-            Self::Kbps320 => "320 kbps",
+            Self::Original => t!("Original"),
+            Self::Kbps128 => t!("128 kbps"),
+            Self::Kbps192 => t!("192 kbps"),
+            Self::Kbps256 => t!("256 kbps"),
+            Self::Kbps320 => t!("320 kbps"),
         }
     }
 
@@ -337,11 +409,11 @@ impl RepeatMode {
         }
     }
 
-    pub fn tooltip(self) -> &'static str {
+    pub fn tooltip(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Off => "Repeat off",
-            Self::All => "Repeat all",
-            Self::One => "Repeat current track",
+            Self::Off => t!("Repeat off"),
+            Self::All => t!("Repeat all"),
+            Self::One => t!("Repeat current track"),
         }
     }
 }
@@ -395,6 +467,22 @@ impl EqSettings {
             [4.0, 3.0, 2.0, 0.0, -1.0, -1.0, 0.0, 2.5, 3.5, 4.5],
         ),
     ];
+
+    /// 预设的显示名。`PRESETS` 里的名称同时充当元素 ID 与配置无关的
+    /// 稳定标识，因此只在显示时翻译（与侧边栏入口同一套做法）。
+    pub fn preset_label(name: &'static str) -> std::borrow::Cow<'static, str> {
+        match name {
+            "Flat" => t!("Flat"),
+            "Bass boost" => t!("Bass boost"),
+            "Treble boost" => t!("Treble boost"),
+            "Vocal" => t!("Vocal"),
+            "Rock" => t!("Rock"),
+            "Pop" => t!("Pop"),
+            "Jazz" => t!("Jazz"),
+            "Classical" => t!("Classical"),
+            other => std::borrow::Cow::Borrowed(other),
+        }
+    }
 
     /// 把可能越界的滑杆值夹回 [-12, 12] dB。
     pub fn clamp_gains(&mut self) {
@@ -456,12 +544,12 @@ pub enum AlbumSort {
 }
 
 impl AlbumSort {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::NewestAdded => "Recently added",
-            Self::Name => "Name",
-            Self::Artist => "Artist",
-            Self::Year => "Year",
+            Self::NewestAdded => t!("Recently added"),
+            Self::Name => t!("Name"),
+            Self::Artist => t!("Artist"),
+            Self::Year => t!("Year"),
         }
     }
 
@@ -483,11 +571,11 @@ pub enum ArtistSort {
 }
 
 impl ArtistSort {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Name => "Name (A–Z)",
-            Self::NameDesc => "Name (Z–A)",
-            Self::AlbumCount => "Album count",
+            Self::Name => t!("Name (A–Z)"),
+            Self::NameDesc => t!("Name (Z–A)"),
+            Self::AlbumCount => t!("Album count"),
         }
     }
 
@@ -570,7 +658,7 @@ impl ServerProfile {
         }
         let host = self.host();
         if host.is_empty() {
-            "Unnamed server".to_string()
+            t!("Unnamed server").to_string()
         } else {
             host
         }
@@ -624,6 +712,9 @@ pub struct Config {
     pub active_server: Option<String>,
     #[serde(default)]
     pub theme: ThemePreference,
+    /// 界面语言（System = 跟随操作系统）。
+    #[serde(default)]
+    pub language: LanguagePreference,
     #[serde(default)]
     pub cache_dir: Option<PathBuf>,
     #[serde(default)]
@@ -671,6 +762,7 @@ impl Default for Config {
             servers: Vec::new(),
             active_server: None,
             theme: ThemePreference::Light,
+            language: LanguagePreference::System,
             cache_dir: None,
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
@@ -811,7 +903,7 @@ impl Config {
         }
         let profile = ServerProfile {
             id: candidate.clone(),
-            name: format!("Server {}", self.servers.len() + 1),
+            name: t!("Server %{number}", number = self.servers.len() + 1).to_string(),
             url: String::new(),
             username: String::new(),
             password: String::new(),
@@ -863,19 +955,20 @@ pub enum VolumeNormalization {
 impl VolumeNormalization {
     pub const ALL: [Self; 3] = [Self::Off, Self::Track, Self::Album];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Off => "Off",
-            Self::Track => "Track",
-            Self::Album => "Album",
+            Self::Off => t!("Off"),
+            Self::Track => t!("Track"),
+            Self::Album => t!("Album"),
         }
     }
 
-    pub fn tooltip(self) -> &'static str {
+    /// 说明文案（翻译键）；取词时点跟随当前界面语言。
+    pub fn tooltip(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Off => "Play every song at its recorded loudness",
-            Self::Track => "Normalize each track to a consistent loudness (ReplayGain)",
-            Self::Album => "Normalize by album so a record's relative dynamics are preserved",
+            Self::Off => t!("Play every song at its recorded loudness"),
+            Self::Track => t!("Normalize each track to a consistent loudness (ReplayGain)"),
+            Self::Album => t!("Normalize by album so a record's relative dynamics are preserved"),
         }
     }
 }
@@ -885,8 +978,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AlbumSort, ArtistSort, Config, PlayModes, PlaybackMode, PlaybackSession, RepeatMode,
-        ServerProfile, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
+        locale_from_os_tag, AlbumSort, ArtistSort, Config, LanguagePreference, PlayModes,
+        PlaybackMode, PlaybackSession, RepeatMode, ServerProfile, Song, ThemePreference,
+        TranscodingQuality, VolumeNormalization,
     };
 
     #[test]
@@ -1061,6 +1155,60 @@ mod tests {
         let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
         assert!(!restored.show_lyrics_translation);
         assert!(json.contains("show_lyrics_translation"));
+    }
+
+    #[test]
+    fn interface_language_round_trips_and_legacy_configs_follow_the_system() {
+        let config = Config {
+            language: LanguagePreference::ChineseTraditional,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+        assert_eq!(restored.language, LanguagePreference::ChineseTraditional);
+        assert!(json.contains(r#""language":"chinese_traditional""#));
+
+        // 旧配置没有 language 字段：默认 System（跟随操作系统），不能报错。
+        let legacy: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without a language should still deserialize");
+        assert_eq!(legacy.language, LanguagePreference::System);
+        assert_eq!(legacy.language.locale_code(), "system");
+    }
+
+    #[test]
+    fn os_language_tags_resolve_to_a_supported_catalog() {
+        for tag in ["en", "en-US", "de-DE", "ja-JP", "", "  "] {
+            assert_eq!(locale_from_os_tag(tag), "en", "tag={tag:?}");
+        }
+        for tag in ["zh", "zh-CN", "zh-Hans", "zh-Hans-CN", "zh-SG", " ZH-cn "] {
+            assert_eq!(locale_from_os_tag(tag), "zh-CN", "tag={tag:?}");
+        }
+        for tag in [
+            "zh-TW",
+            "zh-HK",
+            "zh-MO",
+            "zh-Hant",
+            "zh-Hant-TW",
+            "zh-hant-hk",
+        ] {
+            assert_eq!(locale_from_os_tag(tag), "zh-TW", "tag={tag:?}");
+        }
+        // 显式选择的语言不受操作系统影响。
+        assert_eq!(LanguagePreference::English.resolve(), "en");
+        assert_eq!(LanguagePreference::ChineseSimplified.resolve(), "zh-CN");
+        assert_eq!(LanguagePreference::ChineseTraditional.resolve(), "zh-TW");
+        // 语言按钮用各自的母语自称，不随界面语言变化。
+        assert_eq!(
+            LanguagePreference::ChineseSimplified.native_label(),
+            "简体中文"
+        );
+        assert_eq!(
+            LanguagePreference::ChineseTraditional.native_label(),
+            "繁體中文"
+        );
+        assert_eq!(LanguagePreference::English.native_label(), "English");
     }
 
     #[test]

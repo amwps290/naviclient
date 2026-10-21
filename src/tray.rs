@@ -69,6 +69,18 @@ pub fn set_tray_paused(paused: bool) {
 #[cfg(not(target_os = "linux"))]
 pub fn set_tray_paused(_paused: bool) {}
 
+/// 界面语言切换后重建托盘菜单文案。Linux（ksni）的菜单在 handle.update
+/// 时重新生成，因此下一次 `menu()` 会用新语言取词；Windows 的 tray-icon
+/// 菜单标签在创建时固定，改动要等下次启动才生效。
+pub fn refresh_labels() {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(handle) = linux::tray_handle() {
+            handle.update(|_tray| {});
+        }
+    }
+}
+
 /// Linux 托盘（ksni / StatusNotifierItem over D-Bus）。
 /// ksni 自带服务线程，菜单回调只做通道转发，符合其文档建议。
 #[cfg(target_os = "linux")]
@@ -77,6 +89,7 @@ mod linux {
     use ksni::blocking::TrayMethods as _;
     use ksni::menu::StandardItem;
     use ksni::{Icon, MenuItem, Tray};
+    use rust_i18n::t;
     use std::sync::OnceLock;
 
     pub struct LinuxTray {
@@ -145,7 +158,11 @@ mod linux {
             let paused = self.paused;
             vec![
                 StandardItem {
-                    label: if paused { "Play" } else { "Pause" }.into(),
+                    label: if paused {
+                        t!("Play").into()
+                    } else {
+                        t!("Pause").into()
+                    },
                     icon_name: if paused {
                         "media-playback-start"
                     } else {
@@ -159,7 +176,7 @@ mod linux {
                 }
                 .into(),
                 StandardItem {
-                    label: "Previous".into(),
+                    label: t!("Previous").into(),
                     icon_name: "media-skip-backward".into(),
                     activate: Box::new(|tray: &mut LinuxTray| {
                         let _ = tray.tx.send(TrayCommand::Previous);
@@ -168,7 +185,7 @@ mod linux {
                 }
                 .into(),
                 StandardItem {
-                    label: "Next".into(),
+                    label: t!("Next").into(),
                     icon_name: "media-skip-forward".into(),
                     activate: Box::new(|tray: &mut LinuxTray| {
                         let _ = tray.tx.send(TrayCommand::Next);
@@ -178,7 +195,7 @@ mod linux {
                 .into(),
                 ksni::menu::MenuItem::Separator,
                 StandardItem {
-                    label: "Show window".into(),
+                    label: t!("Show window").into(),
                     icon_name: "window-new".into(),
                     activate: Box::new(|tray: &mut LinuxTray| {
                         let _ = tray.tx.send(TrayCommand::ShowWindow);
@@ -187,7 +204,7 @@ mod linux {
                 }
                 .into(),
                 StandardItem {
-                    label: "Exit".into(),
+                    label: t!("Exit").into(),
                     icon_name: "application-exit".into(),
                     activate: Box::new(|tray: &mut LinuxTray| {
                         let _ = tray.tx.send(TrayCommand::Quit);
@@ -230,14 +247,15 @@ mod linux {
 
 #[cfg(target_os = "windows")]
 fn run_tray_loop(tx: &Sender<TrayCommand>) -> Result<()> {
+    use rust_i18n::t;
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, TrayIconBuilder};
 
-    let toggle = MenuItem::new("Play / Pause", true, None);
-    let previous = MenuItem::new("Previous", true, None);
-    let next = MenuItem::new("Next", true, None);
-    let show = MenuItem::new("Show window", true, None);
-    let quit = MenuItem::new("Exit", true, None);
+    let toggle = MenuItem::new(t!("Play / Pause"), true, None);
+    let previous = MenuItem::new(t!("Previous"), true, None);
+    let next = MenuItem::new(t!("Next"), true, None);
+    let show = MenuItem::new(t!("Show window"), true, None);
+    let quit = MenuItem::new(t!("Exit"), true, None);
 
     let menu = Menu::new();
     menu.append(&toggle)?;

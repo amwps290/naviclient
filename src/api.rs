@@ -1,3 +1,4 @@
+use rust_i18n::t;
 use std::fmt::Write;
 
 use anyhow::{anyhow, Context, Result};
@@ -34,7 +35,7 @@ impl Api {
 
         let probe = Url::parse(&format!("{base_url}/rest/ping.view"))?;
         if !matches!(probe.scheme(), "http" | "https") {
-            return Err(anyhow!("server URL must use http or https"));
+            return Err(anyhow!(t!("server URL must use http or https")));
         }
 
         Ok(Self {
@@ -99,12 +100,12 @@ impl Api {
             .send()
             .await
             .map_err(reqwest::Error::without_url)
-            .with_context(|| format!("request to {view} failed"))?;
+            .with_context(|| t!("request to %{view} failed", view = view))?;
         let status = response.status();
         let text = response
             .text()
             .await
-            .with_context(|| format!("read response from {view} failed"))?;
+            .with_context(|| t!("read response from %{view} failed", view = view))?;
 
         if !status.is_success() {
             return Err(anyhow!(
@@ -335,7 +336,9 @@ impl Api {
         if let Some(id) = edit.id() {
             let current = self.playlist(id).await?;
             if !can_edit(&current.playlist, &self.username) {
-                return Err(anyhow!("Only the playlist owner can edit this playlist."));
+                return Err(anyhow!(t!(
+                    "Only the playlist owner can edit this playlist."
+                )));
             }
             edit.validate_entries(&song_ids(&current.songs))?;
         }
@@ -344,7 +347,7 @@ impl Api {
             PlaylistEdit::Create { name, songs } => {
                 let name = name.trim();
                 if name.is_empty() {
-                    return Err(anyhow!("Enter a playlist name."));
+                    return Err(anyhow!(t!("Enter a playlist name.")));
                 }
                 params.push(("name", name.into()));
                 params.extend(songs.iter().cloned().map(|id| ("songId", id)));
@@ -353,7 +356,7 @@ impl Api {
             PlaylistEdit::Rename { id, name } => {
                 let name = name.trim();
                 if name.is_empty() {
-                    return Err(anyhow!("Enter a playlist name."));
+                    return Err(anyhow!(t!("Enter a playlist name.")));
                 }
                 params.extend([("playlistId", id.clone()), ("name", name.into())]);
                 "updatePlaylist"
@@ -364,7 +367,7 @@ impl Api {
             }
             PlaylistEdit::Append { id, songs } => {
                 if songs.is_empty() {
-                    return Err(anyhow!("Choose at least one song."));
+                    return Err(anyhow!(t!("Choose at least one song.")));
                 }
                 params.push(("playlistId", id.clone()));
                 params.extend(songs.iter().cloned().map(|id| ("songIdToAdd", id)));

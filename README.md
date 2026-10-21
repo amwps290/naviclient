@@ -24,6 +24,16 @@ JavaScript runtime.
 - Home, artists, albums, playlists, and search views
 - Album cover art loaded from the Navidrome API
 - Native system font discovery and multilingual text rendering through GPUI
+- Interface languages: English, Simplified Chinese (简体中文) and Traditional
+  Chinese (繁體中文), switchable from Settings and applied instantly without a
+  restart, or “System” to follow the OS language (Hant/TW/HK/MO regions get
+  Traditional, other Chinese locales Simplified, everything else English). Every
+  label, empty state, tooltip, dialog, desktop notification and player error is
+  translated, with `%{name}` placeholders preserved across languages. The
+  default locale is embedded at build time from `locales/*.yml`, missing keys
+  fall back to the English source text, and `src/i18n_tests.rs` fails the suite
+  if a `t!()` key is missing from any catalog, is no longer used, or changes its
+  placeholder set
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, seek, and queue
   progression
@@ -125,6 +135,9 @@ JavaScript runtime.
   cover glows with the track's accent color while playing; scrolling the wheel
   over the window adjusts volume and briefly flashes it on the progress line
 - Server settings persisted locally as JSON
+- Language preference persisted locally (`System` by default); the Windows tray
+  menu keeps the language it was built with until the next launch, while the
+  Linux tray menu refreshes with the next playback-state update
 - Navidrome-synced favorites for artists, albums, and songs
 - Track-change desktop notifications on Linux (D-Bus) with the cached cover,
   title, artist and album; rapid switching replaces the previous notification
@@ -182,6 +195,31 @@ restarts render grids instantly without re-downloading every cover.
 Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
 5 MiB. Stream URLs are logged without authentication query parameters.
+
+## Translations
+
+UI copy lives in `locales/`, one flat `"key": "text"` line per string, where the
+key is the English source text used by `t!("…")` in the code and the value is
+what that language shows. The catalogs are embedded at build time:
+
+- `locales/en.yml` - source catalog (value equals key)
+- `locales/zh-CN.yml` - 简体中文
+- `locales/zh-TW.yml` - 繁體中文
+
+To add or change a string:
+
+1. Use it in the code as `t!("Full English sentence")`; keep interpolation as
+   `%{name}` (rust-i18n's syntax - `{name}` is **not** replaced and would be
+   shown literally).
+2. Add the same key to all three catalogs, keeping every `%{name}` placeholder
+   exactly once.
+3. Run `cargo test i18n`. The guard tests fail when a `t!()` key is missing from
+   a catalog, when a catalog still carries a key the code no longer uses, when a
+   translation drops or renames a placeholder, or when the runtime switch
+   between the three languages stops working.
+
+Do not translate server-provided metadata (titles, artists, album and playlist
+names), log messages, or MPRIS protocol values such as `Playing`/`Paused`.
 
 ## Development Roadmap
 

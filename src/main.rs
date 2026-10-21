@@ -1,10 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// i18n：编译期嵌入 locales/*.yml；t! 缺键回退原文（键即英文）。
+// 必须在 crate root 声明，子模块里 t! 才能解析 crate::_rust_i18n_try_translate。
+rust_i18n::i18n!["locales", fallback = "en"];
+
 mod api;
 mod app;
 mod assets;
 mod audio;
 mod config;
+#[cfg(test)]
+mod i18n_tests;
 mod media_session;
 mod models;
 mod msg;

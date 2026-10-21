@@ -322,9 +322,9 @@ impl NavidromeApp {
     pub(super) fn render_album_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
         Button::new("albums-sort")
-            .label(format!("Sort: {}", self.state.albums_sort.label()))
+            .label(t!("Sort: %{mode}", mode = self.state.albums_sort.label()))
             .icon(AppIcon::ChevronDown)
-            .tooltip("Album sort order")
+            .tooltip(t!("Album sort order"))
             .ghost()
             .small()
             .dropdown_menu(move |menu, _, cx| {
@@ -350,9 +350,9 @@ impl NavidromeApp {
     pub(super) fn render_artist_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
         Button::new("artists-sort")
-            .label(format!("Sort: {}", self.state.artists_sort.label()))
+            .label(t!("Sort: %{mode}", mode = self.state.artists_sort.label()))
             .icon(AppIcon::ChevronDown)
-            .tooltip("Artist sort order")
+            .tooltip(t!("Artist sort order"))
             .ghost()
             .small()
             .dropdown_menu(move |menu, _, cx| {
@@ -457,10 +457,14 @@ impl NavidromeApp {
             .children(self.state.genres.iter().enumerate().map(|(index, genre)| {
                 let genre_for_click = genre.value.clone();
                 let counts = match (genre.album_count, genre.song_count) {
-                    (Some(albums), Some(songs)) => format!("{albums} albums · {songs} songs"),
-                    (Some(albums), None) => format!("{albums} albums"),
-                    (None, Some(songs)) => format!("{songs} songs"),
-                    (None, None) => "—".to_string(),
+                    (Some(albums), Some(songs)) => t!(
+                        "%{albums} albums · %{songs} songs",
+                        albums = albums,
+                        songs = songs
+                    ),
+                    (Some(albums), None) => t!("%{albums} albums", albums = albums),
+                    (None, Some(songs)) => t!("%{songs} songs", songs = songs),
+                    (None, None) => t!("—"),
                 };
                 div()
                     .id(SharedString::from(format!("genre-card-{index}")))
@@ -506,7 +510,7 @@ impl NavidromeApp {
             .trigger(
                 Button::new("player-eq")
                     .icon(AppIcon::Eq)
-                    .tooltip("Equalizer")
+                    .tooltip(t!("Equalizer"))
                     .ghost()
                     .with_size(px(30.0))
                     .rounded_full(),
@@ -527,29 +531,23 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Equalizer"),
+                                    .child(t!("Equalizer")),
                             )
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .children([(true, "On"), (false, "Off")].map(
-                                        |(enable, label)| {
-                                            let app = app.clone();
-                                            Button::new(SharedString::from(format!(
-                                                "eq-popover-{label}"
-                                            )))
-                                            .label(label)
-                                            .small()
-                                            .ghost()
-                                            .selected(enabled == enable)
-                                            .on_click(move |_, _, cx| {
-                                                let _ = app.update(cx, |this, cx| {
-                                                    this.set_eq_enabled(enable, cx);
-                                                });
-                                            })
-                                        },
-                                    )),
-                            ),
+                            .child(h_flex().gap_1().children(
+                                [(true, t!("On")), (false, t!("Off"))].map(|(enable, label)| {
+                                    let app = app.clone();
+                                    Button::new(SharedString::from(format!("eq-popover-{enable}")))
+                                        .label(label)
+                                        .small()
+                                        .ghost()
+                                        .selected(enabled == enable)
+                                        .on_click(move |_, _, cx| {
+                                            let _ = app.update(cx, |this, cx| {
+                                                this.set_eq_enabled(enable, cx);
+                                            });
+                                        })
+                                }),
+                            )),
                     )
                     // 预设
                     .child(h_flex().gap_1().flex_wrap().children(presets.iter().map(
@@ -558,7 +556,7 @@ impl NavidromeApp {
                             let app = app.clone();
                             let sliders = sliders.clone();
                             Button::new(SharedString::from(format!("eq-popover-preset-{name}")))
-                                .label(*name)
+                                .label(EqSettings::preset_label(name))
                                 .small()
                                 .ghost()
                                 .selected(enabled && gains == preset_gains)
@@ -608,7 +606,7 @@ impl NavidromeApp {
     pub(super) fn header_refresh_button(
         &self,
         id: &'static str,
-        tooltip: &'static str,
+        tooltip: impl Into<SharedString>,
         loading: bool,
         cx: &Context<Self>,
         action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
@@ -639,7 +637,7 @@ impl NavidromeApp {
             .justify_center()
             .child(
                 Button::new(id)
-                    .label("Loading failed — try again")
+                    .label(t!("Loading failed — try again"))
                     .outline()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -871,7 +869,7 @@ impl NavidromeApp {
                                     cx,
                                 ))
                                 .when_some(album.year, |this, year| {
-                                    this.child(format!("- {year}"))
+                                    this.child(t!("- %{year}", year = year))
                                 }),
                         )
                 }));
@@ -1109,8 +1107,8 @@ impl NavidromeApp {
                             .child(
                                 artist
                                     .album_count
-                                    .map(|count| format!("{count} albums"))
-                                    .unwrap_or_else(|| "Artist".to_string()),
+                                    .map(|count| t!("%{count} albums", count = count))
+                                    .unwrap_or_else(|| t!("Artist")),
                             ),
                     )
             }))
@@ -1236,15 +1234,15 @@ impl NavidromeApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(div().w(px(34.0)))
                     .child(div().w(px(42.0)))
-                    .child(div().flex_1().flex_grow(3.0).child("Title"))
+                    .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
                     .child(
                         div()
                             .flex_1()
                             .flex_grow(2.0)
                             .max_w(px(180.0))
-                            .child("Artist"),
+                            .child(t!("Artist")),
                     )
-                    .child(div().w(px(64.0)).text_right().child("Time"))
+                    .child(div().w(px(64.0)).text_right().child(t!("Time")))
                     .child(div().w(px(if editable { 124.0 } else { 92.0 }))),
             )
             .child(list)
@@ -1302,23 +1300,27 @@ impl NavidromeApp {
             )
         };
         let mut info = v_flex().gap_2();
-        info = info_row(info, "Title", song.title.clone());
+        info = info_row(info, &t!("Title"), song.title.clone());
         if !song.artist.trim().is_empty() {
-            info = info_row(info, "Artist", song.artist.clone());
+            info = info_row(info, &t!("Artist"), song.artist.clone());
         }
         if !song.album.trim().is_empty() {
-            info = info_row(info, "Album", song.album.clone());
+            info = info_row(info, &t!("Album"), song.album.clone());
         }
         if song.track.is_some() || song.disc.is_some() {
             let value = match (song.disc, song.track) {
-                (Some(disc), Some(track)) => format!("Disc {disc} · Track {track:02}"),
-                (Some(disc), None) => format!("Disc {disc}"),
-                (None, Some(track)) => format!("Track {track:02}"),
-                (None, None) => String::new(),
+                (Some(disc), Some(track)) => t!(
+                    "Disc %{disc} · Track %{track}",
+                    disc = disc,
+                    track = format!("{track:02}")
+                ),
+                (Some(disc), None) => t!("Disc %{disc}", disc = disc),
+                (None, Some(track)) => t!("Track %{track}", track = format!("{track:02}")),
+                (None, None) => std::borrow::Cow::Borrowed(""),
             };
-            info = info_row(info, "Position", value);
+            info = info_row(info, &t!("Position"), value.to_string());
         }
-        info = info_row(info, "Duration", format_duration(song.duration));
+        info = info_row(info, &t!("Duration"), format_duration(song.duration));
         if song.suffix.as_deref().is_some_and(|s| !s.is_empty()) {
             let mut value = song.suffix.as_deref().unwrap_or_default().to_uppercase();
             if let Some(bit_rate) = song.bit_rate {
@@ -1327,16 +1329,16 @@ impl NavidromeApp {
             if let Some(size) = song.size {
                 value.push_str(&format!(" · {}", format_file_size(size.max(0) as u64)));
             }
-            info = info_row(info, "Format", value);
+            info = info_row(info, &t!("Format"), value.to_string());
         }
         if let Some(path) = &song.path {
             if !path.is_empty() {
-                info = info_row(info, "File", path.clone());
+                info = info_row(info, &t!("File"), path.clone());
             }
         }
-        info = info_row(info, "ID", song.id.clone());
+        info = info_row(info, &t!("ID"), song.id.clone());
         dialog
-            .title("Track info")
+            .title(t!("Track info"))
             .w(px(440.0))
             .close_button(true)
             .keyboard(true)
@@ -1350,7 +1352,7 @@ impl NavidromeApp {
                         .pt_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Metadata from the Navidrome server."),
+                        .child(t!("Metadata from the Navidrome server.")),
                 ),
             )
     }
@@ -1374,9 +1376,9 @@ impl NavidromeApp {
             AppIcon::Heart
         };
         let favorite_label = if all_favorited {
-            "Unfavorite selected"
+            t!("Unfavorite selected")
         } else {
-            "Favorite selected"
+            t!("Favorite selected")
         };
         let add_disabled = self.playlist_ui.busy || self.api.is_none();
         h_flex()
@@ -1394,13 +1396,13 @@ impl NavidromeApp {
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().primary)
-                    .child(format!("{} selected", songs.len())),
+                    .child(t!("%{count} selected", count = songs.len())),
             )
             .child(div().flex_1())
             .child(
                 Button::new(SharedString::from(format!("multi-play-{scope}")))
                     .icon(PlayerIcon::Play)
-                    .tooltip("Play selected (Enter)")
+                    .tooltip(t!("Play selected (Enter)"))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1411,7 +1413,7 @@ impl NavidromeApp {
             .child(
                 Button::new(SharedString::from(format!("multi-next-{scope}")))
                     .icon(PlayerIcon::Next)
-                    .tooltip("Play selected next")
+                    .tooltip(t!("Play selected next"))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1422,7 +1424,7 @@ impl NavidromeApp {
             .child(
                 Button::new(SharedString::from(format!("multi-queue-{scope}")))
                     .icon(AppIcon::Queue)
-                    .tooltip("Add selected to queue")
+                    .tooltip(t!("Add selected to queue"))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1432,7 +1434,7 @@ impl NavidromeApp {
             )
             .child(
                 Button::new(SharedString::from(format!("multi-playlist-{scope}")))
-                    .label("Add to playlist…")
+                    .label(t!("Add to playlist…"))
                     .disabled(add_disabled)
                     .ghost()
                     .small()
@@ -1459,7 +1461,7 @@ impl NavidromeApp {
             .child(
                 Button::new(SharedString::from(format!("multi-clear-{scope}")))
                     .icon(AppIcon::Close)
-                    .tooltip("Clear selection (Esc)")
+                    .tooltip(t!("Clear selection (Esc)"))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1495,7 +1497,7 @@ impl NavidromeApp {
             && (!editable || self.state.queue_index == Some(index));
         let animated = current && playback.active && !playback.paused;
         let album = if song.album.trim().is_empty() {
-            "Unknown album".to_string()
+            t!("Unknown album").to_string()
         } else {
             song.album.clone()
         };
@@ -1645,7 +1647,7 @@ impl NavidromeApp {
                     slot.child(
                         Button::new(SharedString::from(format!("queue-up-{key}")))
                             .icon(AppIcon::ChevronUp)
-                            .tooltip("Move up")
+                            .tooltip(t!("Move up"))
                             .ghost()
                             .small()
                             .disabled(index == 0)
@@ -1658,7 +1660,7 @@ impl NavidromeApp {
                     .child(
                         Button::new(SharedString::from(format!("queue-down-{key}")))
                             .icon(AppIcon::ChevronDown)
-                            .tooltip("Move down")
+                            .tooltip(t!("Move down"))
                             .ghost()
                             .small()
                             .disabled(index + 1 >= total)
@@ -1671,7 +1673,7 @@ impl NavidromeApp {
                     .child(
                         Button::new(SharedString::from(format!("queue-remove-{key}")))
                             .icon(AppIcon::Close)
-                            .tooltip("Remove from queue")
+                            .tooltip(t!("Remove from queue"))
                             .ghost()
                             .small()
                             .text_color(cx.theme().muted_foreground)
@@ -1686,7 +1688,7 @@ impl NavidromeApp {
                     slot.child(
                         Button::new(SharedString::from(format!("play-next-{key}")))
                             .icon(PlayerIcon::Next)
-                            .tooltip("Play next")
+                            .tooltip(t!("Play next"))
                             .ghost()
                             .small()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1700,7 +1702,7 @@ impl NavidromeApp {
                     .child(
                         Button::new(SharedString::from(format!("add-to-queue-{key}")))
                             .icon(AppIcon::Queue)
-                            .tooltip("Add to queue")
+                            .tooltip(t!("Add to queue"))
                             .ghost()
                             .small()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1720,7 +1722,7 @@ impl NavidromeApp {
                         .child(
                             Button::new(SharedString::from(format!("song-menu-{key}")))
                                 .icon(IconName::Ellipsis)
-                                .tooltip("Song actions")
+                                .tooltip(t!("Song actions"))
                                 .ghost()
                                 .small()
                                 .dropdown_menu(move |menu, _, cx| {
@@ -1793,20 +1795,21 @@ impl NavidromeApp {
     pub(super) fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let connected = self.state.server.is_some();
         let status = if self.state.loading {
-            "Connecting…".to_string()
+            t!("Connecting…").to_string()
         } else if connected {
             match self.state.server.as_ref() {
-                Some(server) => format!(
-                    "Connected · {} {}",
-                    server.app_name.as_deref().unwrap_or("Navidrome"),
-                    server.version
-                ),
-                None => "Connected".to_string(),
+                Some(server) => t!(
+                    "Connected · %{app} %{version}",
+                    app = server.app_name.as_deref().unwrap_or("Navidrome"),
+                    version = server.version
+                )
+                .to_string(),
+                None => t!("Connected").to_string(),
             }
         } else if self.config.servers.len() > 1 {
-            "Not connected — pick a server below".to_string()
+            t!("Not connected — pick a server below").to_string()
         } else {
-            "Not connected — fill in the address and account".to_string()
+            t!("Not connected — fill in the address and account").to_string()
         };
         let status_color = if connected {
             cx.theme().accent
@@ -1821,9 +1824,9 @@ impl NavidromeApp {
             .active_profile()
             .is_some_and(|profile| profile.password_in_keyring)
         {
-            "Password is kept in the system credential store"
+            t!("Password is kept in the system credential store")
         } else {
-            "Password is kept in the config file"
+            t!("Password is kept in the config file")
         };
 
         v_flex()
@@ -1867,21 +1870,21 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child(format!("Editing “{editing}”")),
+                                    .child(t!("Editing “%{editing}”", editing = editing)),
                             )
                             .when(self.config.servers.len() > 1, |this| {
                                 this.child(
                                     div()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child("switch servers in the list above"),
+                                        .child(t!("switch servers in the list above")),
                                 )
                             }),
                     )
-                    .child(self.render_server_field("Display name", &self.name_input, cx))
-                    .child(self.render_server_field("Server URL", &self.server_input, cx))
-                    .child(self.render_server_field("Username", &self.username_input, cx))
-                    .child(self.render_server_field("Password", &self.password_input, cx))
+                    .child(self.render_server_field(t!("Display name"), &self.name_input, cx))
+                    .child(self.render_server_field(t!("Server URL"), &self.server_input, cx))
+                    .child(self.render_server_field(t!("Username"), &self.username_input, cx))
+                    .child(self.render_server_field(t!("Password"), &self.password_input, cx))
                     .child(
                         div()
                             .text_xs()
@@ -1891,7 +1894,7 @@ impl NavidromeApp {
                     .child(
                         h_flex().justify_end().child(
                             Button::new("save-settings")
-                                .label("Save and connect")
+                                .label(t!("Save and connect"))
                                 .primary()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.save_settings(cx);
@@ -1907,10 +1910,11 @@ impl NavidromeApp {
     /// 保证四个字段的输入框起始位置完全一致。
     fn render_server_field(
         &self,
-        label: &'static str,
+        label: impl Into<SharedString>,
         input: &Entity<InputState>,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let label: SharedString = label.into();
         h_flex()
             .w_full()
             .gap_3()
@@ -1943,17 +1947,27 @@ impl NavidromeApp {
                 let is_active = active.as_deref() == Some(profile.id.as_str());
                 let label = profile.label();
                 let detail = if profile.is_configured() {
-                    format!("{} · {}", profile.url, profile.username)
+                    t!(
+                        "%{url} · %{user}",
+                        url = profile.url,
+                        user = profile.username
+                    )
+                    .to_string()
                 } else {
-                    "Not configured — fill in the form below".to_string()
+                    t!("Not configured — fill in the form below").to_string()
                 };
                 let switchable = !is_active && profile.is_configured();
                 let tooltip = if is_active {
-                    "Currently connected".to_string()
+                    t!("Currently connected").to_string()
                 } else if switchable {
-                    format!("Switch to {label}\n{detail}")
+                    t!(
+                        "Switch to %{label}\n%{detail}",
+                        label = label,
+                        detail = detail
+                    )
+                    .to_string()
                 } else {
-                    format!("{label} is not configured yet")
+                    t!("%{label} is not configured yet", label = label).to_string()
                 };
                 h_flex()
                     .id(SharedString::from(format!("server-row-{switch_id}")))
@@ -2040,7 +2054,7 @@ impl NavidromeApp {
                                         .text_size(px(10.0))
                                         .bg(cx.theme().accent.opacity(0.16))
                                         .text_color(cx.theme().accent)
-                                        .child("Active"),
+                                        .child(t!("Active")),
                                 )
                             })
                             .child(
@@ -2049,9 +2063,9 @@ impl NavidromeApp {
                                 )))
                                 .icon(AppIcon::Trash)
                                 .tooltip(if can_remove {
-                                    "Remove this server"
+                                    t!("Remove this server")
                                 } else {
-                                    "Keep at least one server"
+                                    t!("Keep at least one server")
                                 })
                                 .disabled(!can_remove)
                                 .ghost()
@@ -2089,7 +2103,7 @@ impl NavidromeApp {
             .gap_2()
             .child(
                 Button::new("cancel-remove-server")
-                    .label("Cancel")
+                    .label(t!("Cancel"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_remove_server(cx);
                         window.close_dialog(cx);
@@ -2097,7 +2111,7 @@ impl NavidromeApp {
             )
             .child(
                 Button::new("confirm-remove-server")
-                    .label("Remove")
+                    .label(t!("Remove"))
                     .danger()
                     .outline()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -2107,7 +2121,7 @@ impl NavidromeApp {
             )
             .child(
                 Button::new("confirm-remove-server-data")
-                    .label("Remove and clear data")
+                    .label(t!("Remove and clear data"))
                     .danger()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_remove_server(true, window, cx);
@@ -2116,7 +2130,7 @@ impl NavidromeApp {
             );
         let ok_app = cx.entity().downgrade();
         dialog
-            .title("Remove server?")
+            .title(t!("Remove server?"))
             .w(px(480.0))
             .overlay_closable(false)
             .keyboard(true)
@@ -2134,19 +2148,19 @@ impl NavidromeApp {
                 v_flex()
                     .gap_2()
                     .p_1()
-                    .child(div().text_sm().child(format!(
-                        "Remove “{label}” from this app? The server itself and its music stay untouched."
+                    .child(div().text_sm().child(t!("Remove “%{label}” from this app? The server itself and its music stay untouched.",
+                        label = label
                     )))
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(
-                                "Remove keeps local data: the saved session, loudness and genre caches, \
-                                 and the stored credential are kept, so re-adding the same server \
-                                 continues where you left off. Remove and clear data deletes them \
-                                 for good — the password will have to be re-entered."
-                            ),
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("Remove keeps local data: the saved session, loudness and genre caches, and the stored credential are kept, so re-adding the same server continues where you left off. Remove and clear data deletes them for good — the password will have to be re-entered."))
+                                ),
                     ),
             )
             .footer(footer)
@@ -2201,12 +2215,12 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Settings"),
+                                    .child(t!("Settings")),
                             )
                             .child(
                                 Button::new("close-settings")
                                     .icon(AppIcon::Close)
-                                    .tooltip("Close settings")
+                                    .tooltip(t!("Close settings"))
                                     .ghost()
                                     .small()
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -2250,7 +2264,7 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child("Servers"),
+                                    .child(t!("Servers")),
                             )
                             .child(
                                 h_flex()
@@ -2260,7 +2274,7 @@ impl NavidromeApp {
                                         this.child(
                                             Button::new("settings-refresh")
                                                 .icon(AppIcon::Refresh)
-                                                .tooltip("Refresh library")
+                                                .tooltip(t!("Refresh library"))
                                                 .loading(self.state.loading)
                                                 .ghost()
                                                 .small()
@@ -2273,8 +2287,8 @@ impl NavidromeApp {
                                     .child(
                                         Button::new("settings-add-server")
                                             .icon(KitIcon::Plus)
-                                            .label("Add server")
-                                            .tooltip("Add another server")
+                                            .label(t!("Add server"))
+                                            .tooltip(t!("Add another server"))
                                             .ghost()
                                             .small()
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -2293,7 +2307,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Playback"),
+                            .child(t!("Playback")),
                     )
                     .child(
                         v_flex()
@@ -2310,7 +2324,7 @@ impl NavidromeApp {
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child("Audio cache folder"),
+                                            .child(t!("Audio cache folder")),
                                     )
                                     .child(
                                         h_flex()
@@ -2327,14 +2341,14 @@ impl NavidromeApp {
                                             )
                                             .child(
                                                 Button::new("choose-cache-directory")
-                                                    .label("Choose folder")
+                                                    .label(t!("Choose folder"))
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.choose_cache_directory(cx);
                                                     })),
                                             )
                                             .child(
                                                 Button::new("reset-cache-directory")
-                                                    .label("Use default")
+                                                    .label(t!("Use default"))
                                                     .disabled(self.config.cache_dir.is_none())
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.apply_cache_directory(None);
@@ -2350,7 +2364,7 @@ impl NavidromeApp {
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child("Streaming quality"),
+                                            .child(t!("Streaming quality")),
                                     )
                                     .child(h_flex().gap_2().flex_wrap().children(
                                         TranscodingQuality::ALL.into_iter().map(|quality| {
@@ -2375,7 +2389,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Audio output"),
+                            .child(t!("Audio output")),
                     )
                     .child(
                         v_flex()
@@ -2389,12 +2403,13 @@ impl NavidromeApp {
                                 let playback = self.audio.state();
                                 let active = match playback.output_name.as_deref() {
                                     Some(name) => name.to_string(),
-                                    None => "System default".to_string(),
+                                    None => t!("System default").to_string(),
                                 };
                                 div().text_xs().text_color(cx.theme().muted_foreground).child(
-                                    format!(
-                                        "Active: {active} · {} Hz · {} ch",
-                                        playback.output_sample_rate, playback.output_channels
+                                    t!("Active: %{active} · %{rate} Hz · %{channels} ch",
+                                        active = active,
+                                        rate = playback.output_sample_rate,
+                                        channels = playback.output_channels
                                     ),
                                 )
                             })
@@ -2404,8 +2419,8 @@ impl NavidromeApp {
                                     .flex_wrap()
                                     .child(
                                         Button::new("output-device-default")
-                                            .label("System default")
-                                            .tooltip("Follow the OS default output device")
+                                            .label(t!("System default"))
+                                            .tooltip(t!("Follow the OS default output device"))
                                             .selected(self.config.output_device.is_none())
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.set_output_device(None, cx);
@@ -2422,10 +2437,11 @@ impl NavidromeApp {
                                                 Button::new(SharedString::from(format!(
                                                     "output-device-{index}"
                                                 )))
-                                                .label(format!(
-                                                    "{name}{}",
-                                                    if *is_default { " (default)" } else { "" }
-                                                ))
+                                                .label(if *is_default {
+                                                    t!("%{name} (default)", name = name)
+                                                } else {
+                                                    t!("%{name}", name = name)
+                                                })
                                                 .selected(
                                                     self.config.output_device
                                                         .as_deref()
@@ -2441,7 +2457,7 @@ impl NavidromeApp {
                                     )
                                     .child(
                                         Button::new("refresh-output-devices")
-                                            .label("Refresh devices")
+                                            .label(t!("Refresh devices"))
                                             .ghost()
                                             .small()
                                             .loading(self.state.output_devices_loading)
@@ -2459,7 +2475,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Volume normalization"),
+                            .child(t!("Volume normalization")),
                     )
                     .child(
                         v_flex()
@@ -2474,15 +2490,17 @@ impl NavidromeApp {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(
-                                        "Adjust per-song loudness with ReplayGain so quiet and loud tracks play at a similar level.",
+                                        t!("Adjust per-song loudness with ReplayGain so quiet and loud tracks play at a similar level."
+                                        ),
                                     ),
                             )
                             .child(
                                 h_flex().gap_2().flex_wrap().children(
                                     VolumeNormalization::ALL.into_iter().map(|mode| {
+                                        // 元素 ID 用 Debug 名（Off/Track/Album）保持稳定，
+                                        // 显示文案随界面语言变。
                                         Button::new(SharedString::from(format!(
-                                            "volume-normalization-{}",
-                                            mode.label().to_ascii_lowercase()
+                                            "volume-normalization-{mode:?}"
                                         )))
                                         .label(mode.label())
                                         .tooltip(mode.tooltip())
@@ -2502,7 +2520,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Lyrics"),
+                            .child(t!("Lyrics")),
                     )
                     .child(
                         v_flex()
@@ -2517,12 +2535,16 @@ impl NavidromeApp {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(
-                                        "Show translated lyrics under the original line when the server provides another language variant.",
+                                        t!("Show translated lyrics under the original line when the server provides another language variant."
+                                        ),
                                     ),
                             )
                             .child(
                                 h_flex().gap_2().children(
-                                    [("Show translation", true), ("Original only", false)]
+                                    [
+                                        (t!("Show translation"), true),
+                                        (t!("Original only"), false),
+                                    ]
                                         .into_iter()
                                         .map(|(label, show)| {
                                             Button::new(SharedString::from(format!(
@@ -2547,7 +2569,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Desktop"),
+                            .child(t!("Desktop")),
                     )
                     .child(
                         v_flex()
@@ -2570,24 +2592,28 @@ impl NavidromeApp {
                                             .child(
                                                 div()
                                                     .text_sm()
-                                                    .child("Now-playing notifications"),
+                                                    .child(t!("Now-playing notifications")),
                                             )
                                             .child(
                                                 div()
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(
-                                                        "Send a desktop notification with the cover, title, artist and album when a track starts. Rapid switching replaces the previous notification.",
+                                                        t!("Send a desktop notification with the cover, title, artist and album when a track starts. Rapid switching replaces the previous notification."
+                                                        ),
                                                     ),
                                             ),
                                     )
                                     .child(
                                         h_flex().gap_1().children(
-                                            [("On", true), ("Off", false)].map(
-                                                |(label, value)| {
-                                                    Button::new(SharedString::from(format!(
-                                                        "track-notifications-{label}"
-                                                    )))
+                                            [
+                                                (t!("On"), true),
+                                                (t!("Off"), false),
+                                            ]
+                                            .map(|(label, value)| {
+                                                Button::new(SharedString::from(format!(
+                                                    "track-notifications-{value}"
+                                                )))
                                                     .label(label)
                                                     .selected(
                                                         self.config.show_track_notifications
@@ -2618,24 +2644,28 @@ impl NavidromeApp {
                                             .child(
                                                 div()
                                                     .text_sm()
-                                                    .child("Close button minimizes"),
+                                                    .child(t!("Close button minimizes")),
                                             )
                                             .child(
                                                 div()
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(
-                                                        "The window close button minimizes to the taskbar instead of quitting; tray Exit still quits. Some Wayland compositors ignore minimize requests.",
+                                                        t!("The window close button minimizes to the taskbar instead of quitting; tray Exit still quits. Some Wayland compositors ignore minimize requests."
+                                                        ),
                                                     ),
                                             ),
                                     )
                                     .child(
                                         h_flex().gap_1().children(
-                                            [("On", true), ("Off", false)].map(
-                                                |(label, value)| {
-                                                    Button::new(SharedString::from(format!(
-                                                        "close-minimizes-{label}"
-                                                    )))
+                                            [
+                                                (t!("On"), true),
+                                                (t!("Off"), false),
+                                            ]
+                                            .map(|(label, value)| {
+                                                Button::new(SharedString::from(format!(
+                                                    "close-minimizes-{value}"
+                                                )))
                                                     .label(label)
                                                     .selected(
                                                         self.config.close_minimizes == value,
@@ -2659,7 +2689,7 @@ impl NavidromeApp {
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Appearance"),
+                            .child(t!("Appearance")),
                     )
                     .child(
                         v_flex()
@@ -2673,7 +2703,7 @@ impl NavidromeApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Theme"),
+                                    .child(t!("Theme")),
                             )
                             .child(
                                 h_flex().gap_2().children(
@@ -2684,9 +2714,10 @@ impl NavidromeApp {
                                     ]
                                     .into_iter()
                                     .map(|preference| {
+                                        // 同上：ID 用 Debug 名（Light/Dark/System），
+                                        // 不随界面语言变化。
                                         Button::new(SharedString::from(format!(
-                                            "theme-{}",
-                                            preference.label().to_lowercase()
+                                            "theme-{preference:?}"
                                         )))
                                         .label(preference.label())
                                         .selected(self.config.theme == preference)
@@ -2696,6 +2727,48 @@ impl NavidromeApp {
                                             }),
                                         )
                                     }),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(t!("Language")),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_3()
+                            .p_4()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().secondary.opacity(0.2))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("Interface language. Changes apply instantly.")),
+                            )
+                            .child(
+                                h_flex().gap_2().flex_wrap().children(
+                                    LanguagePreference::ALL
+                                        .into_iter()
+                                        .map(|preference| {
+                                            Button::new(SharedString::from(format!(
+                                                "language-{}",
+                                                preference.locale_code()
+                                            )))
+                                            .label(preference.native_label())
+                                            .selected(self.config.language == preference)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.set_language(preference, cx);
+                                            }))
+                                        }),
                                 ),
                             ),
                     ),
@@ -2719,13 +2792,13 @@ impl NavidromeApp {
                     div()
                         .text_xl()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("No track playing"),
+                        .child(t!("No track playing")),
                 )
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Choose a song from your library."),
+                        .child(t!("Choose a song from your library.")),
                 )
                 .into_any_element();
         };
@@ -2753,7 +2826,7 @@ impl NavidromeApp {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child("Loading lyrics...")
+                .child(t!("Loading lyrics..."))
                 .into_any_element()
         } else if let Some(error) = &self.state.lyrics_error {
             v_flex()
@@ -2762,7 +2835,7 @@ impl NavidromeApp {
                 .justify_center()
                 .gap_2()
                 .text_color(cx.theme().muted_foreground)
-                .child("Lyrics are unavailable for this track.")
+                .child(t!("Lyrics are unavailable for this track."))
                 .child(div().text_xs().child(error.clone()))
                 .into_any_element()
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
@@ -2864,7 +2937,7 @@ impl NavidromeApp {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child("No lyrics are available for this track.")
+                .child(t!("No lyrics are available for this track."))
                 .into_any_element()
         };
 
@@ -2945,13 +3018,17 @@ impl NavidromeApp {
                                 div()
                                     .text_base()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Lyrics"),
+                                    .child(t!("Lyrics")),
                             )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground.opacity(0.82))
-                                    .child(format!("{} - {}", song.title, song.artist)),
+                                    .child(t!(
+                                        "%{title} - %{artist}",
+                                        title = song.title,
+                                        artist = song.artist
+                                    )),
                             ),
                     )
                     .child(lyrics_body),
@@ -2963,10 +3040,11 @@ impl NavidromeApp {
     pub(super) fn render_home_section(
         &self,
         id: &'static str,
-        title: &str,
+        title: impl Into<SharedString>,
         content: gpui_kit::AnyElement,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let title: SharedString = title.into();
         let collapsed = self.state.collapsed_sections.contains(id);
         v_flex()
             .gap_3()
@@ -2992,7 +3070,7 @@ impl NavidromeApp {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(title.to_string()),
+                            .child(title.clone()),
                     ),
             )
             .when(!collapsed, |this| this.child(content))
@@ -3005,17 +3083,18 @@ impl NavidromeApp {
         scope: &str,
         albums: &[Album],
         loading: bool,
-        empty_text: &str,
+        empty_text: impl Into<SharedString>,
         cx: &Context<Self>,
         window: &mut Window,
     ) -> gpui_kit::AnyElement {
+        let empty_text: SharedString = empty_text.into();
         if albums.is_empty() && loading {
             self.render_album_skeleton_grid(cx)
         } else if albums.is_empty() {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(empty_text.to_string())
+                .child(empty_text)
                 .into_any_element()
         } else {
             self.render_album_grid(scope, albums, cx, window)
@@ -3041,23 +3120,23 @@ impl NavidromeApp {
                 .gap_5()
                 .child(
                     self.page_header(
-                        "Home",
+                        t!("Home"),
                         self.state
                             .server
                             .as_ref()
-                            .map(|info| format!("Connected to Navidrome API {}", info.version))
+                            .map(|info| t!("Connected to Navidrome API %{version}", version = info.version).to_string())
                             .unwrap_or_else(|| self.state.status.clone()),
                         cx,
                     ),
                 )
                 .child(self.render_home_section(
                     "recent",
-                    "Recently played",
+                    t!("Recently played"),
                     self.render_home_album_content(
                         "recent",
                         &self.state.recent_albums,
                         self.state.recent_albums_loading,
-                        "Nothing played yet — recently played albums will appear here.",
+                        t!("Nothing played yet — recently played albums will appear here."),
                         cx,
                         window,
                     ),
@@ -3065,12 +3144,12 @@ impl NavidromeApp {
                 ))
                 .child(self.render_home_section(
                     "frequent",
-                    "Frequently played",
+                    t!("Frequently played"),
                     self.render_home_album_content(
                         "frequent",
                         &self.state.frequent_albums,
                         self.state.frequent_albums_loading,
-                        "Nothing frequently played yet — your most-played albums will appear here.",
+                        t!("Nothing frequently played yet — your most-played albums will appear here."),
                         cx,
                         window,
                     ),
@@ -3078,12 +3157,12 @@ impl NavidromeApp {
                 ))
                 .child(self.render_home_section(
                     "random",
-                    "Random albums",
+                    t!("Random albums"),
                     self.render_home_album_content(
                         "random",
                         &self.state.random_albums,
                         self.state.random_albums_loading,
-                        "No random albums to show — refresh the library for a fresh pick.",
+                        t!("No random albums to show — refresh the library for a fresh pick."),
                         cx,
                         window,
                     ),
@@ -3091,12 +3170,12 @@ impl NavidromeApp {
                 ))
                 .child(self.render_home_section(
                     "newest",
-                    "Newest albums",
+                    t!("Newest albums"),
                     self.render_home_album_content(
                         "newest",
                         &self.state.newest_albums,
                         self.state.newest_albums_loading,
-                        "No albums in your library yet.",
+                        t!("No albums in your library yet."),
                         cx,
                         window,
                     ),
@@ -3113,13 +3192,13 @@ impl NavidromeApp {
                         .items_end()
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
-                            "Favorites",
-                            format!("{total} starred items from your Navidrome library"),
+                            t!("Favorites"),
+                            t!("%{total} starred items from your Navidrome library", total = total),
                             cx,
                         )))
                         .child(self.header_refresh_button(
                             "refresh-favorites",
-                            "Refresh favorites",
+                            t!("Refresh favorites"),
                             false,
                             cx,
                             |this, _cx| this.load_favorites(),
@@ -3131,7 +3210,7 @@ impl NavidromeApp {
                         div()
                             .py_8()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Click a heart on a song, album, or artist to add it here."),
+                            .child(t!("Click a heart on a song, album, or artist to add it here.")),
                     );
                 }
                 if !favorites.artists.is_empty() {
@@ -3140,7 +3219,7 @@ impl NavidromeApp {
                             div()
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Artists"),
+                                .child(t!("Artists")),
                         )
                         .child(self.render_artist_grid(&favorites.artists, cx, window));
                 }
@@ -3150,7 +3229,7 @@ impl NavidromeApp {
                             div()
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Albums"),
+                                .child(t!("Albums")),
                         )
                         .child(self.render_album_grid("favorites", &favorites.albums, cx, window));
                 }
@@ -3160,7 +3239,7 @@ impl NavidromeApp {
                             div()
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Songs"),
+                                .child(t!("Songs")),
                         )
                         .child(self.render_song_list("favorites", false, cx));
                 }
@@ -3175,14 +3254,14 @@ impl NavidromeApp {
                         .items_end()
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
-                            "Artists",
-                            format!("{} artists in your library", self.state.artists.len()),
+                            t!("Artists"),
+                            t!("%{count} artists in your library", count = self.state.artists.len()),
                             cx,
                         )))
                         .child(self.render_artist_sort_button(cx))
                         .child(self.header_refresh_button(
                             "refresh-artists",
-                            "Refresh artists",
+                            t!("Refresh artists"),
                             self.state.loading && self.state.artists.is_empty(),
                             cx,
                             |this, _cx| this.load_artists(),
@@ -3203,14 +3282,14 @@ impl NavidromeApp {
                         .items_end()
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
-                            "Albums",
-                            format!("{} albums in your library", self.state.albums.len()),
+                            t!("Albums"),
+                            t!("%{count} albums in your library", count = self.state.albums.len()),
                             cx,
                         )))
                         .child(self.render_album_sort_button(cx))
                         .child(self.header_refresh_button(
                             "refresh-albums",
-                            "Refresh albums",
+                            t!("Refresh albums"),
                             self.state.albums_loading,
                             cx,
                             |this, _cx| this.load_albums(),
@@ -3236,9 +3315,9 @@ impl NavidromeApp {
                 // 有旧数据（磁盘缓存）时直接渲染，仅在后台重验证中提示；
                 // 首次无缓存才显示骨架屏。
                 let subtitle = if self.state.genres_loading && !self.state.genres.is_empty() {
-                    format!("{} genres — refreshing…", self.state.genres.len())
+                    t!("%{count} genres — refreshing…", count = self.state.genres.len())
                 } else {
-                    format!("{} genres in your library", self.state.genres.len())
+                    t!("%{count} genres in your library", count = self.state.genres.len())
                 };
                 v_flex()
                     .gap_5()
@@ -3250,11 +3329,11 @@ impl NavidromeApp {
                             .child(
                                 div()
                                     .flex_1()
-                                    .child(self.page_header("Genres", subtitle, cx)),
+                                    .child(self.page_header(t!("Genres"), subtitle, cx)),
                             )
                             .child(self.header_refresh_button(
                                 "refresh-genres",
-                                "Refresh genres",
+                                t!("Refresh genres"),
                                 self.state.genres_loading,
                                 cx,
                                 |this, _cx| this.load_genres(),
@@ -3267,7 +3346,7 @@ impl NavidromeApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No genres in your library yet.")
+                                .child(t!("No genres in your library yet."))
                                 .into_any_element()
                         } else {
                             self.render_genre_grid(cx)
@@ -3277,13 +3356,13 @@ impl NavidromeApp {
             }
             View::GenreDetail => {
                 let Some(genre) = self.state.current_genre.clone() else {
-                    return div().child("Genre not found").into_any_element();
+                    return div().child(t!("Genre not found")).into_any_element();
                 };
                 v_flex()
                     .gap_5()
                     .child(self.page_header(
                         genre,
-                        format!("{} albums", self.state.genre_albums.len()),
+                        t!("%{count} albums", count = self.state.genre_albums.len()),
                         cx,
                     ))
                     .child(
@@ -3293,7 +3372,7 @@ impl NavidromeApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No albums in this genre yet.")
+                                .child(t!("No albums in this genre yet."))
                                 .into_any_element()
                         } else {
                             self.render_album_grid(
@@ -3336,8 +3415,8 @@ impl NavidromeApp {
                                     .owner
                                     .as_deref()
                                     .filter(|owner| !owner.trim().is_empty())
-                                    .map(|owner| format!("{track_count} tracks | {owner}"))
-                                    .unwrap_or_else(|| format!("{track_count} tracks"));
+                                    .map(|owner| t!("%{track_count} tracks | %{owner}", track_count = track_count, owner = owner))
+                                    .unwrap_or_else(|| t!("%{track_count} tracks", track_count = track_count));
 
                                 h_flex()
                                     .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
@@ -3390,8 +3469,8 @@ impl NavidromeApp {
                 v_flex()
                     .gap_5()
                     .child(self.page_header(
-                        "Playlists",
-                        format!("{} playlists", self.state.playlists.len()),
+                        t!("Playlists"),
+                        t!("%{count} playlists", count = self.state.playlists.len()),
                         cx,
                     ))
                     .child(
@@ -3399,7 +3478,7 @@ impl NavidromeApp {
                             .gap_2()
                             .child(
                                 Button::new("new-playlist")
-                                    .label("New playlist")
+                                    .label(t!("New playlist"))
                                     .primary()
                                     .small()
                                     .disabled(self.playlist_ui.busy || self.api.is_none())
@@ -3410,7 +3489,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("refresh-playlists")
                                     .icon(AppIcon::Refresh)
-                                    .label("Refresh")
+                                    .label(t!("Refresh"))
                                     .outline()
                                     .small()
                                     .disabled(
@@ -3433,7 +3512,7 @@ impl NavidromeApp {
                                 div()
                                     .py_8()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("No playlists are available."),
+                                    .child(t!("No playlists are available.")),
                             )
                         },
                     )
@@ -3446,8 +3525,8 @@ impl NavidromeApp {
                 let mut content = v_flex()
                     .gap_5()
                     .child(self.page_header(
-                        "Search",
-                        "Find music across the entire server library.",
+                        t!("Search"),
+                        t!("Find music across the entire server library."),
                         cx,
                     ))
                     .child(
@@ -3460,7 +3539,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 Button::new("run-search")
-                                    .label("Search")
+                                    .label(t!("Search"))
                                     .primary()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.submit_search(cx);
@@ -3469,7 +3548,7 @@ impl NavidromeApp {
                             )
                             .child(self.header_refresh_button(
                                 "refresh-search",
-                                "Run search again",
+                                t!("Run search again"),
                                 false,
                                 cx,
                                 |this, cx| this.submit_search(cx),
@@ -3507,7 +3586,7 @@ impl NavidromeApp {
                                     div()
                                         .text_lg()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Artists"),
+                                        .child(t!("Artists")),
                                 )
                                 .child(self.render_artist_grid(&results.artists, cx, window));
                         } else if filter == SearchFilter::Artists {
@@ -3515,7 +3594,7 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("No artists matched your search."),
+                                    .child(t!("No artists matched your search.")),
                             );
                         }
                     }
@@ -3526,7 +3605,7 @@ impl NavidromeApp {
                                     div()
                                         .text_lg()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Albums"),
+                                        .child(t!("Albums")),
                                 )
                                 .child(self.render_album_grid(
                                     "search",
@@ -3539,7 +3618,7 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("No albums matched your search."),
+                                    .child(t!("No albums matched your search.")),
                             );
                         }
                     }
@@ -3550,7 +3629,7 @@ impl NavidromeApp {
                                     div()
                                         .text_lg()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Songs"),
+                                        .child(t!("Songs")),
                                 )
                                 .child(self.render_song_list("search", false, cx));
                         } else if filter == SearchFilter::Songs {
@@ -3558,7 +3637,7 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("No songs matched your search."),
+                                    .child(t!("No songs matched your search.")),
                             );
                         }
                     }
@@ -3571,7 +3650,7 @@ impl NavidromeApp {
                             div()
                                 .py_8()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No results matched your search."),
+                                .child(t!("No results matched your search.")),
                         );
                     }
                 }
@@ -3579,13 +3658,13 @@ impl NavidromeApp {
             }
             View::ArtistDetail => {
                 let Some(artist) = &self.state.current_artist else {
-                    return div().child("Artist not found").into_any_element();
+                    return div().child(t!("Artist not found")).into_any_element();
                 };
                 v_flex()
                     .gap_5()
                     .child(self.page_header(
                         artist.name.clone(),
-                        format!("{} albums", self.state.artist_albums.len()),
+                        t!("%{count} albums", count = self.state.artist_albums.len()),
                         cx,
                     ))
                     .child(self.render_album_grid(
@@ -3598,7 +3677,7 @@ impl NavidromeApp {
             }
             View::AlbumDetail => {
                 let Some(album) = &self.state.current_album else {
-                    return div().child("Album not found").into_any_element();
+                    return div().child(t!("Album not found")).into_any_element();
                 };
                 v_flex()
                     .h_full()
@@ -3632,7 +3711,7 @@ impl NavidromeApp {
                                                 cx,
                                             ))
                                             .when_some(album.year, |this, year| {
-                                                this.child(format!("- {year}"))
+                                                this.child(t!("- %{year}", year = year))
                                             }),
                                     )
                                     .child(
@@ -3641,7 +3720,7 @@ impl NavidromeApp {
                                             .flex_wrap()
                                             .child(
                                                 Button::new("play-album")
-                                                    .label("Play album")
+                                                    .label(t!("Play album"))
                                                     .primary()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         let songs =
@@ -3655,7 +3734,7 @@ impl NavidromeApp {
                                             .child(
                                                 Button::new("append-album")
                                                     .icon(AppIcon::Queue)
-                                                    .label("Append all")
+                                                    .label(t!("Append all"))
                                                     .outline()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         let songs =
@@ -3666,7 +3745,7 @@ impl NavidromeApp {
                                             )
                                             .child(
                                                 Button::new("album-add-to-playlist")
-                                                    .label("Add to playlist…")
+                                                    .label(t!("Add to playlist…"))
                                                     .outline()
                                                     .disabled(
                                                         self.playlist_ui.busy
@@ -3692,7 +3771,7 @@ impl NavidromeApp {
             }
             View::PlaylistDetail => {
                 let Some(playlist) = &self.state.current_playlist else {
-                    return div().child("Playlist not found").into_any_element();
+                    return div().child(t!("Playlist not found")).into_any_element();
                 };
                 let rename = playlist.clone();
                 let delete = playlist.clone();
@@ -3705,7 +3784,7 @@ impl NavidromeApp {
                     .gap_5()
                     .child(self.page_header(
                         playlist.name.clone(),
-                        format!("{} tracks", self.state.playlist_songs.len()),
+                        t!("%{count} tracks", count = self.state.playlist_songs.len()),
                         cx,
                     ))
                     .child(
@@ -3715,7 +3794,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("play-playlist")
                                     .icon(PlayerIcon::Play)
-                                    .label("Play all")
+                                    .label(t!("Play all"))
                                     .small()
                                     .info()
                                     .outline()
@@ -3734,7 +3813,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("append-playlist")
                                     .icon(AppIcon::Queue)
-                                    .label("Append all")
+                                    .label(t!("Append all"))
                                     .small()
                                     .outline()
                                     .disabled(
@@ -3749,7 +3828,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 Button::new("rename-playlist")
-                                    .label("Rename")
+                                    .label(t!("Rename"))
                                     .small()
                                     .outline()
                                     .disabled(edit_disabled)
@@ -3759,7 +3838,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 Button::new("delete-playlist")
-                                    .label("Delete")
+                                    .label(t!("Delete"))
                                     .small()
                                     .ghost()
                                     .disabled(edit_disabled)
@@ -3770,7 +3849,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("refresh-playlist")
                                     .icon(AppIcon::Refresh)
-                                    .tooltip("Refresh playlist")
+                                    .tooltip(t!("Refresh playlist"))
                                     .small()
                                     .ghost()
                                     .disabled(
@@ -3789,15 +3868,15 @@ impl NavidromeApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(if self.playlist_ui.busy {
-                                "Saving playlist…"
+                                t!("Saving playlist…")
                             } else if self.playlist_ui.detail_loading {
-                                "Loading playlist…"
+                                t!("Loading playlist…")
                             } else if read_only {
-                                "Shared playlist · Only the owner can edit it."
+                                t!("Shared playlist · Only the owner can edit it.")
                             } else if self.state.playlist_songs.is_empty() {
-                                "This playlist is empty. Use a song’s actions menu to add tracks."
+                                t!("This playlist is empty. Use a song’s actions menu to add tracks.")
                             } else {
-                                "Use a song’s actions menu to move or remove it."
+                                t!("Use a song’s actions menu to move or remove it.")
                             }),
                     )
                     .child(self.render_song_list("playlist-detail", false, cx))
@@ -3809,8 +3888,11 @@ impl NavidromeApp {
                 .min_h_0()
                 .gap_5()
                 .child(self.page_header(
-                    "Queue",
-                    format!("{} tracks in the current queue", self.state.queue.len()),
+                    t!("Queue"),
+                    t!("%{count} tracks in the current queue",
+                        count = self.state.queue.len()
+                    )
+                    .to_string(),
                     cx,
                 ))
                 .when(self.state.queue.is_empty(), |this| {
@@ -3818,7 +3900,7 @@ impl NavidromeApp {
                         div()
                             .py_8()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Start playing an album or playlist to build a queue."),
+                            .child(t!("Start playing an album or playlist to build a queue.")),
                     )
                 })
                 .when(!self.state.queue.is_empty(), |this| {
@@ -3829,7 +3911,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("queue-play-all")
                                     .icon(PlayerIcon::Play)
-                                    .label("Play all")
+                                    .label(t!("Play all"))
                                     .small()
                                     .info()
                                     .outline()
@@ -3843,7 +3925,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 Button::new("queue-clear-after")
-                                    .label("Clear after current")
+                                    .label(t!("Clear after current"))
                                     .small()
                                     .outline()
                                     .disabled(self.state.queue_index.is_none())
@@ -3854,7 +3936,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 Button::new("save-queue-playlist")
-                                    .label("Save as playlist")
+                                    .label(t!("Save as playlist"))
                                     .small()
                                     .outline()
                                     .disabled(self.playlist_ui.busy || self.api.is_none())
@@ -3870,7 +3952,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("queue-clear-all")
                                     .icon(AppIcon::Close)
-                                    .label("Clear queue")
+                                    .label(t!("Clear queue"))
                                     .small()
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -3928,11 +4010,11 @@ impl NavidromeApp {
         let title = song
             .as_ref()
             .map(|song| song.title.clone())
-            .unwrap_or_else(|| "No track playing".to_string());
+            .unwrap_or_else(|| t!("No track playing").to_string());
         let artist = song
             .as_ref()
             .map(|song| song.artist.clone())
-            .unwrap_or_else(|| "Choose a song".to_string());
+            .unwrap_or_else(|| t!("Choose a song").to_string());
 
         let cover_element = img(cover)
             // `on_click` only fires for elements with an id: it needs element state
@@ -4011,14 +4093,14 @@ impl NavidromeApp {
                 div()
                     .text_color(theme.muted_foreground)
                     .when(playback.stall.is_some(), |this| {
-                        this.child(format!(
-                            "Buffering… {}s",
-                            playback.stall.unwrap_or_default().as_secs()
+                        this.child(t!(
+                            "Buffering… %{seconds}s",
+                            seconds = playback.stall.unwrap_or_default().as_secs()
                         ))
                     })
                     .when(
                         playback.stall.is_none() && playback.error.is_some(),
-                        |this| this.child("Playback failed — open for details"),
+                        |this| this.child(t!("Playback failed — open for details")),
                     )
                     .when(
                         playback.stall.is_none() && playback.error.is_none(),
@@ -4044,7 +4126,7 @@ impl NavidromeApp {
             .child(
                 Button::new("mini-previous")
                     .icon(PlayerIcon::Previous)
-                    .tooltip("Previous track")
+                    .tooltip(t!("Previous track"))
                     .ghost()
                     .with_size(px(18.0))
                     .rounded_full()
@@ -4061,7 +4143,7 @@ impl NavidromeApp {
                     } else {
                         PlayerIcon::Play
                     })
-                    .tooltip(if is_playing { "Pause" } else { "Play" })
+                    .tooltip(if is_playing { t!("Pause") } else { t!("Play") })
                     .custom(play_button_style)
                     .with_size(px(26.0))
                     .rounded_full()
@@ -4074,7 +4156,7 @@ impl NavidromeApp {
             .child(
                 Button::new("mini-next")
                     .icon(PlayerIcon::Next)
-                    .tooltip("Next track")
+                    .tooltip(t!("Next track"))
                     .ghost()
                     .with_size(px(18.0))
                     .rounded_full()
@@ -4115,7 +4197,7 @@ impl NavidromeApp {
 
         let expand_button = Button::new("mini-expand")
             .icon(AppIcon::Maximize)
-            .tooltip("Exit mini player")
+            .tooltip(t!("Exit mini player"))
             .ghost()
             .with_size(px(18.0))
             .rounded_full()
@@ -4227,9 +4309,14 @@ impl NavidromeApp {
             // 悬停提示显示完整标题/艺人（长标题被截断时也能看全文），
             // 并说明点击可打开正在播放页。
             let tooltip_text = if song.artist.trim().is_empty() {
-                format!("{}\nOpen now playing", song.title)
+                t!("%{title}\nOpen now playing", title = song.title).to_string()
             } else {
-                format!("{} — {}\nOpen now playing", song.title, song.artist)
+                t!(
+                    "%{title} — %{artist}\nOpen now playing",
+                    title = song.title,
+                    artist = song.artist
+                )
+                .to_string()
             };
             h_flex()
                 .id("now-playing-info")
@@ -4295,14 +4382,14 @@ impl NavidromeApp {
                                 .text_base()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
-                                .child("No track playing"),
+                                .child(t!("No track playing")),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .truncate()
-                                .child("Choose a song from your library."),
+                                .child(t!("Choose a song from your library.")),
                         ),
                 )
                 .into_any_element()
@@ -4356,7 +4443,7 @@ impl NavidromeApp {
             .child(
                 Button::new("player-queue")
                     .icon(AppIcon::Queue)
-                    .tooltip("Queue (Q)")
+                    .tooltip(t!("Queue (Q)"))
                     .ghost()
                     .with_size(px(30.0))
                     .rounded_full()
@@ -4462,7 +4549,11 @@ impl NavidromeApp {
                     .child(
                         Button::new("player-volume-mute")
                             .icon(volume_icon)
-                            .tooltip(if self.muted { "Unmute (M)" } else { "Mute (M)" })
+                            .tooltip(if self.muted {
+                                t!("Unmute (M)")
+                            } else {
+                                t!("Mute (M)")
+                            })
                             .ghost()
                             .with_size(px(30.0))
                             .rounded_full()
@@ -4498,7 +4589,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("previous")
                                     .icon(PlayerIcon::Previous)
-                                    .tooltip("Previous track (Ctrl+Left)")
+                                    .tooltip(t!("Previous track (Ctrl+Left)"))
                                     .ghost()
                                     .with_size(px(30.0))
                                     .rounded_full()
@@ -4515,9 +4606,9 @@ impl NavidromeApp {
                                         PlayerIcon::Play
                                     })
                                     .tooltip(if playback.active && !playback.paused {
-                                        "Pause (Space)"
+                                        t!("Pause (Space)")
                                     } else {
-                                        "Play (Space)"
+                                        t!("Play (Space)")
                                     })
                                     .custom(play_button_style)
                                     .with_size(px(40.0))
@@ -4530,7 +4621,7 @@ impl NavidromeApp {
                             .child(
                                 Button::new("next")
                                     .icon(PlayerIcon::Next)
-                                    .tooltip("Next track (Ctrl+Right)")
+                                    .tooltip(t!("Next track (Ctrl+Right)"))
                                     .ghost()
                                     .with_size(px(30.0))
                                     .rounded_full()
@@ -4606,9 +4697,9 @@ impl NavidromeApp {
 fn render_stall_chip(stall: Duration, accent: Hsla) -> gpui_kit::AnyElement {
     let seconds = stall.as_secs();
     let label = if seconds >= 2 {
-        format!("Buffering {seconds}s")
+        t!("Buffering %{seconds}s", seconds = seconds).to_string()
     } else {
-        "Buffering".to_string()
+        t!("Buffering").to_string()
     };
     h_flex()
         .id("player-stall")
@@ -4653,7 +4744,7 @@ fn render_playback_error_chip(error: String, cx: &Context<NavidromeApp>) -> gpui
         )
         .child(
             Button::new("player-retry")
-                .label("Retry")
+                .label(t!("Retry"))
                 .ghost()
                 .xsmall()
                 .on_click(cx.listener(|this, _, _, cx| {
