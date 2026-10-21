@@ -2577,7 +2577,7 @@ impl NavidromeApp {
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(
-                                                        "Send a desktop notification with the                                                          cover, title, artist and album when a                                                          track starts. Rapid switching replaces                                                          the previous notification.",
+                                                        "Send a desktop notification with the cover, title, artist and album when a track starts. Rapid switching replaces the previous notification.",
                                                     ),
                                             ),
                                     )
@@ -2625,7 +2625,7 @@ impl NavidromeApp {
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
                                                     .child(
-                                                        "The window close button minimizes to                                                          the taskbar instead of quitting; tray                                                          Exit still quits. Some Wayland                                                          compositors ignore minimize requests.",
+                                                        "The window close button minimizes to the taskbar instead of quitting; tray Exit still quits. Some Wayland compositors ignore minimize requests.",
                                                     ),
                                             ),
                                     )
