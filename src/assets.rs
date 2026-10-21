@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 37] = [
+const ICON_FILES: [&str; 40] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -42,6 +42,9 @@ const ICON_FILES: [&str; 37] = [
     "genre-tags.svg",
     "eq.svg",
     "list-music.svg",
+    "server.svg",
+    "cloud-off.svg",
+    "trash.svg",
 ];
 
 pub struct Assets;
@@ -78,6 +81,9 @@ pub enum AppIcon {
     Genres,
     Playlists,
     Eq,
+    Server,
+    ServerOff,
+    Trash,
 }
 
 #[derive(Clone, Copy)]
@@ -123,6 +129,9 @@ impl IconNamed for AppIcon {
             Self::Genres => "icons/genre-tags.svg",
             Self::Playlists => "icons/list-music.svg",
             Self::Eq => "icons/eq.svg",
+            Self::Server => "icons/server.svg",
+            Self::ServerOff => "icons/cloud-off.svg",
+            Self::Trash => "icons/trash.svg",
         }
         .into()
     }
@@ -195,6 +204,9 @@ impl AssetSource for Assets {
             "icons/genre-tags.svg" => Some(include_bytes!("../assets/icons/genre-tags.svg")),
             "icons/list-music.svg" => Some(include_bytes!("../assets/icons/list-music.svg")),
             "icons/eq.svg" => Some(include_bytes!("../assets/icons/eq.svg")),
+            "icons/server.svg" => Some(include_bytes!("../assets/icons/server.svg")),
+            "icons/cloud-off.svg" => Some(include_bytes!("../assets/icons/cloud-off.svg")),
+            "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
             _ => None,
         };
 
@@ -233,12 +245,49 @@ mod tests {
         }
     }
 
+    /// 回归：设置页曾直接引用 kit 的 `IconName::Server` / `CloudOff` / `Trash`，
+    /// 它们不在 gpui-kit-assets 的默认内嵌清单里，导致每帧刷
+    /// "could not find asset at path \"icons/server.svg\""。
+    /// 凡是界面用到的图标都必须能在本项目的 AssetSource 里解析。
+    #[test]
+    fn every_application_icon_resolves() {
+        use gpui_kit::component::IconNamed;
+
+        for icon in [
+            super::AppIcon::Server,
+            super::AppIcon::ServerOff,
+            super::AppIcon::Trash,
+            super::AppIcon::Refresh,
+            super::AppIcon::Eq,
+        ] {
+            let path = icon.path();
+            let loaded = Assets.load(&path).expect("asset lookup should not error");
+            assert!(loaded.is_some(), "icon is not embedded: {path}");
+        }
+    }
+
     #[test]
     fn includes_kit_icons_without_replacing_application_icons() {
         use gpui_kit::assets::IconName;
 
         let search = IconName::Search.path();
         assert!(Assets.load(&search).unwrap().is_some());
+        // 其余直接引用 kit 图标的调用点：默认内嵌清单里必须都有，
+        // 否则运行期会刷 "could not find asset at path"。
+        for icon in [
+            IconName::Search,
+            IconName::Plus,
+            IconName::LoaderCircle,
+            IconName::TriangleAlert,
+            IconName::PanelLeftOpen,
+            IconName::PanelLeftClose,
+        ] {
+            let path = icon.path();
+            assert!(
+                Assets.load(&path).unwrap().is_some(),
+                "kit icon missing from the default asset list: {path}",
+            );
+        }
         assert_eq!(
             Assets
                 .load("icons/chevron-down.svg")

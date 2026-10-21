@@ -10,6 +10,7 @@ mod models;
 mod msg;
 mod notify;
 mod playlist;
+mod secrets;
 mod single_instance;
 mod tray;
 #[cfg(test)]

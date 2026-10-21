@@ -9,6 +9,18 @@ JavaScript runtime.
 ## Features
 
 - Subsonic authentication with the standard `u/t/s` token flow
+- Multiple saved servers with one-click switching: the sidebar shows which
+  library you are browsing and the Settings page lists every server with its
+  address and account. Switching stops playback, saves the current queue, and
+  reconnects to the other server. Server state is fully isolated per entry:
+  play queue and position, measured loudness, genre cache, and cover cache each
+  get their own namespace, so two servers with colliding song/cover ids can
+  never see each other's data. Legacy single-server configs and caches are
+  migrated automatically on first launch. Passwords are kept in the system
+  credential store when available (Windows Credential Manager; platforms
+  without a backend keep using the config file and a note in Settings shows
+  the current mode). Removing a server asks whether to also delete its local
+  data (saved session, loudness and genre caches, stored credential)
 - Home, artists, albums, playlists, and search views
 - Album cover art loaded from the Navidrome API
 - Native system font discovery and multilingual text rendering through GPUI

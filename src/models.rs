@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -91,6 +92,41 @@ impl TranscodingQuality {
             Self::Kbps256 => "mp3-256",
             Self::Kbps320 => "mp3-320",
         }
+    }
+
+    /// 判断音源是否为本地解码链不支持的编码（Ogg Opus）。
+    ///
+    /// symphonia 0.5 尚未发布 Opus 解码器，rodio 也没有对应 feature；
+    /// Original 档位拿到原始 Opus 流会在解码器初始化时失败（报错文案
+    /// 是误导性的“格式未识别”）。判定依据歌曲元数据的 suffix 与
+    /// content type，均做 trim 并忽略大小写；两者都缺失时按可解码处理
+    /// （保持现状，不盲目降级）。
+    pub fn is_undecodable_source(suffix: Option<&str>, content_type: Option<&str>) -> bool {
+        let is = |text: Option<&str>, expected: &str| {
+            text.is_some_and(|text| text.trim().eq_ignore_ascii_case(expected))
+        };
+        is(suffix, "opus") || is(content_type, "audio/opus")
+    }
+
+    /// 取流实际使用的音质：Original 遇到本地无法解码的 Opus 源时，
+    /// 自动降级为服务端转码，取既有档位里最高的 320 kbps，尽量贴近
+    /// “原始音质”的意图；其余情况（含已选转码档位）保持配置不变——
+    /// 用户手动选的转码档位本身就会触发服务端转码，无需干预。
+    pub fn effective_for(
+        configured: Self,
+        suffix: Option<&str>,
+        content_type: Option<&str>,
+    ) -> Self {
+        if configured == Self::Original && Self::is_undecodable_source(suffix, content_type) {
+            Self::transcode_fallback()
+        } else {
+            configured
+        }
+    }
+
+    /// Opus 自动降级的目标档位。
+    pub const fn transcode_fallback() -> Self {
+        Self::Kbps320
     }
 }
 
@@ -476,11 +512,116 @@ pub struct PlaybackSession {
     pub shuffle_forward: Vec<usize>,
 }
 
+/// 一台配置好的服务端。`id` 由地址与用户名派生，用作缓存目录命名空间
+/// （播放会话、响度、流派缓存都按服务器隔离，song id 在不同服务器之间会撞）。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerProfile {
+    pub id: String,
+    /// 用户自定义的显示名；为空时回退到主机名。
+    #[serde(default)]
+    pub name: String,
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    /// 密码已迁入系统凭据库：配置里的 `password` 保持为空，连接时从
+    /// 凭据库读取。读取失败（凭据库被锁/被清）时回退明文字段——迁移
+    /// 中断、跨机器拷贝配置等场景仍可连接。
+    #[serde(default)]
+    pub password_in_keyring: bool,
+}
+
+impl ServerProfile {
+    /// 由地址 + 用户名派生稳定 id：同一服务器反复添加不会产生重复条目，
+    /// 重启后缓存命名空间也不会变。
+    pub fn id_for(url: &str, username: &str) -> String {
+        let mut hasher = Md5::new();
+        hasher.update(normalize_server_url(url).as_bytes());
+        hasher.update(b"\n");
+        hasher.update(username.trim().as_bytes());
+        format!("{:x}", hasher.finalize())[..12].to_string()
+    }
+
+    pub fn new(url: &str, username: &str, password: &str) -> Self {
+        Self {
+            id: Self::id_for(url, username),
+            name: String::new(),
+            url: url.trim().to_string(),
+            username: username.trim().to_string(),
+            password: password.to_string(),
+            password_in_keyring: false,
+        }
+    }
+
+    /// 连接时实际使用的密码：迁入系统凭据库的条目优先读凭据库，
+    /// 凭据库不可用或读取失败时回退明文字段。
+    pub fn resolved_password(&self) -> String {
+        if self.password_in_keyring {
+            if let Some((_, password)) = crate::secrets::load_password(&self.id) {
+                return password;
+            }
+        }
+        self.password.clone()
+    }
+
+    /// 界面上的短名：优先用户命名，否则取主机名（去掉协议与端口）。
+    pub fn label(&self) -> String {
+        if !self.name.trim().is_empty() {
+            return self.name.trim().to_string();
+        }
+        let host = self.host();
+        if host.is_empty() {
+            "Unnamed server".to_string()
+        } else {
+            host
+        }
+    }
+
+    /// 仅主机名，用于紧凑展示。
+    pub fn host(&self) -> String {
+        normalize_server_url(&self.url)
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(self.url.trim())
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    pub fn is_configured(&self) -> bool {
+        !self.url.trim().is_empty() && !self.username.trim().is_empty()
+    }
+}
+
+/// 比较与派生 id 时使用的规范形式：去空白、去尾部斜杠、缺协议补 http。
+fn normalize_server_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    with_scheme.trim_end_matches('/').to_lowercase()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    /// 当前激活服务器的地址/账号镜像。
+    ///
+    /// 保留为独立字段是为了兼容旧配置与 `Api::new` 等现有调用点；
+    /// `sync_active_profile` 会保证它始终与 `servers[active_server]` 一致。
     pub server_url: String,
     pub username: String,
     pub password: String,
+    /// 已保存的所有服务端；始终至少一条（迁移后）。
+    #[serde(default)]
+    pub servers: Vec<ServerProfile>,
+    /// 当前激活服务器的 id。
+    #[serde(default)]
+    pub active_server: Option<String>,
     #[serde(default)]
     pub theme: ThemePreference,
     #[serde(default)]
@@ -527,6 +668,8 @@ impl Default for Config {
             server_url: "http://127.0.0.1:4533".to_string(),
             username: String::new(),
             password: String::new(),
+            servers: Vec::new(),
+            active_server: None,
             theme: ThemePreference::Light,
             cache_dir: None,
             transcoding_quality: TranscodingQuality::Original,
@@ -542,6 +685,160 @@ impl Default for Config {
             show_track_notifications: default_true(),
             close_minimizes: false,
         }
+    }
+}
+
+impl Config {
+    /// 保证服务器列表不变量成立。
+    ///
+    /// 三条不变量：至少一条（旧版单服务器配置迁移成一条）、`active_server`
+    /// 指向存在的条目、遗留的 `server_url/username/password` 与激活条目一致。
+    /// 启动与每次保存后调用，历史配置无需手工迁移。
+    pub fn sync_active_profile(&mut self) {
+        if self.servers.is_empty() {
+            // 空列表：把遗留字段当成唯一服务器收编（全新安装也会得到一条可编辑条目）。
+            let profile = ServerProfile::new(&self.server_url, &self.username, &self.password);
+            self.active_server = Some(profile.id.clone());
+            self.servers.push(profile);
+        }
+        let active_exists = self
+            .active_server
+            .as_ref()
+            .is_some_and(|id| self.servers.iter().any(|profile| &profile.id == id));
+        if !active_exists {
+            self.active_server = Some(self.servers[0].id.clone());
+        }
+        if let Some(profile) = self.active_profile().cloned() {
+            self.server_url = profile.url;
+            self.username = profile.username;
+            self.password = profile.password;
+        }
+    }
+
+    pub fn active_profile(&self) -> Option<&ServerProfile> {
+        let id = self.active_server.as_ref()?;
+        self.servers.iter().find(|profile| &profile.id == id)
+    }
+
+    /// 当前服务器的缓存命名空间键；未配置时返回 None。
+    pub fn active_server_id(&self) -> Option<&str> {
+        self.active_profile().map(|profile| profile.id.as_str())
+    }
+
+    /// 切到指定服务器。失败（id 不存在）时保持原状并返回 false。
+    pub fn switch_to(&mut self, id: &str) -> bool {
+        let Some(profile) = self
+            .servers
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return false;
+        };
+        self.active_server = Some(profile.id);
+        self.server_url = profile.url;
+        self.username = profile.username;
+        self.password = profile.password;
+        true
+    }
+
+    /// 把当前输入框里的地址/账号写回激活条目。
+    ///
+    /// 条目 id 保持不变（即使地址变了），这样缓存命名空间不会因为改了一个
+    /// 端口就全部丢失；若新地址 + 用户名已属于另一条，则合并到那一条。
+    /// 返回激活的服务器 id。
+    pub fn store_active(&mut self, url: &str, username: &str, password: &str) -> String {
+        let url = url.trim().to_string();
+        let username = username.trim().to_string();
+        let password = password.to_string();
+        let derived = ServerProfile::id_for(&url, &username);
+        let duplicate = self
+            .servers
+            .iter()
+            .find(|profile| profile.id == derived)
+            .map(|profile| profile.id.clone());
+
+        // 新身份落在别的条目上：直接激活那一条，不动原条目。
+        // 写入新的明文密码时必须落下凭据库标记，否则连接时会优先读凭据库里
+        // 那条旧密码；后续 save_settings 会把新密码重新写入凭据库。
+        if let Some(id) = duplicate.filter(|id| Some(id.as_str()) != self.active_server.as_deref())
+        {
+            if let Some(profile) = self.servers.iter_mut().find(|p| p.id == id) {
+                profile.url = url;
+                profile.username = username;
+                profile.password = password;
+                profile.password_in_keyring = false;
+            }
+            self.switch_to(&id);
+            return id;
+        }
+
+        match self.active_server.clone() {
+            Some(id) if self.servers.iter().any(|profile| profile.id == id) => {
+                if let Some(profile) = self.servers.iter_mut().find(|profile| profile.id == id) {
+                    profile.url = url;
+                    profile.username = username;
+                    profile.password = password;
+                }
+            }
+            _ => {
+                let profile = ServerProfile {
+                    id: derived,
+                    name: String::new(),
+                    url,
+                    username,
+                    password,
+                    password_in_keyring: false,
+                };
+                let id = profile.id.clone();
+                self.servers.push(profile);
+                self.active_server = Some(id);
+            }
+        }
+        self.sync_active_profile();
+        self.active_server.clone().unwrap_or_default()
+    }
+
+    /// 新增一个空白服务器条目并激活，返回其 id。
+    /// 地址与用户名都为空时 id 会与默认条目碰撞，因此带上递增编号区分。
+    pub fn add_server(&mut self) -> String {
+        let base = ServerProfile::id_for(&self.server_url, &self.username);
+        let mut candidate = base.clone();
+        let mut serial = 2;
+        while self.servers.iter().any(|profile| profile.id == candidate) {
+            candidate = format!("{base}-{serial}");
+            serial += 1;
+        }
+        let profile = ServerProfile {
+            id: candidate.clone(),
+            name: format!("Server {}", self.servers.len() + 1),
+            url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            password_in_keyring: false,
+        };
+        self.servers.push(profile);
+        self.switch_to(&candidate);
+        candidate
+    }
+
+    /// 删除指定服务器；只删剩下的最后一条时拒绝（返回 false）。
+    /// 删除当前激活条目时自动切到相邻条目。
+    pub fn remove_server(&mut self, id: &str) -> bool {
+        if self.servers.len() <= 1 {
+            return false;
+        }
+        let Some(index) = self.servers.iter().position(|profile| profile.id == id) else {
+            return false;
+        };
+        let was_active = self.active_server.as_deref() == Some(id);
+        self.servers.remove(index);
+        if was_active {
+            let next = self.servers[index.min(self.servers.len() - 1)].id.clone();
+            self.switch_to(&next);
+        }
+        self.sync_active_profile();
+        true
     }
 }
 
@@ -588,8 +885,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AlbumSort, ArtistSort, Config, PlayModes, PlaybackMode, PlaybackSession, RepeatMode, Song,
-        ThemePreference, TranscodingQuality, VolumeNormalization,
+        AlbumSort, ArtistSort, Config, PlayModes, PlaybackMode, PlaybackSession, RepeatMode,
+        ServerProfile, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
     };
 
     #[test]
@@ -833,5 +1130,236 @@ mod tests {
     #[test]
     fn corrupted_session_json_fails_cleanly() {
         assert!(serde_json::from_str::<PlaybackSession>("not json at all").is_err());
+    }
+
+    #[test]
+    fn legacy_single_server_config_migrates_into_the_server_list() {
+        let mut config: Config = serde_json::from_str(
+            r#"{"server_url":"http://nas.local:4533","username":"alice","password":"secret"}"#,
+        )
+        .expect("legacy config should deserialize");
+        assert!(config.servers.is_empty(), "legacy config has no list yet");
+
+        config.sync_active_profile();
+
+        assert_eq!(config.servers.len(), 1);
+        let profile = config.servers.first().unwrap();
+        assert_eq!(profile.url, "http://nas.local:4533");
+        assert_eq!(profile.username, "alice");
+        // 遗留字段保持为激活服务器的镜像，旧调用点无需改动。
+        assert_eq!(config.server_url, profile.url);
+        assert_eq!(config.active_server.as_deref(), Some(profile.id.as_str()));
+    }
+
+    #[test]
+    fn server_ids_are_stable_and_independent_of_case_and_trailing_slash() {
+        let a = ServerProfile::id_for("http://NAS.local:4533/", "alice");
+        let b = ServerProfile::id_for("  http://nas.local:4533  ", " alice ");
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 12);
+        assert!(a.chars().all(|ch| ch.is_ascii_hexdigit()));
+        // 不同的用户名/端口必须区分开，否则缓存会串服务器。
+        assert_ne!(a, ServerProfile::id_for("http://nas.local:4533", "bob"));
+        assert_ne!(a, ServerProfile::id_for("http://nas.local:4534", "alice"));
+    }
+
+    #[test]
+    fn switching_servers_mirrors_the_active_profile_into_legacy_fields() {
+        let mut config = Config {
+            servers: vec![
+                ServerProfile::new("http://one.local:4533", "alice", "pw1"),
+                ServerProfile::new("http://two.local:4533", "bob", "pw2"),
+            ],
+            ..Config::default()
+        };
+        config.sync_active_profile();
+        let second = config.servers[1].id.clone();
+
+        assert!(config.switch_to(&second));
+        assert_eq!(config.server_url, "http://two.local:4533");
+        assert_eq!(config.username, "bob");
+        assert_eq!(config.password, "pw2");
+
+        // 未知 id 不改变任何状态。
+        assert!(!config.switch_to("does-not-exist"));
+        assert_eq!(config.username, "bob");
+    }
+
+    #[test]
+    fn adding_a_server_activates_a_blank_entry_without_colliding_ids() {
+        let mut config = Config::default();
+        config.sync_active_profile();
+        let first = config.active_server.clone().unwrap();
+
+        let added = config.add_server();
+        assert_ne!(added, first);
+        assert_eq!(config.servers.len(), 2);
+        assert_eq!(config.active_server.as_deref(), Some(added.as_str()));
+        // 新条目是空白条目，等待用户填写。
+        assert!(config.server_url.is_empty());
+        assert!(config.username.is_empty());
+        assert!(!config.active_profile().unwrap().is_configured());
+
+        // 连续新增不能产生重复 id。
+        let another = config.add_server();
+        assert_eq!(
+            config
+                .servers
+                .iter()
+                .filter(|profile| profile.id == another)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn removing_the_active_server_falls_back_to_a_neighbour() {
+        let mut config = Config {
+            servers: vec![
+                ServerProfile::new("http://one.local:4533", "alice", "pw1"),
+                ServerProfile::new("http://two.local:4533", "bob", "pw2"),
+            ],
+            ..Config::default()
+        };
+        config.sync_active_profile();
+        let first = config.servers[0].id.clone();
+        let second = config.servers[1].id.clone();
+        config.switch_to(&first);
+
+        assert!(config.remove_server(&first));
+        assert_eq!(config.servers.len(), 1);
+        assert_eq!(config.active_server.as_deref(), Some(second.as_str()));
+        assert_eq!(config.server_url, "http://two.local:4533");
+
+        // 最后一条不能删：否则会退化成没有服务器可连的状态。
+        assert!(!config.remove_server(&second));
+        assert_eq!(config.servers.len(), 1);
+    }
+
+    #[test]
+    fn editing_the_active_server_keeps_its_id_so_caches_survive_a_url_edit() {
+        let mut config = Config {
+            servers: vec![ServerProfile::new("http://old.local:4533", "alice", "pw1")],
+            ..Config::default()
+        };
+        config.sync_active_profile();
+        let original_id = config.active_server.clone().unwrap();
+
+        let id = config.store_active("http://new.local:4533", "alice", "pw2");
+
+        assert_eq!(id, original_id, "改地址不应换缓存命名空间");
+        assert_eq!(config.servers.len(), 1);
+        assert_eq!(config.server_url, "http://new.local:4533");
+        assert_eq!(config.password, "pw2");
+    }
+
+    #[test]
+    fn storing_a_known_peer_identity_merges_instead_of_duplicating() {
+        let mut config = Config {
+            servers: vec![
+                ServerProfile::new("http://one.local:4533", "alice", "pw1"),
+                ServerProfile::new("http://two.local:4533", "bob", "pw2"),
+            ],
+            ..Config::default()
+        };
+        config.sync_active_profile();
+        let second = config.servers[1].id.clone();
+        config.switch_to(&second);
+
+        // 在第二条条目里填上第一条的地址+账号：应合并回第一条，而不是新建。
+        let id = config.store_active("http://one.local:4533", "alice", "pw-new");
+
+        assert_eq!(config.servers.len(), 2);
+        assert_eq!(id, config.servers[0].id);
+        assert_eq!(config.active_server.as_deref(), Some(id.as_str()));
+        assert_eq!(config.servers[0].password, "pw-new");
+    }
+
+    #[test]
+    fn server_label_falls_back_to_host_when_unnamed() {
+        let profile = ServerProfile::new("http://192.168.1.10:4533", "alice", "pw");
+        assert_eq!(profile.host(), "192.168.1.10:4533");
+        assert_eq!(profile.label(), "192.168.1.10:4533");
+
+        let named = ServerProfile {
+            name: "  Home NAS  ".to_string(),
+            ..profile
+        };
+        assert_eq!(named.label(), "Home NAS");
+    }
+
+    #[test]
+    fn keyring_flag_defaults_off_for_legacy_configs() {
+        let config: Config = serde_json::from_str(
+        r#"{"server_url":"http://nas.local:4533","username":"alice","password":"secret","servers":[{"id":"abc","url":"http://nas.local:4533","username":"alice","password":"secret"}]}"#,
+    )
+    .expect("legacy server entries should deserialize without the keyring flag");
+        assert!(!config.servers[0].password_in_keyring);
+
+        // 序列化时必须写出该标记，供回环保持。
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("password_in_keyring"));
+    }
+
+    #[test]
+    fn resolved_password_prefers_the_credential_store_and_falls_back_to_plaintext() {
+        let profile = ServerProfile::new("http://nas.local:4533", "alice", "pw");
+        assert_eq!(profile.resolved_password(), "pw");
+
+        // 凭据库里没有这个 id 的条目（测试专用 id）：即使被误标为已迁入，
+        // 也必须回退明文字段，绝不能因为读取失败而丢密码。
+        let flagged = ServerProfile {
+            password_in_keyring: true,
+            ..profile
+        };
+        assert_eq!(flagged.resolved_password(), "pw");
+    }
+
+    #[test]
+    fn opus_sources_fall_back_to_server_transcoding_only_at_original_quality() {
+        // Original + Opus：自动降级到既有档位里最高的 320 kbps。
+        assert_eq!(
+            TranscodingQuality::effective_for(
+                TranscodingQuality::Original,
+                Some("opus"),
+                Some("audio/ogg")
+            ),
+            TranscodingQuality::transcode_fallback()
+        );
+        // 判定容忍大小写与空白；content type audio/opus 单独成立。
+        assert!(TranscodingQuality::is_undecodable_source(
+            Some(" OPUS "),
+            None
+        ));
+        assert!(TranscodingQuality::is_undecodable_source(
+            None,
+            Some("Audio/Opus")
+        ));
+
+        // 已选转码档位：服务器本来就会转码，保持用户选择不变。
+        assert_eq!(
+            TranscodingQuality::effective_for(TranscodingQuality::Kbps128, Some("opus"), None),
+            TranscodingQuality::Kbps128
+        );
+
+        // Vorbis / FLAC / 未知后缀都保持 Original：只有 Opus 才降级，
+        // 尤其不能把 Ogg Vorbis（可正常解码）一并误伤。
+        for suffix in ["ogg", "oga", "flac", "mp3", "m4a", "wma"] {
+            assert!(!TranscodingQuality::is_undecodable_source(
+                Some(suffix),
+                None
+            ));
+            assert_eq!(
+                TranscodingQuality::effective_for(TranscodingQuality::Original, Some(suffix), None),
+                TranscodingQuality::Original
+            );
+        }
+
+        // 两者都缺失时不盲目降级（无从判定，保持现状）。
+        assert!(!TranscodingQuality::is_undecodable_source(None, None));
+        assert_eq!(
+            TranscodingQuality::effective_for(TranscodingQuality::Original, None, None),
+            TranscodingQuality::Original
+        );
     }
 }

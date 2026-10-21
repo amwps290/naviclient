@@ -18,16 +18,17 @@ impl NavidromeApp {
         };
         let id = id.to_string();
         let config = self.config.clone();
+        let server_id = self.config.active_server_id().map(str::to_string);
         let tx = self.tx.clone();
         let cover_slots = self.cover_slots.clone();
         self.spawn_future(async move {
             // 网络下载不限并发（IO 等待不占 CPU），只对解码限流，避免占满后台线程。
             // 先查磁盘缓存，命中跳过网络；未命中走网络并回写缓存。
-            let result = match config::read_cover_cache(&config, &id) {
+            let result = match config::read_cover_cache(&config, server_id.as_deref(), &id) {
                 Some(bytes) => Ok(bytes),
                 None => match api.get_bytes(&url).await {
                     Ok(bytes) => {
-                        config::write_cover_cache(&config, &id, &bytes);
+                        config::write_cover_cache(&config, server_id.as_deref(), &id, &bytes);
                         Ok(bytes)
                     }
                     Err(error) => Err(error_message(error)),

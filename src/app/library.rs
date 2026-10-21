@@ -402,7 +402,11 @@ impl NavidromeApp {
         });
     }
 
-    pub(super) fn poll_tray_commands(&mut self, window: &mut Window) -> bool {
+    pub(super) fn poll_tray_commands(
+        &mut self,
+        // 其他平台（Windows）通过 hwnd 还原窗口，不使用 window 句柄。
+        #[cfg_attr(target_os = "windows", allow(unused_variables))] window: &mut Window,
+    ) -> bool {
         let mut changed = false;
         while let Ok(command) = self.tray_rx.try_recv() {
             changed = true;
@@ -558,7 +562,9 @@ impl NavidromeApp {
                             // 服务器返回顺序不定，统一按名称 A→Z 展示；
                             // 写入磁盘缓存供下次启动即时展示。
                             genres.sort_by_key(|genre| genre.value.trim().to_lowercase());
-                            if let Err(error) = config::save_genres_cache(&genres) {
+                            if let Err(error) =
+                                config::save_genres_cache(self.config.active_server_id(), &genres)
+                            {
                                 log::warn!("failed to cache genres: {error}");
                             }
                             self.state.genres = genres;

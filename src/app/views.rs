@@ -1787,170 +1787,370 @@ impl NavidromeApp {
                 .flatten(),
         })
     }
+    /// 服务器设置卡：上半部分是服务器列表（选择），下半部分是当前条目的
+    /// 编辑表单（改名 / 地址 / 账号）。两者分开是为了让“切到哪台”和
+    /// “改哪台”互不干扰——之前混在一起，改完一台再切换很容易改错对象。
     pub(super) fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        let status_label = if self.state.loading {
-            "Connecting..."
-        } else if self.state.server.is_some() {
-            "Connected"
+        let connected = self.state.server.is_some();
+        let status = if self.state.loading {
+            "Connecting…".to_string()
+        } else if connected {
+            match self.state.server.as_ref() {
+                Some(server) => format!(
+                    "Connected · {} {}",
+                    server.app_name.as_deref().unwrap_or("Navidrome"),
+                    server.version
+                ),
+                None => "Connected".to_string(),
+            }
+        } else if self.config.servers.len() > 1 {
+            "Not connected — pick a server below".to_string()
         } else {
-            "Not connected"
+            "Not connected — fill in the address and account".to_string()
         };
-        let status_color = if self.state.server.is_some() {
+        let status_color = if connected {
             cx.theme().accent
         } else {
             cx.theme().muted_foreground
         };
-        let server_name = self
-            .state
-            .server
-            .as_ref()
-            .map(|server| {
-                format!(
-                    "{} {}",
-                    server.app_name.as_deref().unwrap_or("Navidrome"),
-                    server.version
-                )
-            })
-            .unwrap_or_else(|| "Server entry".to_string());
-        let server_url = if self.config.server_url.trim().is_empty() {
-            "No server URL configured".to_string()
+        let editing = self.active_server_label();
+        // 密码存储位置提示（里程碑 #17）：已迁入系统凭据库的条目不再
+        // 往配置文件里写明文，用户需要在设置页能确认当前状态。
+        let credential_note = if self
+            .config
+            .active_profile()
+            .is_some_and(|profile| profile.password_in_keyring)
+        {
+            "Password is kept in the system credential store"
         } else {
-            self.config.server_url.clone()
-        };
-        let username = if self.config.username.trim().is_empty() {
-            "No username configured".to_string()
-        } else {
-            self.config.username.clone()
+            "Password is kept in the config file"
         };
 
         v_flex()
             .w_full()
-            .gap_4()
-            .p_4()
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().secondary.opacity(0.35))
+            // ---- 上：服务器列表 ----
             .child(
-                h_flex()
-                    .justify_between()
-                    .items_start()
-                    .gap_4()
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .p_4()
+                    .child(self.render_server_list(cx))
                     .child(
                         v_flex()
-                            .min_w_0()
-                            .gap_1()
+                            .gap_0p5()
+                            .child(div().text_xs().text_color(status_color).child(status))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(credential_note),
+                            ),
+                    ),
+            )
+            // ---- 分隔线：明确“编辑区”只作用于上面选中的那台 ----
+            .child(div().h(px(1.0)).bg(cx.theme().border))
+            // ---- 下：当前条目的编辑表单 ----
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_3()
+                    .p_4()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
                             .child(
                                 div()
                                     .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Primary server"),
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(format!("Editing “{editing}”")),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .truncate()
-                                    .child(server_name),
-                            )
-                            .child(div().text_xs().text_color(status_color).child(status_label)),
+                            .when(self.config.servers.len() > 1, |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("switch servers in the list above"),
+                                )
+                            }),
                     )
-                    .when(self.api.is_some(), |this| {
-                        this.child(
-                            Button::new("settings-refresh")
-                                .icon(AppIcon::Refresh)
-                                .tooltip("Refresh library")
-                                .loading(self.state.loading)
-                                .ghost()
-                                .small()
+                    .child(self.render_server_field("Display name", &self.name_input, cx))
+                    .child(self.render_server_field("Server URL", &self.server_input, cx))
+                    .child(self.render_server_field("Username", &self.username_input, cx))
+                    .child(self.render_server_field("Password", &self.password_input, cx))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(self.state.status.clone()),
+                    )
+                    .child(
+                        h_flex().justify_end().child(
+                            Button::new("save-settings")
+                                .label("Save and connect")
+                                .primary()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.refresh_library();
+                                    this.save_settings(cx);
                                     cx.notify();
                                 })),
-                        )
-                    }),
-            )
-            .child(
-                h_flex()
-                    .gap_6()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Server URL"),
-                            )
-                            .child(div().text_sm().truncate().child(server_url)),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Username"),
-                            )
-                            .child(div().text_sm().truncate().child(username)),
+                        ),
                     ),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.state.status.clone()),
-            )
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Server URL"),
-                    )
-                    .child(Input::new(&self.server_input).w_full()),
-            )
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Username"),
-                    )
-                    .child(Input::new(&self.username_input).w_full()),
-            )
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Password"),
-                    )
-                    .child(Input::new(&self.password_input).w_full()),
-            )
-            .child(
-                h_flex().justify_end().gap_2().child(
-                    Button::new("save-settings")
-                        .label("Save and connect")
-                        .primary()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_settings(cx);
-                            cx.notify();
-                        })),
-                ),
             )
             .into_any_element()
     }
 
+    /// 一行「标签 + 输入框」的紧凑表单行：标签定宽左对齐，
+    /// 保证四个字段的输入框起始位置完全一致。
+    fn render_server_field(
+        &self,
+        label: &'static str,
+        input: &Entity<InputState>,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        h_flex()
+            .w_full()
+            .gap_3()
+            .items_center()
+            .child(
+                div()
+                    .w(px(110.0))
+                    .flex_none()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            )
+            .child(div().flex_1().min_w_0().child(Input::new(input).w_full()))
+            .into_any_element()
+    }
+
+    /// 已保存服务器列表：点击切换，右侧按钮删除条目。
+    /// 这是多服务器的主要入口，排在编辑表单之前。
+    /// 服务器列表：一行一台，整行可点即切换（比在行尾找小按钮快），
+    /// 只有删除按钮留在行尾。选中项用左侧实心点 + 高亮底色表示。
+    fn render_server_list(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let active = self.config.active_server.clone();
+        let can_remove = self.config.servers.len() > 1;
+        v_flex()
+            .w_full()
+            .gap_1()
+            .children(self.config.servers.iter().map(|profile| {
+                let switch_id = profile.id.clone();
+                let remove_id = profile.id.clone();
+                let is_active = active.as_deref() == Some(profile.id.as_str());
+                let label = profile.label();
+                let detail = if profile.is_configured() {
+                    format!("{} · {}", profile.url, profile.username)
+                } else {
+                    "Not configured — fill in the form below".to_string()
+                };
+                let switchable = !is_active && profile.is_configured();
+                let tooltip = if is_active {
+                    "Currently connected".to_string()
+                } else if switchable {
+                    format!("Switch to {label}\n{detail}")
+                } else {
+                    format!("{label} is not configured yet")
+                };
+                h_flex()
+                    .id(SharedString::from(format!("server-row-{switch_id}")))
+                    .w_full()
+                    .gap_2()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(if is_active {
+                        cx.theme().accent.opacity(0.45)
+                    } else {
+                        cx.theme().border.opacity(0.7)
+                    })
+                    .bg(if is_active {
+                        cx.theme().accent.opacity(0.07)
+                    } else {
+                        cx.theme().background
+                    })
+                    .when(switchable, |this| {
+                        this.cursor_pointer()
+                            .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                    })
+                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                    // 左侧指示点：实心 = 当前连接。
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(if is_active {
+                                cx.theme().accent
+                            } else {
+                                cx.theme().border
+                            }),
+                    )
+                    .child(
+                        Icon::new(if is_active {
+                            AppIcon::Server
+                        } else {
+                            AppIcon::ServerOff
+                        })
+                        .with_size(px(14.0))
+                        .text_color(if is_active {
+                            cx.theme().accent
+                        } else {
+                            cx.theme().muted_foreground
+                        }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(if is_active {
+                                        FontWeight::SEMIBOLD
+                                    } else {
+                                        FontWeight::MEDIUM
+                                    })
+                                    .truncate()
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .child(detail),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .gap_1()
+                            .items_center()
+                            .when(is_active, |this| {
+                                this.child(
+                                    div()
+                                        .px_1p5()
+                                        .rounded(px(4.0))
+                                        .text_size(px(10.0))
+                                        .bg(cx.theme().accent.opacity(0.16))
+                                        .text_color(cx.theme().accent)
+                                        .child("Active"),
+                                )
+                            })
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "remove-server-{remove_id}"
+                                )))
+                                .icon(AppIcon::Trash)
+                                .tooltip(if can_remove {
+                                    "Remove this server"
+                                } else {
+                                    "Keep at least one server"
+                                })
+                                .disabled(!can_remove)
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.confirm_remove_server(&remove_id, window, cx);
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
+                    )
+                    .when(switchable, |this| {
+                        this.on_click(cx.listener(move |this, _, window, cx| {
+                            this.switch_server(&switch_id, window, cx);
+                            cx.notify();
+                        }))
+                    })
+            }))
+            .into_any_element()
+    }
+
+    /// 删除服务器的确认弹窗：两个递进选项——只移除条目，或连同清理
+    /// 这台服务器的本地数据（播放会话/响度/流派缓存与已存凭据）。
+    pub(super) fn render_remove_server_dialog(
+        &self,
+        dialog: gpui_kit::component::dialog::Dialog,
+        cx: &Context<Self>,
+    ) -> gpui_kit::component::dialog::Dialog {
+        let Some((_, label)) = &self.server_remove_prompt else {
+            return dialog;
+        };
+        let footer = h_flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("cancel-remove-server")
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.cancel_remove_server(cx);
+                        window.close_dialog(cx);
+                    })),
+            )
+            .child(
+                Button::new("confirm-remove-server")
+                    .label("Remove")
+                    .danger()
+                    .outline()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_remove_server(false, window, cx);
+                        window.close_dialog(cx);
+                    })),
+            )
+            .child(
+                Button::new("confirm-remove-server-data")
+                    .label("Remove and clear data")
+                    .danger()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_remove_server(true, window, cx);
+                        window.close_dialog(cx);
+                    })),
+            );
+        let ok_app = cx.entity().downgrade();
+        dialog
+            .title("Remove server?")
+            .w(px(480.0))
+            .overlay_closable(false)
+            .keyboard(true)
+            // Enter 芓当于“只移除”，保守默认不清理本地数据。
+            .on_ok(move |_, window, cx| {
+                let _ = ok_app.update(cx, |this, cx| {
+                    this.submit_remove_server(false, window, cx)
+                });
+                true
+            })
+            .on_close(cx.listener(|this, _, _, cx| {
+                this.cancel_remove_server(cx);
+            }))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .p_1()
+                    .child(div().text_sm().child(format!(
+                        "Remove “{label}” from this app? The server itself and its music stay untouched."
+                    )))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                "Remove keeps local data: the saved session, loudness and genre caches, \
+                                 and the stored credential are kept, so re-adding the same server \
+                                 continues where you left off. Remove and clear data deletes them \
+                                 for good — the password will have to be re-entered."
+                            ),
+                    ),
+            )
+            .footer(footer)
+    }
     /// 设置覆盖层：盖住侧边栏与内容区，点击背景或 Esc 关闭；
     /// 标题栏和底部播放条不被遮挡，改设置时也能控制播放。
     pub(super) fn render_settings_overlay(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
@@ -2042,10 +2242,47 @@ impl NavidromeApp {
                 v_flex()
                     .gap_3()
                     .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child("Servers"),
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child("Servers"),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .when(self.api.is_some(), |this| {
+                                        this.child(
+                                            Button::new("settings-refresh")
+                                                .icon(AppIcon::Refresh)
+                                                .tooltip("Refresh library")
+                                                .loading(self.state.loading)
+                                                .ghost()
+                                                .small()
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.refresh_library();
+                                                    cx.notify();
+                                                })),
+                                        )
+                                    })
+                                    .child(
+                                        Button::new("settings-add-server")
+                                            .icon(KitIcon::Plus)
+                                            .label("Add server")
+                                            .tooltip("Add another server")
+                                            .ghost()
+                                            .small()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.add_server(window, cx);
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
                     )
                     .child(self.render_server_status_card(cx)),
             )
@@ -3779,19 +4016,23 @@ impl NavidromeApp {
                             playback.stall.unwrap_or_default().as_secs()
                         ))
                     })
-                    .when(playback.stall.is_none() && playback.error.is_some(), |this| {
-                        this.child("Playback failed — open for details")
-                    })
-                    .when(playback.stall.is_none() && playback.error.is_none(), |this| {
-                        this.child(self.render_scrolling_text(
-                            artist.clone().into(),
-                            info_width,
-                            px(10.0),
-                            FontWeight::NORMAL,
-                            artist_id,
-                            window,
-                        ))
-                    }),
+                    .when(
+                        playback.stall.is_none() && playback.error.is_some(),
+                        |this| this.child("Playback failed — open for details"),
+                    )
+                    .when(
+                        playback.stall.is_none() && playback.error.is_none(),
+                        |this| {
+                            this.child(self.render_scrolling_text(
+                                artist.clone().into(),
+                                info_width,
+                                px(10.0),
+                                FontWeight::NORMAL,
+                                artist_id,
+                                window,
+                            ))
+                        },
+                    ),
             );
 
         let controls = h_flex()
@@ -4387,10 +4628,7 @@ fn render_stall_chip(stall: Duration, accent: Hsla) -> gpui_kit::AnyElement {
 
 /// 播放失败的紧凑提示 + 立即重试。
 /// 播放条只有 24px 高，这里只显示归因摘要，完整原因放在悬停提示里。
-fn render_playback_error_chip(
-    error: String,
-    cx: &Context<NavidromeApp>,
-) -> gpui_kit::AnyElement {
+fn render_playback_error_chip(error: String, cx: &Context<NavidromeApp>) -> gpui_kit::AnyElement {
     let tooltip = error.clone();
     let summary = error
         .split_once(": ")

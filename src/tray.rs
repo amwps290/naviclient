@@ -48,6 +48,8 @@ pub fn start_tray_worker(tx: Sender<TrayCommand>) -> Result<()> {
 
 /// RGBA（R,G,B,A 每像素 4 字节）转 SNI 的 ARGB32 网络字节序
 /// （A,R,G,B 每像素 4 字节）。纯转换，便于测试。
+/// 目前只有 Linux 的 ksni 托盘用到；其他平台保留实现供测试与后续接入。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn rgba_to_argb32(rgba: &[u8]) -> Vec<u8> {
     let mut argb = Vec::with_capacity(rgba.len());
     for pixel in rgba.chunks_exact(4) {
@@ -226,22 +228,6 @@ mod linux {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::rgba_to_argb32;
-
-    #[test]
-    fn rgba_to_argb32_reorders_channels_per_pixel() {
-        // 单像素 R=1 G=2 B=3 A=4 → A=4 R=1 G=2 B=3
-        assert_eq!(rgba_to_argb32(&[1, 2, 3, 4]), vec![4, 1, 2, 3]);
-        // 多像素按 4 字节分组，互不串扰
-        assert_eq!(
-            rgba_to_argb32(&[1, 2, 3, 4, 5, 6, 7, 8]),
-            vec![4, 1, 2, 3, 8, 5, 6, 7]
-        );
-    }
-}
-
 #[cfg(target_os = "windows")]
 fn run_tray_loop(tx: &Sender<TrayCommand>) -> Result<()> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
@@ -320,4 +306,20 @@ fn tray_icon_rgba() -> Result<Vec<u8>> {
         .resize(32, 32, image::imageops::FilterType::Triangle)
         .to_rgba8();
     Ok(image.into_raw())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rgba_to_argb32;
+
+    #[test]
+    fn rgba_to_argb32_reorders_channels_per_pixel() {
+        // 单像素 R=1 G=2 B=3 A=4 → A=4 R=1 G=2 B=3
+        assert_eq!(rgba_to_argb32(&[1, 2, 3, 4]), vec![4, 1, 2, 3]);
+        // 多像素按 4 字节分组，互不串扰
+        assert_eq!(
+            rgba_to_argb32(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            vec![4, 1, 2, 3, 8, 5, 6, 7]
+        );
+    }
 }

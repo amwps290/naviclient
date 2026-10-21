@@ -50,6 +50,7 @@ use crate::models::{
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
+use crate::secrets;
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
 use crate::vinyl::VinylCover;
@@ -282,6 +283,8 @@ pub struct NavidromeApp {
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
+    /// 当前服务器的显示名输入框（可选）。
+    name_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
     volume_slider: Entity<SliderState>,
     muted: bool,
@@ -332,6 +335,8 @@ pub struct NavidromeApp {
     eq_sliders: Vec<Entity<SliderState>>,
     /// 均衡器配置保存的防抖代次。
     eq_save_generation: u64,
+    /// 删除服务器的确认弹窗：（服务器 id， 显示名）。None 表示无弹窗。
+    server_remove_prompt: Option<(String, String)>,
 }
 
 impl Drop for NavidromeApp {
@@ -344,8 +349,28 @@ impl Drop for NavidromeApp {
 
 impl NavidromeApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let config = config::load();
-        let api = Api::new(&config.server_url, &config.username, &config.password).ok();
+        let mut config = config::load();
+        // 一次性迁移（里程碑 #17）：把旧版明文密码移入系统凭据库，
+        // 迁移成功的条目在配置里只留空引用；凭据库不可用时保持明文，
+        // 每轮启动重试，绝不丢密码。
+        let migrated = secrets::migrate_config(&mut config);
+        if !migrated.is_empty() {
+            match config::save(&config) {
+                Ok(()) => log::info!(
+                    "migrated {} server password(s) into the system credential store",
+                    migrated.len()
+                ),
+                Err(error) => {
+                    log::warn!("failed to persist the credential migration: {error:#}")
+                }
+            }
+        }
+        // 连接使用解析后的密码：已迁入凭据库的条目从凭据库读取。
+        let active_password = config
+            .active_profile()
+            .map(|profile| profile.resolved_password())
+            .unwrap_or_default();
+        let api = Api::new(&config.server_url, &config.username, &active_password).ok();
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle());
@@ -375,8 +400,19 @@ impl NavidromeApp {
         let password_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Password")
-                .default_value(config.password.clone())
+                .default_value(active_password)
                 .masked(true)
+        });
+        // 服务器显示名（可选）：为空时界面回退到主机名。
+        let name_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Optional — defaults to the host name")
+                .default_value(
+                    config
+                        .active_profile()
+                        .map(|profile| profile.name.clone())
+                        .unwrap_or_default(),
+                )
         });
         let playback_slider = cx.new(|_| {
             SliderState::new()
@@ -424,6 +460,7 @@ impl NavidromeApp {
             server_input,
             username_input,
             password_input,
+            name_input,
             playback_slider: playback_slider.clone(),
             volume_slider: volume_slider.clone(),
             muted: false,
@@ -466,13 +503,9 @@ impl NavidromeApp {
             mini_volume_flash_generation: 0,
             eq_sliders,
             eq_save_generation: 0,
+            server_remove_prompt: None,
         };
-        app.state.loudness_cache = config::load_loudness();
         app.state.playback_modes = app.config.playback_modes;
-        // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
-        if let Some(cached) = config::load_genres_cache() {
-            app.state.genres = cached;
-        }
         // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
         {
             let prune_config = app.config.clone();
@@ -483,41 +516,8 @@ impl NavidromeApp {
         app.state.albums_sort = app.config.albums_sort;
         app.state.artists_sort = app.config.artists_sort;
         app.audio.set_volume(initial_volume);
-
-        // 恢复上次播放会话（仅服务器匹配时；不自动播放，点播放时从保存位置继续）。
-        if let Some(session) = config::load_session() {
-            let server_matches = app
-                .api
-                .as_ref()
-                .map(|api| api.base_url() == session.server_url)
-                .unwrap_or(false);
-            if server_matches && !session.queue.is_empty() {
-                let index = session
-                    .queue_index
-                    .filter(|index| *index < session.queue.len());
-                let restored_index = index;
-                app.state.queue = session.queue;
-                app.state.queue_index = index;
-                app.state.playback_modes = session.playback_modes;
-                app.config.playback_modes = session.playback_modes;
-                app.state.shuffle_history =
-                    ShuffleHistory::restore(session.shuffle_played, session.shuffle_forward);
-                if let Some(index) = restored_index {
-                    let song = app.state.queue.get(index).cloned();
-                    if let Some(song) = song {
-                        app.state.now_playing = Some(song.clone());
-                        app.resume_position =
-                            Some(Duration::from_secs_f64(session.position_secs.max(0.0)));
-                        app.ensure_cover(song.cover_art.as_deref(), true);
-                    }
-                }
-                log::info!(
-                    "restored playback session; queue={} index={restored_index:?} position={:.1}s",
-                    app.state.queue.len(),
-                    session.position_secs
-                );
-            }
-        }
+        // 响度/流派/播放会话都按服务器隔离，统一在切换与启动时加载。
+        app.load_active_server_cache();
 
         // 启动系统托盘（Windows），并拦截"关闭"改为隐藏到托盘。
         let (tray_tx, tray_rx) = mpsc::channel();
@@ -948,7 +948,9 @@ impl NavidromeApp {
         self.state
             .loudness_cache
             .insert(song_id.clone(), (loudness_db, loudness_peak));
-        if let Err(error) = config::save_loudness(&self.state.loudness_cache) {
+        let server_id = self.config.active_server_id().map(str::to_string);
+        if let Err(error) = config::save_loudness(server_id.as_deref(), &self.state.loudness_cache)
+        {
             log::warn!("loudness cache save failed: {error:#}");
         }
         log::debug!(
@@ -1714,9 +1716,10 @@ impl NavidromeApp {
             return;
         }
         self.last_notified_track = Some(song.id.clone());
-        let cover = song.cover_art.as_deref().map(|id| {
-            config::cover_cache_dir(&self.config).join(config::cover_cache_file_name(id))
-        });
+        let cover = song
+            .cover_art
+            .as_deref()
+            .map(|id| config::cover_cache_path(&self.config, self.config.active_server_id(), id));
         self.track_notifier.track_changed(
             &song.title,
             &notify::notification_body(&song.artist, &song.album),
@@ -1733,42 +1736,119 @@ impl NavidromeApp {
         }
     }
 
-    fn save_settings(&mut self, cx: &Context<Self>) {
-        let new_config = Config {
-            server_url: self.server_input.read(cx).value().trim().to_string(),
-            username: self.username_input.read(cx).value().trim().to_string(),
-            password: self.password_input.read(cx).value().to_string(),
-            theme: self.config.theme,
-            cache_dir: self.config.cache_dir.clone(),
-            transcoding_quality: self.config.transcoding_quality,
-            volume: self.config.volume,
-            playback_modes: self.config.playback_modes,
-            show_lyrics_translation: self.config.show_lyrics_translation,
-            output_device: self.config.output_device.clone(),
-            equalizer: self.config.equalizer.clone(),
-            volume_normalization: self.config.volume_normalization,
-            sidebar_collapsed: self.config.sidebar_collapsed,
-            albums_sort: self.config.albums_sort,
-            artists_sort: self.config.artists_sort,
-            show_track_notifications: self.config.show_track_notifications,
-            close_minimizes: self.config.close_minimizes,
+    /// 加载当前服务器作用域下的响度缓存、流派缓存与播放会话。
+    /// 启动与切换服务器时都走这里；切换时调用方已清空 `state`。
+    fn load_active_server_cache(&mut self) {
+        let server_id = self.config.active_server_id().map(str::to_string);
+        self.state.loudness_cache = config::load_loudness(server_id.as_deref());
+        // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
+        self.state.genres = config::load_genres_cache(server_id.as_deref()).unwrap_or_default();
+
+        // 恢复该服务器的播放会话（不自动播放，点播放时从保存位置继续）。
+        let Some(session) =
+            config::load_session(server_id.as_deref(), self.config.server_url.trim())
+        else {
+            return;
         };
-        self.config = new_config;
-        if let Err(error) = config::save(&self.config) {
-            self.state.status = format!("Config save failed: {error:#}");
+        if session.queue.is_empty() {
+            return;
         }
+        // 会话里记录的地址必须与当前服务器一致，避免拿错队列。
+        let server_matches = self
+            .api
+            .as_ref()
+            .map(|api| api.base_url() == session.server_url)
+            .unwrap_or(false);
+        if !server_matches {
+            return;
+        }
+        let index = session
+            .queue_index
+            .filter(|index| *index < session.queue.len());
+        let restored_index = index;
+        self.state.queue = session.queue;
+        self.state.queue_index = index;
+        self.state.playback_modes = session.playback_modes;
+        self.config.playback_modes = session.playback_modes;
+        self.state.shuffle_history =
+            ShuffleHistory::restore(session.shuffle_played, session.shuffle_forward);
+        if let Some(index) = restored_index {
+            if let Some(song) = self.state.queue.get(index).cloned() {
+                self.state.now_playing = Some(song.clone());
+                self.resume_position =
+                    Some(Duration::from_secs_f64(session.position_secs.max(0.0)));
+                self.ensure_cover(song.cover_art.as_deref(), true);
+            }
+        }
+        log::info!(
+            "restored playback session; server={:?} queue={} index={restored_index:?} position={:.1}s",
+            self.config.active_server_id(),
+            self.state.queue.len(),
+            session.position_secs
+        );
+    }
+
+    /// 把设置页的四个输入框同步为当前服务器（切换后必须调用，否则
+    /// 用户看到并保存的是上一台服务器的账号）。密码同样解析后展示，
+    /// 已迁入凭据库的条目回显真实密码，用户改密码时无需重新输入。
+    fn sync_server_inputs(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.config.server_url.clone();
+        let username = self.config.username.clone();
+        let password = self
+            .config
+            .active_profile()
+            .map(|profile| profile.resolved_password())
+            .unwrap_or_default();
+        let display_name = self
+            .config
+            .active_profile()
+            .map(|profile| profile.name.clone())
+            .unwrap_or_default();
+        self.name_input
+            .update(cx, |input, cx| input.set_value(display_name, window, cx));
+        self.server_input
+            .update(cx, |input, cx| input.set_value(url, window, cx));
+        self.username_input
+            .update(cx, |input, cx| input.set_value(username, window, cx));
+        self.password_input
+            .update(cx, |input, cx| input.set_value(password, window, cx));
+    }
+
+    /// 断开当前服务器并重建连接与视图状态（切服务器、保存设置共用）。
+    fn reconnect_active_server(&mut self) {
         self.cancel_next_preload();
         self.audio.stop();
         self.state = AppState::default();
         self.playlist_ui.reset();
         self.resume_position = None;
-        match Api::new(
-            &self.config.server_url,
-            &self.config.username,
-            &self.config.password,
-        ) {
+        self.reconnect = None;
+        self.reconnect_attempts = None;
+        // 上一台服务器的曲目不应继续出现在“正在播放”与通知里。
+        self.last_notified_track = None;
+        self.state.playback_modes = self.config.playback_modes;
+        self.state.albums_sort = self.config.albums_sort;
+        self.state.artists_sort = self.config.artists_sort;
+        // 空白条目（刚新增还没填）不是错误：只清空连接，等用户保存地址。
+        let configured = self
+            .config
+            .active_profile()
+            .is_some_and(|profile| profile.is_configured());
+        if !configured {
+            self.api = None;
+            self.state.status = "Enter the server address and account".to_string();
+            self.state.settings_open = true;
+            return;
+        }
+        // 已迁入系统凭据库的条目用解析后的密码连接。
+        let password = self
+            .config
+            .active_profile()
+            .map(|profile| profile.resolved_password())
+            .unwrap_or_default();
+        match Api::new(&self.config.server_url, &self.config.username, &password) {
             Ok(api) => {
                 self.api = Some(api);
+                self.load_active_server_cache();
                 self.refresh_library();
             }
             Err(error) => {
@@ -1778,6 +1858,224 @@ impl NavidromeApp {
                 self.state.settings_open = true;
             }
         }
+    }
+
+    /// 切换到另一台已保存的服务器。切换前先把当前服务器的作用域数据落盘。
+    fn switch_server(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.config.active_server.as_deref() == Some(id) {
+            return;
+        }
+        if !self.config.servers.iter().any(|profile| profile.id == id) {
+            return;
+        }
+        // 队列属于当前服务器：先保存，再断开。
+        self.save_session();
+        if let Err(error) =
+            config::save_loudness(self.config.active_server_id(), &self.state.loudness_cache)
+        {
+            log::warn!("failed to save loudness cache: {error:#}");
+        }
+        if !self.config.switch_to(id) {
+            return;
+        }
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Config save failed: {error:#}"));
+        }
+        log::info!(
+            "switched server; id={id} url={} user={}",
+            self.config.server_url,
+            self.config.username
+        );
+        self.state.status = format!("Switched to {}", self.active_server_label());
+        self.reconnect_active_server();
+        self.sync_server_inputs(window, cx);
+    }
+
+    /// 新增一台空白服务器并立即切过去，方便直接填地址账号。
+    fn add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_session();
+        // 切走前把当前服务器的作用域数据落盘（与 switch_server 同等义务）。
+        if let Err(error) =
+            config::save_loudness(self.config.active_server_id(), &self.state.loudness_cache)
+        {
+            log::warn!("failed to save loudness cache: {error:#}");
+        }
+        let id = self.config.add_server();
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Config save failed: {error:#}"));
+        }
+        log::info!("added server entry; id={id}");
+        self.reconnect_active_server();
+        self.sync_server_inputs(window, cx);
+        self.state.status = "Enter the address and account for the new server".to_string();
+    }
+
+    /// 删除一台服务器；正在使用的条目被删除时自动切到相邻条目。
+    /// clean_data = true 时一并清理这台服务器的作用域缓存（播放会话/
+    /// 响度/流派）与系统凭据库条目；凭据删除不可恢复，重新添加同一台
+    /// 服务器需要重输密码，因此默认保留。
+    fn remove_server(
+        &mut self,
+        id: &str,
+        clean_data: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let removing_active = self.config.active_server.as_deref() == Some(id);
+        let Some(profile) = self
+            .config
+            .servers
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        if removing_active {
+            self.save_session();
+            // 与切换服务器同等的落盘义务：响度缓存也属于当前服务器。
+            if let Err(error) =
+                config::save_loudness(self.config.active_server_id(), &self.state.loudness_cache)
+            {
+                log::warn!("failed to save loudness cache: {error:#}");
+            }
+        }
+        if !self.config.remove_server(id) {
+            self.notify_error("Keep at least one server configured");
+            return;
+        }
+        if clean_data {
+            if profile.password_in_keyring {
+                secrets::delete_password(id);
+            }
+            let removed = config::remove_server_cache(id);
+            log::info!("removed {removed} scoped cache file(s) of server {id}");
+        }
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(format!("Config save failed: {error:#}"));
+        }
+        log::info!("removed server entry; id={id}");
+        if removing_active {
+            self.reconnect_active_server();
+            self.sync_server_inputs(window, cx);
+        }
+        self.state.status = format!("Removed {}", profile.label());
+    }
+
+    /// 删除服务器前的确认弹窗（可选连同清理这台服务器的本地数据）。
+    pub(super) fn confirm_remove_server(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(label) = self
+            .config
+            .servers
+            .iter()
+            .find(|profile| profile.id == id)
+            .map(|profile| profile.label())
+        else {
+            return;
+        };
+        if self.server_remove_prompt.is_some() {
+            return;
+        }
+        self.server_remove_prompt = Some((id.to_string(), label));
+        self.show_remove_server_dialog(window, cx);
+    }
+
+    /// 弹窗确认后的实际删除；clean_data 的语义与 remove_server 一致。
+    /// 弹窗的关闭由调用方（按钮/框架）负责，这里只执行删除。
+    pub(super) fn submit_remove_server(
+        &mut self,
+        clean_data: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((id, _)) = self.server_remove_prompt.take() else {
+            return;
+        };
+        self.remove_server(&id, clean_data, window, cx);
+        cx.notify();
+    }
+
+    /// 关闭弹窗（取消 / Esc / 点击遮罩）：只清状态，不删除。
+    pub(super) fn cancel_remove_server(&mut self, cx: &mut Context<Self>) {
+        self.server_remove_prompt = None;
+        cx.notify();
+    }
+
+    fn show_remove_server_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if !window.has_active_dialog(cx) {
+            let app = cx.entity().downgrade();
+            // 与歌单弹窗同因：先等菜单层收尾，再安装弹窗的焦点域。
+            window.defer(cx, move |window, cx| {
+                window.open_dialog(cx, move |dialog, _, cx| {
+                    app.update(cx, |this, cx| this.render_remove_server_dialog(dialog, cx))
+                        .expect("app owns dialog")
+                });
+            });
+        }
+        cx.notify();
+    }
+
+    /// 当前服务器的显示名（侧边栏与设置页顶部共用）。
+    fn active_server_label(&self) -> String {
+        self.config
+            .active_profile()
+            .map(|profile| profile.label())
+            .unwrap_or_else(|| "No server".to_string())
+    }
+
+    fn save_settings(&mut self, cx: &Context<Self>) {
+        let url = self.server_input.read(cx).value().trim().to_string();
+        let username = self.username_input.read(cx).value().trim().to_string();
+        let password = self.password_input.read(cx).value().to_string();
+        let display_name = self.name_input.read(cx).value().trim().to_string();
+        // 写回当前服务器条目，而不是另外造一份配置：多服务器列表是唯一真源。
+        let active_id = self.config.store_active(&url, &username, &password);
+        if let Some(profile) = self
+            .config
+            .servers
+            .iter_mut()
+            .find(|profile| profile.id == active_id)
+        {
+            profile.name = display_name;
+            // 密码优先写入系统凭据库（里程碑 #17）：成功后配置里只留空
+            // 引用，明文不再落盘；凭据库不可用时保留明文并落下标记。
+            if !password.is_empty() {
+                match secrets::store_password(&active_id, &username, &password) {
+                    Ok(()) => {
+                        profile.password.clear();
+                        profile.password_in_keyring = true;
+                        log::info!(
+                            "stored the password of server {active_id} in the system credential store"
+                        );
+                    }
+                    Err(error) => {
+                        profile.password_in_keyring = false;
+                        log::warn!(
+                            "system credential store unavailable; keeping the password in the config file: {error:#}"
+                        );
+                    }
+                }
+            } else {
+                // 用户主动清空密码：同步删掉凭据库条目，避免遗留旧密码。
+                if profile.password_in_keyring {
+                    secrets::delete_password(&active_id);
+                }
+                profile.password_in_keyring = false;
+            }
+        }
+        // 同步镜像字段（server_url/username/password 始终与激活条目一致）。
+        // 直接在 self.config 上变更，不再重建整份 Config——手动罗列字段的
+        // 重建在新字段加入时极易漏拷而静默丢失设置。
+        self.config.sync_active_profile();
+        if let Err(error) = config::save(&self.config) {
+            self.state.status = format!("Config save failed: {error}");
+        }
+        self.reconnect_active_server();
     }
 
     fn apply_cache_directory(&mut self, cache_dir: Option<PathBuf>) {
@@ -1984,6 +2282,11 @@ impl NavidromeApp {
         }
         let position = self.audio.state().position;
         let (shuffle_played, shuffle_forward) = self.state.shuffle_history.snapshot();
+        let api_server_id = self
+            .config
+            .active_server_id()
+            .unwrap_or_default()
+            .to_string();
         let session = PlaybackSession {
             server_url: api.base_url().to_string(),
             queue: self.state.queue.clone(),
@@ -1993,7 +2296,8 @@ impl NavidromeApp {
             shuffle_played,
             shuffle_forward,
         };
-        if let Err(error) = config::save_session(&session) {
+        let server_id = api_server_id.to_string();
+        if let Err(error) = config::save_session(Some(&server_id), &session) {
             log::warn!("failed to save playback session: {error:#}");
         }
     }
@@ -2035,11 +2339,7 @@ impl NavidromeApp {
 
     /// 播放中断后安排一次自动重连。只有网络/服务端类失败才重试；
     /// 解码、本地输出问题以及重试次数用尽时返回 false。
-    fn schedule_reconnect(
-        &mut self,
-        failure: Option<StreamFailure>,
-        position: Duration,
-    ) -> bool {
+    fn schedule_reconnect(&mut self, failure: Option<StreamFailure>, position: Duration) -> bool {
         let Some(song) = self.state.now_playing.clone() else {
             return false;
         };
@@ -2091,12 +2391,16 @@ impl NavidromeApp {
         // 只有播放真的重新前进了一段（而不是刚发出 Play 就被当成成功）才清零
         // 重试计数，否则连续失败会被无限重试。
         if self.reconnect.is_none() && playback.error.is_none() {
-            let recovered = self.reconnect_attempts.as_ref().is_some_and(
-                |(id, _, failed_at)| {
-                    self.state.now_playing.as_ref().is_some_and(|song| &song.id == id)
+            let recovered = self
+                .reconnect_attempts
+                .as_ref()
+                .is_some_and(|(id, _, failed_at)| {
+                    self.state
+                        .now_playing
+                        .as_ref()
+                        .is_some_and(|song| &song.id == id)
                         && playback.position > failed_at.saturating_add(RECOVERY_CONFIRMATION)
-                },
-            );
+                });
             if recovered {
                 log::info!("playback recovered; clearing reconnect attempts");
                 self.reconnect_attempts = None;
@@ -2608,6 +2912,9 @@ impl Render for NavidromeApp {
                             .border_r_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().sidebar)
+                            // 当前服务器：多服务器下必须一眼可见正在浏览谁的库，
+                            // 点击进入设置切换。
+                            .child(self.render_sidebar_server(cx))
                             .when(!self.config.sidebar_collapsed, |this| {
                                 this.child(
                                     div()
