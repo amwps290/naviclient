@@ -2151,7 +2151,9 @@ impl Read for HttpRangeReader {
             let result = self
                 .response
                 .as_mut()
-                .ok_or_else(|| failure_io(StreamFailure::Connect, "audio HTTP response is unavailable"))?
+                .ok_or_else(|| {
+                    failure_io(StreamFailure::Connect, "audio HTTP response is unavailable")
+                })?
                 .read(buffer);
             self.control.check()?;
             match result {
@@ -2289,7 +2291,90 @@ fn request_range(client: &Client, url: &str, position: u64) -> Result<Response> 
             format!("audio request returned HTTP {status}")
         )));
     }
+    // stream 端点正常必须返回音频二进制；HTTP 200 却给出 JSON/text
+    // 说明服务器用 Subsonic 错误信封回应（例如拒绝/无法转码）。这里
+    // 直接读出错误内容并中止，避免把错误正文喂给解码器后报出误导性的
+    // “格式未识别”。归类为服务端拒绝，不触发自动重连。
+    if response_is_error_envelope(&response) {
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let mut body = String::new();
+        let _ = response
+            .take(8 * 1024)
+            .read_to_string(&mut body)
+            .map_err(|error| format!("body read failed: {error}"));
+        let detail = subsonic_error_detail(&body);
+        log::warn!(
+            "stream endpoint returned a non-audio response; endpoint={} status={status} content_type={} body={}",
+            stream_endpoint(url),
+            content_type,
+            body.trim()
+        );
+        return Err(anyhow!(FailureError::new(
+            StreamFailure::Http(status.as_u16()),
+            format!("server refused the stream request: {detail}"),
+        )));
+    }
     Ok(response)
+}
+
+/// 判定响应是否为非音频的错误信封：stream 端点正常必须返回音频二进制，
+/// JSON/text 正文只可能是协议错误（或完全跑错的网关页）。
+fn response_is_error_envelope(response: &Response) -> bool {
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    content_type.starts_with("application/json")
+        || content_type.starts_with("text/")
+        || content_type.starts_with("application/xml")
+}
+
+/// 解析 Subsonic 错误信封，取出服务端给出的真实原因。
+///
+/// 形如 `{"subsonic-response":{"status":"failed","error":{"code":0,"message":"…"}}}`；
+/// 解析不出时回退到截断后的原始正文，保证日志与界面仍能看到内容。
+fn subsonic_error_detail(body: &str) -> String {
+    let trimmed = body.trim();
+    let raw = || {
+        if trimmed.is_empty() {
+            "the server returned an empty response".to_string()
+        } else {
+            let prefix: String = trimmed.chars().take(200).collect();
+            if prefix.chars().count() < trimmed.chars().count() {
+                format!("{prefix}…")
+            } else {
+                prefix
+            }
+        }
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return raw();
+    };
+    let error = value
+        .get("subsonic-response")
+        .and_then(|response| response.get("error"))
+        .or_else(|| value.get("error"));
+    let Some(error) = error else {
+        return raw();
+    };
+    let code = error.get("code").and_then(serde_json::Value::as_i64);
+    let message = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    match (code, message.is_empty()) {
+        (Some(code), false) => format!("{message} (Subsonic error {code})"),
+        (Some(code), true) => format!("Subsonic error {code}"),
+        (None, false) => message.to_string(),
+        (None, true) => raw(),
+    }
 }
 
 fn content_range_len(response: &Response) -> Option<u64> {
@@ -2361,6 +2446,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn subsonic_error_envelope_yields_the_server_message() {
+        // 标准错误信封：取出服务端给出的真实原因与错误码。
+        let body = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"transcoding not configured"}}}"#;
+        assert_eq!(
+            subsonic_error_detail(body),
+            "transcoding not configured (Subsonic error 0)"
+        );
+        // 只有错误码：仍可给出可辨识的描述。
+        assert_eq!(
+            subsonic_error_detail(r#"{"error":{"code":70}}"#),
+            "Subsonic error 70"
+        );
+        // JSON 但非信封结构：回退原始正文。
+        let gateway = r#"{"detail":"gateway panic"}"#;
+        assert_eq!(subsonic_error_detail(gateway), gateway);
+    }
+
+    #[test]
+    fn subsonic_error_envelope_falls_back_to_raw_text_when_unparseable() {
+        // 非 JSON 正文：截断保留前 200 字符。
+        let html = "<html>502 Bad Gateway</html>";
+        assert_eq!(subsonic_error_detail(html), html);
+        let long = "x".repeat(300);
+        assert_eq!(
+            subsonic_error_detail(&long),
+            format!("{}…", "x".repeat(200))
+        );
+        // 空正文：给出占位描述而不是空字符串。
+        assert_eq!(
+            subsonic_error_detail(""),
+            "the server returned an empty response"
+        );
+        assert_eq!(
+            subsonic_error_detail("   "),
+            "the server returned an empty response"
+        );
+    }
+
+    #[test]
     fn network_failures_are_retryable_but_decode_and_output_are_not() {
         for kind in [
             StreamFailure::Connect,
@@ -2383,7 +2507,8 @@ mod tests {
 
     #[test]
     fn failure_messages_keep_the_summary_and_the_detail() {
-        let failure = FailureError::new(StreamFailure::Http(502), "audio request returned HTTP 502");
+        let failure =
+            FailureError::new(StreamFailure::Http(502), "audio request returned HTTP 502");
         assert_eq!(
             failure.message(),
             "Server returned an error: audio request returned HTTP 502"
@@ -2398,7 +2523,10 @@ mod tests {
     fn io_errors_carry_their_classification_through_the_reader_chain() {
         let wrapped = failure_io(StreamFailure::Truncated, "stream ended at byte 10 of 90");
         assert_eq!(classify_io(&wrapped), StreamFailure::Truncated);
-        assert_eq!(classify_io(&io::Error::from(io::ErrorKind::TimedOut)), StreamFailure::Timeout);
+        assert_eq!(
+            classify_io(&io::Error::from(io::ErrorKind::TimedOut)),
+            StreamFailure::Timeout
+        );
         assert_eq!(
             classify_io(&io::Error::from(io::ErrorKind::ConnectionRefused)),
             StreamFailure::Connect

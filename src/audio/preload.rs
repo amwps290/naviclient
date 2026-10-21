@@ -73,7 +73,10 @@ impl StreamControl {
     }
 
     pub(super) fn take_io_error(&self) -> Option<FailureError> {
-        self.last_io_error.lock().ok().and_then(|mut slot| slot.take())
+        self.last_io_error
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 
     pub(super) fn check(&self) -> io::Result<()> {

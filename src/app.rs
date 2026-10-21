@@ -791,12 +791,28 @@ impl NavidromeApp {
             song.suffix,
             song.size
         );
-        self.select_playing(index, &song, self.config.transcoding_quality);
+        // Opus 等本地无法解码的音源在 Original 档位自动降级为服务端转码；
+        // URL、缓存键、界面音质胶囊、无缝衔接都用同一个有效音质，保持一致。
+        let configured = self.config.transcoding_quality;
+        let quality = TranscodingQuality::effective_for(
+            configured,
+            song.suffix.as_deref(),
+            song.content_type.as_deref(),
+        );
+        if quality != configured {
+            log::info!(
+                "transcode fallback engaged; song_id={} suffix={:?} {} -> {} (the local decoder chain cannot decode this source)",
+                song.id,
+                song.suffix,
+                configured.label(),
+                quality.label()
+            );
+        }
+        self.select_playing(index, &song, quality);
         let Some(api) = self.api.clone() else {
             self.notify_error("Configure a server before playing");
             return;
         };
-        let quality = self.config.transcoding_quality;
         let max_bit_rate = quality.max_bit_rate();
         log::info!(
             "stream profile selected; song_id={} quality={} max_bit_rate_kbps={max_bit_rate:?}",
@@ -1063,7 +1079,13 @@ impl NavidromeApp {
             return;
         };
         let Some(api) = self.api.as_ref() else { return };
-        let quality = self.config.transcoding_quality;
+        // 与播放主路径同一套有效音质规则：预加载流必须与正式播放的
+        // 档位/缓存键一致，否则无缝衔接会因音质不符而拒绝复用。
+        let quality = TranscodingQuality::effective_for(
+            self.config.transcoding_quality,
+            song.suffix.as_deref(),
+            song.content_type.as_deref(),
+        );
         let Ok(url) = api.stream_url(&song.id, quality.max_bit_rate()) else {
             return;
         };
@@ -2328,6 +2350,22 @@ impl NavidromeApp {
             if self.schedule_reconnect(playback.failure, playback.position) {
                 return;
             }
+            // Opus 源解码失败时给出可操作的提示（而不是误导性的
+            // “格式未识别”）：说明需要服务器转码，并指向两案。
+            let undecodable_source = self.state.now_playing.as_ref().is_some_and(|song| {
+                TranscodingQuality::is_undecodable_source(
+                    song.suffix.as_deref(),
+                    song.content_type.as_deref(),
+                )
+            });
+            let error = if undecodable_source {
+                format!(
+                    "{error} Opus tracks must be transcoded by the server: enable transcoding \
+                     in Navidrome, or pick a lower playback quality."
+                )
+            } else {
+                error
+            };
             self.notify_error(error);
         } else if playback.ended {
             self.state.ended_handled = true;

@@ -216,7 +216,11 @@ transcoded levels request an MP3 stream from Navidrome, and each quality profile
 has an isolated cache. The decoded audio queue absorbs longer network
 interruptions, while completed
 tracks play directly from local storage. MP3, FLAC, AAC, Vorbis, and other
-formats supported by `rodio` remain available.
+formats supported by `rodio` remain available. Ogg Opus sources cannot be
+decoded locally (Symphonia has no released Opus decoder yet), so on the
+Original quality level they automatically fall back to a 320 kbps server
+transcode — the quality pill and the stream log show the effective level, and
+a decode error explains the cause if the server refuses to transcode.
 
 Preloading starts within the last 15 seconds only after the current track's
 remaining audio has been decoded, keeping its playback independent of network
