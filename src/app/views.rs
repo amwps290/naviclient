@@ -1789,11 +1789,11 @@ impl NavidromeApp {
                 .flatten(),
         })
     }
-    /// 服务器设置卡：上半部分是服务器列表（选择/切换/删除），下半部分
-    /// 是当前条目的连接详情。两者分开是为了让“切到哪台”和“改哪台”
-    /// 互不干扰。已配置的条目默认只显示摘要行（编辑入口，断线时附重试）；
-    /// 表单只在用户主动点开编辑、或条目尚未配置（首次运行/刚新增）时展开，
-    /// 避免四个输入框和保存按钮在没有编辑意图时直接铺开。
+    /// 服务器设置卡：上半部分是服务器列表（点击切换，行尾铅笔/垃圾桶
+    /// 分别编辑与删除那一行），下半部分是编辑表单——仅在铅笔点开某行
+    /// 或该条目尚未配置（首次运行/刚新增）时存在，平时不铺任何表单。
+    /// 编辑不切换服务器：改另一台的地址账号不会动当前正在播的库；
+    /// 断线重试在状态行上，不需要先进表单绕一圈。
     pub(super) fn render_server_status_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let connected = self.state.server.is_some();
         let active_configured = self
@@ -1826,11 +1826,20 @@ impl NavidromeApp {
         } else {
             cx.theme().muted_foreground
         };
-        let editing_label = self.active_server_label();
-        // 表单只在两种情况下展开：用户点了「Edit connection」，或当前
-        // 条目还没有连接信息可展示（首次运行、刚新增）。已配置的服务器
-        // 默认只给一个编辑入口，避免四个输入框和保存按钮不请自来。
-        let form_open = self.state.server_editing || !active_configured;
+        // 表单目标：行内铅笔打开的条目；没有显式目标时，尚未配置的
+        // 激活条目（首次运行、刚新增）也直接展示表单——那时表单就是
+        // 主任务。已配置的服务器默认不铺任何表单，编辑入口在每行里。
+        let form_target = self
+            .state
+            .editing_server
+            .as_deref()
+            .and_then(|id| self.config.servers.iter().find(|profile| profile.id == id))
+            .or_else(|| {
+                (!active_configured)
+                    .then(|| self.config.active_profile())
+                    .flatten()
+            })
+            .cloned();
         // 密码存储位置提示（里程碑 #17）：已迁入系统凭据库的条目不再
         // 往配置文件里写明文，用户需要在设置页能确认当前状态。
         let credential_note = if self
@@ -1843,7 +1852,7 @@ impl NavidromeApp {
             t!("Password is kept in the config file")
         };
 
-        v_flex()
+        let mut card = v_flex()
             .w_full()
             .rounded_lg()
             .border_1()
@@ -1859,7 +1868,29 @@ impl NavidromeApp {
                     .child(
                         v_flex()
                             .gap_0p5()
-                            .child(div().text_xs().text_color(status_color).child(status))
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(div().text_xs().text_color(status_color).child(status))
+                                    // 断线时给一个就地重试：重连不必先改地址账号。
+                                    .when(
+                                        !connected && active_configured && !self.state.loading,
+                                        |row| {
+                                            row.child(
+                                                Button::new("retry-server-connection")
+                                                    .label(t!("Retry"))
+                                                    .tooltip(t!("Reconnect to the selected server"))
+                                                    .ghost()
+                                                    .small()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.reconnect_active_server();
+                                                        cx.notify();
+                                                    })),
+                                            )
+                                        },
+                                    ),
+                            )
                             .child(
                                 div()
                                     .text_xs()
@@ -1867,83 +1898,33 @@ impl NavidromeApp {
                                     .child(credential_note),
                             ),
                     ),
-            )
-            // ---- 分隔线：明确“编辑区”只作用于上面选中的那台 ----
-            .child(div().h(px(1.0)).bg(cx.theme().border))
-            // ---- 下：已配置 = 摘要行（编辑入口 + 断线重试）；
-            //      未配置或点开编辑 = 连接表单 ----
-            .child(if form_open {
-                self.render_server_edit_form(active_configured, &editing_label, cx)
-            } else {
-                self.render_server_summary_row(connected, cx)
-            })
-            .into_any_element()
+            );
+        // ---- 下：编辑表单（仅在行内铅笔点开或条目未配置时存在） ----
+        if let Some(target) = &form_target {
+            card = card
+                .child(div().h(px(1.0)).bg(cx.theme().border))
+                .child(self.render_server_edit_form(target, cx));
+        }
+        card.into_any_element()
     }
 
-    /// 已配置服务器的摘要态：不展示表单，只留一个编辑入口；
-    /// 断线时附一个重试按钮（重连不需要先改地址账号）。
-    fn render_server_summary_row(
-        &self,
-        connected: bool,
-        cx: &Context<Self>,
-    ) -> gpui_kit::AnyElement {
-        h_flex()
-            .w_full()
-            .items_center()
-            .gap_2()
-            // 与表单态同规格的内边距，分隔线上下视觉重量一致。
-            .p_4()
-            .child(
-                Button::new("edit-server-connection")
-                    .icon(KitIcon::Pencil)
-                    .label(t!("Edit connection"))
-                    .tooltip(t!(
-                        "Change the address, account, or display name of this server."
-                    ))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.server_editing = true;
-                        cx.notify();
-                    })),
-            )
-            .when(!connected, |row| {
-                row.child(
-                    Button::new("retry-server-connection")
-                        .label(t!("Retry"))
-                        .tooltip(t!("Reconnect to the selected server"))
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.reconnect_active_server();
-                            cx.notify();
-                        })),
-                )
-            })
-            .into_any_element()
-    }
-
-    /// 连接表单：未配置条目（首次运行 / 刚新增）或用户主动点开编辑时
-    /// 展示。保存按钮的文案随改动内容变化：动了地址/账号/密码才是
-    /// “保存并连接”，只改显示名时就是普通“保存”。
+    /// 连接表单：行内铅笔点开某一行、或该条目尚未配置（首次运行 /
+    /// 刚新增）时展示，标题写明正在编辑哪一台。保存按钮文案随目标
+    /// 与改动内容变化：目标是当前连接的服务器且动了地址/账号/密码
+    /// 才是“保存并连接”；编辑别的服务器或只改显示名就是普通“保存”。
     fn render_server_edit_form(
         &self,
-        cancelable: bool,
-        editing_label: &str,
+        target: &ServerProfile,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let target_configured = target.is_configured();
+        let is_active = self.config.active_server.as_deref() == Some(target.id.as_str());
         let url = self.server_input.read(cx).value().trim().to_string();
         let username = self.username_input.read(cx).value().trim().to_string();
         let password = self.password_input.read(cx).value().to_string();
-        let identity_dirty = self
-            .config
-            .active_profile()
-            .map(|profile| {
-                profile.url.trim() != url
-                    || profile.username.trim() != username
-                    || profile.resolved_password() != password
-            })
-            .unwrap_or(true);
+        let identity_dirty = target.url.trim() != url
+            || target.username.trim() != username
+            || target.resolved_password() != password;
         v_flex()
             .w_full()
             .gap_3()
@@ -1952,16 +1933,13 @@ impl NavidromeApp {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(if cancelable {
-                                t!("Editing “%{editing}”", editing = editing_label)
-                            } else {
-                                t!("Configure your Navidrome server")
-                            }),
-                    )
+                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(
+                        if target_configured {
+                            t!("Editing “%{editing}”", editing = target.label())
+                        } else {
+                            t!("Configure your Navidrome server")
+                        },
+                    ))
                     .when(self.config.servers.len() > 1, |this| {
                         this.child(
                             div()
@@ -1975,18 +1953,22 @@ impl NavidromeApp {
             .child(self.render_server_field(t!("Server URL"), &self.server_input, cx))
             .child(self.render_server_field(t!("Username"), &self.username_input, cx))
             .child(self.render_server_field(t!("Password"), &self.password_input, cx))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.state.status.clone()),
-            )
+            // 连接状态只与当前连接的服务器有关：编辑另一台时不显示，
+            // 避把 A 的连接错误误读成 B 的问题。
+            .when(is_active, |form| {
+                form.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(self.state.status.clone()),
+                )
+            })
             .child(
                 h_flex()
                     .justify_end()
                     .gap_2()
                     // 未配置的条目没有可取消回去的东西，不给退路按钮。
-                    .when(cancelable, |row| {
+                    .when(target_configured, |row| {
                         row.child(
                             Button::new("cancel-server-edit")
                                 .label(t!("Cancel"))
@@ -1997,8 +1979,10 @@ impl NavidromeApp {
                     })
                     .child(
                         Button::new("save-settings")
-                            .label(if identity_dirty || !cancelable {
-                                // 未配置条目的保存意图就是建立连接。
+                            .label(if is_active && (identity_dirty || !target_configured) {
+                                // 当前连接的服务器且改了连接身份：保存后
+                                // 断开重连；未配置条目的保存意图也是
+                                // 建立连接。
                                 t!("Save and connect")
                             } else {
                                 t!("Save")
@@ -2051,6 +2035,7 @@ impl NavidromeApp {
             .children(self.config.servers.iter().map(|profile| {
                 let switch_id = profile.id.clone();
                 let remove_id = profile.id.clone();
+                let edit_id = profile.id.clone();
                 let is_active = active.as_deref() == Some(profile.id.as_str());
                 let label = profile.label();
                 let detail = if profile.is_configured() {
@@ -2061,7 +2046,7 @@ impl NavidromeApp {
                     )
                     .to_string()
                 } else {
-                    t!("Not configured — fill in the form below").to_string()
+                    t!("Not configured yet").to_string()
                 };
                 let switchable = !is_active && profile.is_configured();
                 let tooltip = if is_active {
@@ -2165,6 +2150,21 @@ impl NavidromeApp {
                                 )
                             })
                             .child(
+                                Button::new(SharedString::from(format!("edit-server-{edit_id}")))
+                                    .icon(KitIcon::Pencil)
+                                    .tooltip(t!("Edit connection"))
+                                    .ghost()
+                                    .small()
+                                    // 行本身可点击切换：行内按钮必须拦住鼠标按下，
+                                    // 否则会“打开编辑表单”与“切换服务器”同时发生。
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.begin_edit_server(&edit_id, window, cx);
+                                    })),
+                            )
+                            .child(
                                 Button::new(SharedString::from(format!(
                                     "remove-server-{remove_id}"
                                 )))
@@ -2177,6 +2177,9 @@ impl NavidromeApp {
                                 .disabled(!can_remove)
                                 .ghost()
                                 .small()
+                                // 同上：可切换行里的删除按钮此前会连带触发切换
+                                // （先弹删除确认、随后又切到那台），拦住冒泡。
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.confirm_remove_server(&remove_id, window, cx);

@@ -47,7 +47,8 @@ use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
     Genre, LanguagePreference, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode,
-    SearchResults, ServerInfo, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
+    SearchResults, ServerInfo, ServerProfile, Song, ThemePreference, TranscodingQuality,
+    VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
@@ -170,11 +171,11 @@ struct AppState {
     requested_covers: HashSet<String>,
     status: String,
     settings_open: bool,
-    /// 设置页的服务器编辑表单是否展开。默认收起：已配置的服务器只
-    /// 显示「Edit connection」入口，避免编辑表单和保存按钮不请自来；
-    /// 未配置的条目（首次运行、刚新增）始终直接展示表单。
-    /// 保存或切换/删除服务器会经 reconnect 重置 state，表单随之收起。
-    server_editing: bool,
+    /// 设置页当前正在编辑的服务器条目 id（行内铅笔按钮打开）。
+    /// None = 没有展开的编辑表单；未配置的激活条目（首次运行/刚新增）
+    /// 无需显式目标也会直出表单。保存或切换/删除服务器会经
+    /// reconnect 重置 state，表单随之收起。
+    editing_server: Option<String>,
     /// 键盘导航选中的歌曲行：作用域 + 行号。
     song_list_selected: Option<(&'static str, usize)>,
     /// 歌曲列表多选集合。索引只在该 scope 当前列表内有效；列表数据
@@ -255,7 +256,7 @@ impl Default for AppState {
             requested_covers: HashSet::new(),
             status: t!("Not connected").to_string(),
             settings_open: false,
-            server_editing: false,
+            editing_server: None,
             song_list_selected: None,
             song_list_multi: None,
             song_info: None,
@@ -1847,26 +1848,10 @@ impl NavidromeApp {
     /// 用户看到并保存的是上一台服务器的账号）。密码同样解析后展示，
     /// 已迁入凭据库的条目回显真实密码，用户改密码时无需重新输入。
     fn sync_server_inputs(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let url = self.config.server_url.clone();
-        let username = self.config.username.clone();
-        let password = self
-            .config
-            .active_profile()
-            .map(|profile| profile.resolved_password())
-            .unwrap_or_default();
-        let display_name = self
-            .config
-            .active_profile()
-            .map(|profile| profile.name.clone())
-            .unwrap_or_default();
-        self.name_input
-            .update(cx, |input, cx| input.set_value(display_name, window, cx));
-        self.server_input
-            .update(cx, |input, cx| input.set_value(url, window, cx));
-        self.username_input
-            .update(cx, |input, cx| input.set_value(username, window, cx));
-        self.password_input
-            .update(cx, |input, cx| input.set_value(password, window, cx));
+        let Some(profile) = self.config.active_profile().cloned() else {
+            return;
+        };
+        self.fill_server_inputs(&profile, window, cx);
     }
 
     /// 断开当前服务器并重建连接与视图状态（切服务器、保存设置共用）。
@@ -1970,7 +1955,7 @@ impl NavidromeApp {
         self.reconnect_active_server();
         self.sync_server_inputs(window, cx);
         // 新条目直接展开表单：新增的意图就是填写连接信息。
-        self.state.server_editing = true;
+        self.state.editing_server = Some(id);
         self.state.status = t!("Enter the address and account for the new server").to_string();
     }
 
@@ -2022,6 +2007,10 @@ impl NavidromeApp {
             ));
         }
         log::info!("removed server entry; id={id}");
+        // 正在编辑的条目被删掉：表单不能指向不存在的 id。
+        if self.state.editing_server.as_deref() == Some(id) {
+            self.state.editing_server = None;
+        }
         if removing_active {
             self.reconnect_active_server();
             self.sync_server_inputs(window, cx);
@@ -2100,36 +2089,77 @@ impl NavidromeApp {
         let username = self.username_input.read(cx).value().trim().to_string();
         let password = self.password_input.read(cx).value().to_string();
         let display_name = self.name_input.read(cx).value().trim().to_string();
-        // 地址/账号/密码任一变化才需要断开重连；只改显示名时正在播放的
-        // 音乐不应被打断。输入框在同步时回填的是解析后的密码，
-        // 因此未改动时两者相等，能可靠地识别“没改连接身份”。
-        let identity_changed = self
+        // 表单目标：行内铅笔打开的条目；没有显式目标时（首次运行的
+        // 表单直出场景）为激活条目。
+        let target_id = self
+            .state
+            .editing_server
+            .clone()
+            .or_else(|| self.config.active_server.clone());
+        let Some(target_id) = target_id else {
+            return;
+        };
+        let Some(target_before) = self
             .config
-            .active_profile()
-            .map(|profile| {
-                profile.url.trim() != url
-                    || profile.username.trim() != username
-                    || profile.resolved_password() != password
-            })
-            .unwrap_or(true);
-        // 写回当前服务器条目，而不是另外造一份配置：多服务器列表是唯一真源。
-        let active_id = self.config.store_active(&url, &username, &password);
+            .servers
+            .iter()
+            .find(|profile| profile.id == target_id)
+            .cloned()
+        else {
+            return;
+        };
+        let is_active = self.config.active_server.as_deref() == Some(target_id.as_str());
+        // 地址/账号/密码任一变化才需要断开重连；只改显示名或编辑的是
+        // 另一台未连接的服务器时，正在播放的音乐不应被打断。输入框
+        // 回填的是解析后的密码，因此未改动时两者相等。
+        let identity_changed = target_before.url.trim() != url
+            || target_before.username.trim() != username
+            || target_before.resolved_password() != password;
+        // 写回目标条目，而不是另外造一份配置：多服务器列表是唯一真源。
+        // 激活条目走 store_active（处理与其它条目的身份合并）；非激活
+        // 条目原位更新，id 与缓存命名空间保持不变。
+        let stored_id = if is_active {
+            let id = self.config.store_active(&url, &username, &password);
+            if let Some(profile) = self
+                .config
+                .servers
+                .iter_mut()
+                .find(|profile| profile.id == id)
+            {
+                profile.name = display_name;
+            }
+            id
+        } else if self
+            .config
+            .store_profile(&target_id, &url, &username, &password)
+        {
+            if let Some(profile) = self
+                .config
+                .servers
+                .iter_mut()
+                .find(|profile| profile.id == target_id)
+            {
+                profile.name = display_name;
+            }
+            target_id
+        } else {
+            return;
+        };
         if let Some(profile) = self
             .config
             .servers
             .iter_mut()
-            .find(|profile| profile.id == active_id)
+            .find(|profile| profile.id == stored_id)
         {
-            profile.name = display_name;
             // 密码优先写入系统凭据库（里程碑 #17）：成功后配置里只留空
             // 引用，明文不再落盘；凭据库不可用时保留明文并落下标记。
             if !password.is_empty() {
-                match secrets::store_password(&active_id, &username, &password) {
+                match secrets::store_password(&stored_id, &username, &password) {
                     Ok(()) => {
                         profile.password.clear();
                         profile.password_in_keyring = true;
                         log::info!(
-                            "stored the password of server {active_id} in the system credential store"
+                            "stored the password of server {stored_id} in the system credential store"
                         );
                     }
                     Err(error) => {
@@ -2142,7 +2172,7 @@ impl NavidromeApp {
             } else {
                 // 用户主动清空密码：同步删掉凭据库条目，避免遗留旧密码。
                 if profile.password_in_keyring {
-                    secrets::delete_password(&active_id);
+                    secrets::delete_password(&stored_id);
                 }
                 profile.password_in_keyring = false;
             }
@@ -2155,27 +2185,78 @@ impl NavidromeApp {
             self.state.status =
                 t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
         }
-        // 未配置的条目（首次运行、刚新增还没填）不能走“仅保存”分支：
-        // 保存后仍连不上，重连会给出正确的引导文案并保持表单展开。
-        let still_unconfigured = self
-            .config
-            .active_profile()
-            .is_none_or(|profile| !profile.is_configured());
-        if identity_changed || still_unconfigured {
-            self.reconnect_active_server();
-        } else {
-            // 只改了显示名：保留当前连接与设置页，收起表单回到摘要态。
-            // “已保存”用 Toast：表单收起后状态行已不在可见区。
-            self.state.server_editing = false;
-            self.notify_success(t!("Saved"));
+        if is_active {
+            // 未配置的条目（首次运行、刚新增还没填）不能走“仅保存”分支：
+            // 保存后仍连不上，重连会给出正确的引导文案并保持表单展开。
+            let still_unconfigured = self
+                .config
+                .active_profile()
+                .is_none_or(|profile| !profile.is_configured());
+            if identity_changed || still_unconfigured {
+                self.reconnect_active_server();
+                return;
+            }
         }
+        // 只改了显示名 / 编辑的是另一台未连接的服务器：保留当前连接与
+        // 设置页，收起表单。“已保存”用 Toast：表单收起后状态行不在可见区。
+        self.state.editing_server = None;
+        self.notify_success(t!("Saved"));
     }
 
-    /// 放弃编辑：把四个输入框恢复为当前条目的已保存值并收起表单。
+    /// 放弃编辑：输入框恢复为表单目标条目的已保存值并收起表单。
     /// 未配置的条目没有可恢复的内容，调用方负责不显示取消按钮。
     fn cancel_server_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.server_editing = false;
-        self.sync_server_inputs(window, cx);
+        let target = self
+            .state
+            .editing_server
+            .clone()
+            .or_else(|| self.config.active_server.clone());
+        if let Some(profile) = target
+            .as_deref()
+            .and_then(|id| self.config.servers.iter().find(|profile| profile.id == id))
+            .cloned()
+        {
+            self.fill_server_inputs(&profile, window, cx);
+        }
+        self.state.editing_server = None;
+        cx.notify();
+    }
+
+    /// 从指定条目填充表单的四个输入框（打开编辑与取消恢复共用）。
+    fn fill_server_inputs(
+        &self,
+        profile: &ServerProfile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = profile.name.clone();
+        self.name_input
+            .update(cx, |input, cx| input.set_value(name, window, cx));
+        let url = profile.url.clone();
+        self.server_input
+            .update(cx, |input, cx| input.set_value(url, window, cx));
+        let username = profile.username.clone();
+        self.username_input
+            .update(cx, |input, cx| input.set_value(username, window, cx));
+        let password = profile.resolved_password();
+        self.password_input
+            .update(cx, |input, cx| input.set_value(password, window, cx));
+    }
+
+    /// 打开指定条目的编辑表单。不切换服务器：修另一台的地址账号
+    /// 不该把当前正在浏览/播放的库换掉。
+    fn begin_edit_server(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(profile) = self
+            .config
+            .servers
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.state.editing_server = Some(id.to_string());
+        self.fill_server_inputs(&profile, window, cx);
         cx.notify();
     }
 

@@ -891,6 +891,24 @@ impl Config {
         self.active_server.clone().unwrap_or_default()
     }
 
+    /// 把行内编辑结果写回一个非激活条目（设置页每行的铅笔按钮）。
+    ///
+    /// 与 store_active 不同：不微合并、不激活——修另一台服务器的地址
+    /// 账号不应把正在连接的服务器切走。条目 id 保持不变，缓存命名空间
+    /// 不因改了地址/账号而丢失。密码先回退为明文、凭据库标记清零，
+    /// 由调用方后续的凭据库写入逻辑统一处理（与激活路径同一套）。
+    /// 找不到条目返回 false。
+    pub fn store_profile(&mut self, id: &str, url: &str, username: &str, password: &str) -> bool {
+        let Some(profile) = self.servers.iter_mut().find(|profile| profile.id == id) else {
+            return false;
+        };
+        profile.url = url.trim().to_string();
+        profile.username = username.trim().to_string();
+        profile.password = password.to_string();
+        profile.password_in_keyring = false;
+        true
+    }
+
     /// 新增一个空白服务器条目并激活，返回其 id。
     /// 地址与用户名都为空时 id 会与默认条目碰撞，因此带上递增编号区分。
     pub fn add_server(&mut self) -> String {
@@ -1421,6 +1439,46 @@ mod tests {
         assert_eq!(id, config.servers[0].id);
         assert_eq!(config.active_server.as_deref(), Some(id.as_str()));
         assert_eq!(config.servers[0].password, "pw-new");
+    }
+
+    #[test]
+    fn storing_a_non_active_profile_updates_it_in_place_without_switching() {
+        let mut config = Config {
+            servers: vec![
+                ServerProfile::new("http://one.local:4533", "alice", "pw1"),
+                ServerProfile::new("http://two.local:4533", "bob", "pw2"),
+            ],
+            ..Config::default()
+        };
+        config.sync_active_profile();
+        assert_eq!(
+            config.active_server.as_deref(),
+            Some(config.servers[0].id.as_str())
+        );
+        let second_id = config.servers[1].id.clone();
+
+        // 行内铅笔编辑非激活条目：原位更新，id 与激活项都不变。
+        assert!(config.store_profile(
+            &second_id,
+            "  http://two.local:4533/new  ",
+            "  robert ",
+            "pw-new"
+        ));
+
+        let second = &config.servers[1];
+        assert_eq!(second.id, second_id, "条目 id 不能变，缓存命名空间依赖它");
+        assert_eq!(second.url, "http://two.local:4533/new");
+        assert_eq!(second.username, "robert");
+        assert_eq!(second.password, "pw-new");
+        assert!(!second.password_in_keyring);
+        assert_eq!(
+            config.active_server.as_deref(),
+            Some(config.servers[0].id.as_str()),
+            "编辑非激活条目不能把连接切走"
+        );
+
+        // 目标 id 不存在（刚被删除）：安全失败，不动任何条目。
+        assert!(!config.store_profile("missing", "http://x", "y", "z"));
     }
 
     #[test]
