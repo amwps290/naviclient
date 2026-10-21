@@ -2562,6 +2562,7 @@ impl NavidromeApp {
         view: View,
         label: &'static str,
         icon: impl IconNamed,
+        count: Option<usize>,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let selected = self.state.view == view
@@ -2573,23 +2574,23 @@ impl NavidromeApp {
                     | (View::Playlists, View::PlaylistDetail)
             );
         let collapsed = self.config.sidebar_collapsed;
-        let button = Button::new(SharedString::from(format!("nav-{label}")))
-            .icon(icon)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.state.settings_open = false;
-                this.state.view = view;
-                match view {
-                    View::Artists if this.state.artists.is_empty() => this.load_artists(),
-                    View::Albums if this.state.albums.is_empty() => this.load_albums(),
-                    View::Genres if this.state.genres.is_empty() => this.load_genres(),
-                    View::Playlists if this.state.playlists.is_empty() => this.load_playlists(),
-                    View::Favorites => this.load_favorites(),
-                    _ => {}
-                }
-                cx.notify();
-            }));
         if collapsed {
             // 折叠态：图标按钮居中、拉高加大点击区，标签退化为 tooltip。
+            let button = Button::new(SharedString::from(format!("nav-{label}")))
+                .icon(icon)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.settings_open = false;
+                    this.state.view = view;
+                    match view {
+                        View::Artists if this.state.artists.is_empty() => this.load_artists(),
+                        View::Albums if this.state.albums.is_empty() => this.load_albums(),
+                        View::Genres if this.state.genres.is_empty() => this.load_genres(),
+                        View::Playlists if this.state.playlists.is_empty() => this.load_playlists(),
+                        View::Favorites => this.load_favorites(),
+                        _ => {}
+                    }
+                    cx.notify();
+                }));
             div()
                 .w_full()
                 .flex()
@@ -2604,12 +2605,59 @@ impl NavidromeApp {
                 )
                 .into_any_element()
         } else {
-            button
-                .label(label)
-                .justify_start()
-                .ghost()
-                .selected(selected)
+            // 展开态：自定义行（图标 + 标题 + 右端计数徽标）。相比全宽
+            // 幽灵按钮，右端的徽标填充了 216px 行尾的大片留白，也顺带让
+            // 每个入口自带规模信息（Artists 128、Playlists 6…）。
+            // 选中态与设置页服务器列表一致：图标主题色 + 行底色。
+            h_flex()
+                .id(SharedString::from(format!("nav-{label}")))
                 .w_full()
+                .h(px(32.0))
+                .items_center()
+                .gap_2()
+                .px_3()
+                .rounded(px(8.0))
+                .when(selected, |this| this.bg(cx.theme().list_active))
+                .when(!selected, |this| {
+                    this.cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().list_active.opacity(0.55)))
+                })
+                .child(Icon::new(icon).with_size(px(16.0)).text_color(if selected {
+                    cx.theme().accent
+                } else {
+                    cx.theme().muted_foreground
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .truncate()
+                        .when(selected, |this| this.font_weight(FontWeight::MEDIUM))
+                        .child(label),
+                )
+                .when_some(count.filter(|count| *count > 0), |this, count| {
+                    this.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(count.to_string()),
+                    )
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.settings_open = false;
+                    this.state.view = view;
+                    match view {
+                        View::Artists if this.state.artists.is_empty() => this.load_artists(),
+                        View::Albums if this.state.albums.is_empty() => this.load_albums(),
+                        View::Genres if this.state.genres.is_empty() => this.load_genres(),
+                        View::Playlists if this.state.playlists.is_empty() => this.load_playlists(),
+                        View::Favorites => this.load_favorites(),
+                        _ => {}
+                    }
+                    cx.notify();
+                }))
                 .into_any_element()
         }
     }
@@ -3089,23 +3137,59 @@ impl Render for NavidromeApp {
                                         .child("LIBRARY"),
                                 )
                             })
-                            .child(self.nav_button(View::Home, "Home", AppIcon::Home, cx))
+                            .child(self.nav_button(View::Home, "Home", AppIcon::Home, None, cx))
                             .child(self.nav_button(
                                 View::Favorites,
                                 "Favorites",
                                 AppIcon::Heart,
+                                Some(
+                                    self.state.favorites.artists.len()
+                                        + self.state.favorites.albums.len()
+                                        + self.state.favorites.songs.len(),
+                                ),
                                 cx,
                             ))
-                            .child(self.nav_button(View::Artists, "Artists", AppIcon::Artists, cx))
-                            .child(self.nav_button(View::Albums, "Albums", AppIcon::Albums, cx))
-                            .child(self.nav_button(View::Genres, "Genres", AppIcon::Genres, cx))
+                            .child(self.nav_button(
+                                View::Artists,
+                                "Artists",
+                                AppIcon::Artists,
+                                Some(self.state.artists.len()),
+                                cx,
+                            ))
+                            .child(
+                                self.nav_button(
+                                    View::Albums,
+                                    "Albums",
+                                    AppIcon::Albums,
+                                    // 专辑列表是增量分页加载，只有拉尽后总数才可信；
+                                    // 拉尽前不显示，避免给出误导性的“当前页数”。
+                                    self.state
+                                        .albums_exhausted
+                                        .then_some(self.state.albums.len()),
+                                    cx,
+                                ),
+                            )
+                            .child(self.nav_button(
+                                View::Genres,
+                                "Genres",
+                                AppIcon::Genres,
+                                Some(self.state.genres.len()),
+                                cx,
+                            ))
                             .child(self.nav_button(
                                 View::Playlists,
                                 "Playlists",
                                 AppIcon::Playlists,
+                                Some(self.state.playlists.len()),
                                 cx,
                             ))
-                            .child(self.nav_button(View::Search, "Search", KitIcon::Search, cx))
+                            .child(self.nav_button(
+                                View::Search,
+                                "Search",
+                                KitIcon::Search,
+                                None,
+                                cx,
+                            ))
                             .child(self.sidebar_collapse_toggle(cx)),
                     )
                     .child(
