@@ -516,7 +516,8 @@ impl NavidromeApp {
                     .rounded_full(),
             )
             .content(move |_, _, popover_cx| {
-                let accent = popover_cx.theme().accent;
+                // accent 是背景 token，做文字/进度色在亮色主题里几乎不可见。
+                let emphasis = popover_cx.theme().primary;
                 let muted = popover_cx.theme().muted_foreground;
                 v_flex()
                     .w(px(400.0))
@@ -590,10 +591,10 @@ impl NavidromeApp {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(if enabled { accent } else { muted })
+                                            .text_color(if enabled { emphasis } else { muted })
                                             .child(format!("{:+.0}", gains[band])),
                                     )
-                                    .child(Slider::new(slider).vertical().h(px(96.0)).bg(accent))
+                                    .child(Slider::new(slider).vertical().h(px(96.0)))
                                     .child(div().text_xs().text_color(muted).child(label))
                             })),
                     )
@@ -1821,8 +1822,10 @@ impl NavidromeApp {
         } else {
             t!("Not connected").to_string()
         };
+        // accent 是背景 token（亮色 neutral-100、深色 neutral-800），做前景
+        // 会与卡片底色同值；连接态的强调色用 primary。
         let status_color = if connected {
-            cx.theme().accent
+            cx.theme().primary
         } else {
             cx.theme().muted_foreground
         };
@@ -2091,7 +2094,7 @@ impl NavidromeApp {
                             .size(px(6.0))
                             .rounded_full()
                             .bg(if is_active {
-                                cx.theme().accent
+                                cx.theme().primary
                             } else {
                                 cx.theme().border
                             }),
@@ -2103,8 +2106,10 @@ impl NavidromeApp {
                             AppIcon::ServerOff
                         })
                         .with_size(px(14.0))
+                        // 图标绝不能再用 accent：它是背景 token，亮色主题下
+                        // ≈#f5f5f5，与选中行底只差 1/255，看起来就是“图标不显示”。
                         .text_color(if is_active {
-                            cx.theme().accent
+                            cx.theme().primary
                         } else {
                             cx.theme().muted_foreground
                         }),
@@ -2144,8 +2149,8 @@ impl NavidromeApp {
                                         .px_1p5()
                                         .rounded(px(4.0))
                                         .text_size(px(10.0))
-                                        .bg(cx.theme().accent.opacity(0.16))
-                                        .text_color(cx.theme().accent)
+                                        .bg(cx.theme().primary.opacity(0.12))
+                                        .text_color(cx.theme().primary)
                                         .child(t!("Active")),
                                 )
                             })

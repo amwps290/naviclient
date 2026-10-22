@@ -2830,8 +2830,10 @@ impl NavidromeApp {
                     this.cursor_pointer()
                         .hover(|style| style.bg(cx.theme().list_active.opacity(0.55)))
                 })
+                // accent 是背景 token（亮色 neutral-100、深色 neutral-800），
+                // 当图标/文字色用时几乎与底色同值；强调前景统一用 primary。
                 .child(Icon::new(icon).with_size(px(16.0)).text_color(if selected {
-                    cx.theme().accent
+                    cx.theme().primary
                 } else {
                     cx.theme().muted_foreground
                 }))
