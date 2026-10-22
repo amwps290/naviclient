@@ -2151,7 +2151,7 @@ impl NavidromeApp {
                             })
                             .child(
                                 Button::new(SharedString::from(format!("edit-server-{edit_id}")))
-                                    .icon(KitIcon::Pencil)
+                                    .icon(AppIcon::Pencil)
                                     .tooltip(t!("Edit connection"))
                                     .ghost()
                                     .small()

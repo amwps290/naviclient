@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 40] = [
+const ICON_FILES: [&str; 41] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -45,6 +45,7 @@ const ICON_FILES: [&str; 40] = [
     "server.svg",
     "cloud-off.svg",
     "trash.svg",
+    "pencil.svg",
 ];
 
 pub struct Assets;
@@ -84,6 +85,7 @@ pub enum AppIcon {
     Server,
     ServerOff,
     Trash,
+    Pencil,
 }
 
 #[derive(Clone, Copy)]
@@ -132,6 +134,7 @@ impl IconNamed for AppIcon {
             Self::Server => "icons/server.svg",
             Self::ServerOff => "icons/cloud-off.svg",
             Self::Trash => "icons/trash.svg",
+            Self::Pencil => "icons/pencil.svg",
         }
         .into()
     }
@@ -207,6 +210,7 @@ impl AssetSource for Assets {
             "icons/server.svg" => Some(include_bytes!("../assets/icons/server.svg")),
             "icons/cloud-off.svg" => Some(include_bytes!("../assets/icons/cloud-off.svg")),
             "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
+            "icons/pencil.svg" => Some(include_bytes!("../assets/icons/pencil.svg")),
             _ => None,
         };
 
@@ -272,22 +276,6 @@ mod tests {
 
         let search = IconName::Search.path();
         assert!(Assets.load(&search).unwrap().is_some());
-        // 其余直接引用 kit 图标的调用点：默认内嵌清单里必须都有，
-        // 否则运行期会刷 "could not find asset at path"。
-        for icon in [
-            IconName::Search,
-            IconName::Plus,
-            IconName::LoaderCircle,
-            IconName::TriangleAlert,
-            IconName::PanelLeftOpen,
-            IconName::PanelLeftClose,
-        ] {
-            let path = icon.path();
-            assert!(
-                Assets.load(&path).unwrap().is_some(),
-                "kit icon missing from the default asset list: {path}",
-            );
-        }
         assert_eq!(
             Assets
                 .load("icons/chevron-down.svg")
@@ -306,5 +294,61 @@ mod tests {
                 .count(),
             1,
         );
+    }
+
+    /// 回归守卫：直接引用 kit 的 `IconName::X`（含 `KitIcon::X` 别名）时，
+    /// 该图标必须能通过本项目的 AssetSource 加载。gpui-kit-assets 默认
+    /// 只内嵌 106 个图标，引用清单外的变体不会编译失败，只会在运行期
+    /// 渲染成空白并刷 “could not find asset”——历史已踩两次
+    /// （Server/Trash，后来又加了 Pencil），所以不再维护硬编码清单，
+    /// 直接扫描源码里实际引用到的每一个变体。
+    #[test]
+    fn every_kit_icon_referenced_in_source_resolves() {
+        use std::collections::BTreeSet;
+        use std::path::Path;
+
+        use gpui_kit::assets::IconName as KitIconName;
+
+        let mut used: BTreeSet<String> = BTreeSet::new();
+        for path in crate::test_support::rust_source_files(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        ) {
+            // 本文件自身列出了历史踩坑的变体名（注释里），且下面三个
+            // 硬编码测试已覆盖它们；扫自己只会被注释里的示例干扰。
+            if path.ends_with("assets.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+            for prefix in ["KitIcon::", "IconName::"] {
+                let mut at = 0;
+                while let Some(found) = text[at..].find(prefix) {
+                    let start = at + found + prefix.len();
+                    let name: String = text[start..]
+                        .chars()
+                        .take_while(|ch| ch.is_ascii_alphanumeric())
+                        .collect();
+                    if !name.is_empty() {
+                        used.insert(name);
+                    }
+                    at = start;
+                }
+            }
+        }
+        assert!(!used.is_empty(), "扫描器没找到任何图标引用，大概失效了");
+        for name in used {
+            let variant = KitIconName::ALL
+                .iter()
+                .find(|variant| format!("{variant:?}") == name)
+                .unwrap_or_else(|| panic!("源码引用了不存在的图标变体：{name}"));
+            let path = variant.path();
+            let loaded = Assets.load(&path).expect("asset lookup should not error");
+            assert!(
+                loaded.is_some(),
+                "源码引用的图标不在默认内嵌清单里：{path}。\
+                 把它作为 AppIcon 加入 assets/icons（参照 pencil.svg），\
+                 或改用默认内嵌的 kit 图标。"
+            );
+        }
     }
 }

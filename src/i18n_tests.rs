@@ -8,19 +8,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use crate::test_support::rust_source_files;
 
 const LOCALES: [&str; 3] = ["en", "zh-CN", "zh-TW"];
 
 /// 从 `src/` 下所有 Rust 源码里收集 `t!("…")` 字面量键。
 fn source_keys() -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
-    let mut files = Vec::new();
-    collect_rust_files(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut files,
-    );
-    for path in files {
+    for path in rust_source_files(Path::new(env!("CARGO_MANIFEST_DIR")).join("src")) {
         // 本文件自身既包含 `t!("` 的扫描样本，也包含文档里的示例，
         // 跳过它，否则守卫会把自己的实现细节当成文案键。
         if path.ends_with("i18n_tests.rs") {
@@ -33,19 +30,6 @@ fn source_keys() -> BTreeSet<String> {
         }
     }
     keys
-}
-
-fn collect_rust_files(dir: PathBuf, files: &mut Vec<PathBuf>) {
-    let entries =
-        fs::read_dir(&dir).unwrap_or_else(|error| panic!("reading {}: {error}", dir.display()));
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_rust_files(path, files);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            files.push(path);
-        }
-    }
 }
 
 /// 极简 Rust 词法扫描：找 `t!(` 后紧跟的字符串字面量并反转义。

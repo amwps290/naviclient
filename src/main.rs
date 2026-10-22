@@ -18,6 +18,8 @@ mod notify;
 mod playlist;
 mod secrets;
 mod single_instance;
+#[cfg(test)]
+mod test_support;
 mod tray;
 #[cfg(test)]
 mod ui_input_tests;
