@@ -2073,32 +2073,28 @@ impl NavidromeApp {
                     .rounded(px(8.0))
                     .border_1()
                     .border_color(if is_active {
-                        cx.theme().accent.opacity(0.45)
+                        // 选中态的边框用框架的 list_active_border（亮色 blue-400、
+                        // 深色 blue-700），与行底同一个蓝色族，不再是灰上加灰。
+                        cx.theme().list_active_border.opacity(0.55)
                     } else {
                         cx.theme().border.opacity(0.7)
                     })
+                    // 选中行底色沿用框架的选中语义色 list_active——accent 是
+                    // 背景 token，0.07 叠在卡片底上等于没叠（与歌曲行同一教训）。
                     .bg(if is_active {
-                        cx.theme().accent.opacity(0.07)
+                        cx.theme().list_active
                     } else {
                         cx.theme().background
                     })
                     .when(switchable, |this| {
+                        // hover 预演选中态：从白色走向同一片蓝色，
+                        // 而不是把鼠标经过变成一次无意义的灰色闪光。
                         this.cursor_pointer()
-                            .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                            .hover(|style| style.bg(cx.theme().list_active))
                     })
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                    // 左侧指示点：实心 = 当前连接。
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(px(6.0))
-                            .rounded_full()
-                            .bg(if is_active {
-                                cx.theme().primary
-                            } else {
-                                cx.theme().border
-                            }),
-                    )
+                    // 当前连接由行底、图标与行尾胶囊三重表达，
+                    // 原来那个 6px 圆点在这里只是噪声，已移除。
                     .child(
                         Icon::new(if is_active {
                             AppIcon::Server
@@ -2145,12 +2141,21 @@ impl NavidromeApp {
                             .items_center()
                             .when(is_active, |this| {
                                 this.child(
+                                    // 胶囊：实心主色 + 主色前景，而不是半透明灰底
+                                    // 靠 4px 小圆角硬拗的“标签”。用 primary /
+                                    // primary_foreground 一对 token，亮暗主题都
+                                    // 自动拿到足够对比度（≈17:1）。
                                     div()
-                                        .px_1p5()
-                                        .rounded(px(4.0))
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .h(px(18.0))
+                                        .px(px(8.0))
+                                        .rounded(px(999.0))
+                                        .bg(cx.theme().primary)
+                                        .text_color(cx.theme().primary_foreground)
                                         .text_size(px(10.0))
-                                        .bg(cx.theme().primary.opacity(0.12))
-                                        .text_color(cx.theme().primary)
+                                        .font_weight(FontWeight::MEDIUM)
                                         .child(t!("Active")),
                                 )
                             })
