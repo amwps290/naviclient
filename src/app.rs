@@ -2460,7 +2460,9 @@ impl NavidromeApp {
             return;
         }
         self.config.language = preference;
-        rust_i18n::set_locale(preference.resolve());
+        let locale = preference.resolve();
+        rust_i18n::set_locale(locale);
+        crate::typography::configure_ui_font(cx, locale);
         // 托盘菜单是原生控件：重建一次让它也换成新语言。
         tray::refresh_labels();
         if let Err(error) = config::save(&self.config) {
@@ -3546,7 +3548,7 @@ fn technical_info_chip(
         .border_1()
         .border_color(color.opacity(0.12))
         .bg(color.opacity(0.045))
-        .text_size(px(11.0))
+        .text_size(px(12.0))
         .text_color(cx.theme().foreground.opacity(0.74))
         .truncate()
         .child(label)

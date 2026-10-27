@@ -22,6 +22,7 @@ mod single_instance;
 #[cfg(test)]
 mod test_support;
 mod tray;
+mod typography;
 #[cfg(test)]
 mod ui_input_tests;
 mod vinyl;
@@ -123,7 +124,9 @@ fn run_app() {
         .with_assets(assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
-            let theme_preference = config::load().theme;
+            let config = config::load();
+            let theme_preference = config.theme;
+            let ui_locale = config.language.resolve();
 
             let window_options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(820.0)), cx)),
@@ -148,6 +151,7 @@ fn run_app() {
                             }
                         }
                         app::adjust_light_theme_contrast(cx);
+                        typography::configure_ui_font(cx, ui_locale);
 
                         cx.new(|cx| app::NavidromeApp::new(window, cx))
                     })

@@ -23,7 +23,11 @@ JavaScript runtime.
   data (saved session, loudness and genre caches, stored credential)
 - Home, artists, albums, playlists, and search views
 - Album cover art loaded from the Navidrome API
-- Native system font discovery and multilingual text rendering through GPUI
+- Native font discovery with a CJK-capable UI family selected per platform:
+  Microsoft YaHei/JhengHei UI on Windows, PingFang on macOS, and
+  Noto/Source Han/WenQuanYi/Sarasa on Linux when installed. Missing candidates
+  safely retain GPUI's system fallback, and compact UI text stays at 12px or
+  larger for consistent Chinese rendering.
 - Interface languages: English, Simplified Chinese (简体中文) and Traditional
   Chinese (繁體中文), switchable from Settings and applied instantly without a
   restart, or “System” to follow the OS language (Hant/TW/HK/MO regions get
@@ -246,6 +250,7 @@ application asset source combines custom player icons with Kit's built-in icons.
 - `src/audio/preload.rs` - cancellable next-track preparation and decoder suspension
 - `src/audio/gapless.rs` - continuous output, track-boundary events and atomic cancellation
 - `src/app.rs` - GPUI application state, navigation, library views, and player
+- `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
 - `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
 - `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
 - `src/playlist.rs` and `src/app/playlists.rs` - playlist edit validation, dialogs, and song menus
