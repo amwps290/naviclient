@@ -515,26 +515,46 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
         .and_then(Value::as_i64)
         .unwrap_or_default();
     let raw_lines = variant.get("line")?.as_array()?;
-    Some(
-        raw_lines
-            .iter()
-            .map(|line| {
-                let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
-                    let adjusted = i128::from(start) + i128::from(offset);
-                    adjusted.clamp(0, i128::from(u64::MAX)) as u64
-                });
-                LyricLine {
-                    start_ms,
-                    text: line
-                        .get("value")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    translation: None,
-                }
-            })
-            .collect(),
-    )
+    let synced = variant
+        .get("synced")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || raw_lines.iter().any(|line| line.get("start").is_some());
+    let mut lines = Vec::with_capacity(raw_lines.len());
+    for line in raw_lines {
+        let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
+            let adjusted = i128::from(start) + i128::from(offset);
+            adjusted.clamp(0, i128::from(u64::MAX)) as u64
+        });
+        let text = line
+            .get("value")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        if text.is_empty() {
+            // 同步歌词的空行通常是间奏/清屏时间点：保留一个即可，渲染层
+            // 会把它画成紧凑间隔。无时间轴歌词的空行没有语义，直接丢弃。
+            let consecutive_blank = lines
+                .last()
+                .is_some_and(|previous: &LyricLine| previous.text.is_empty());
+            if !synced || lines.is_empty() || consecutive_blank {
+                continue;
+            }
+        }
+
+        lines.push(LyricLine {
+            start_ms,
+            text,
+            translation: None,
+        });
+    }
+    // 尾部空行只会制造列表尾部空白；最后一句继续高亮比滚到空行自然。
+    if lines.last().is_some_and(|line| line.text.is_empty()) {
+        lines.pop();
+    }
+    Some(lines)
 }
 
 /// 翻译行与主行配对的时间容差（毫秒）。
@@ -548,6 +568,9 @@ fn pair_translations(primary: &mut [LyricLine], candidate: &[LyricLine]) {
     let candidate_synced = candidate.iter().any(|line| line.start_ms.is_some());
     if primary_synced && candidate_synced {
         for line in primary.iter_mut() {
+            if line.text.is_empty() {
+                continue;
+            }
             let Some(start) = line.start_ms else {
                 continue;
             };
@@ -582,17 +605,31 @@ fn variant_language(variant: &Value) -> &str {
         .unwrap_or_default()
 }
 
-/// 变体排序键：同步优先、行数多者优先。
+fn non_empty_line_count(variant: &Value) -> usize {
+    variant
+        .get("line")
+        .and_then(Value::as_array)
+        .map_or(0, |lines| {
+            lines
+                .iter()
+                .filter(|line| {
+                    line.get("value")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.trim().is_empty())
+                })
+                .count()
+        })
+}
+
+/// 变体排序键：同步优先、有效歌词行多者优先。空行不算内容，避免带有
+/// 大量间奏标记的低质量版本仅靠原始数组更长而胜出。
 fn variant_rank(variant: &Value) -> (bool, usize) {
     (
         variant
             .get("synced")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        variant
-            .get("line")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len),
+        non_empty_line_count(variant),
     )
 }
 
@@ -617,12 +654,7 @@ fn parse_structured_lyrics(body: &Value) -> Option<Lyrics> {
         .as_array()?;
     let usable = variants
         .iter()
-        .filter(|lyrics| {
-            lyrics
-                .get("line")
-                .and_then(Value::as_array)
-                .is_some_and(|lines| !lines.is_empty())
-        })
+        .filter(|lyrics| non_empty_line_count(lyrics) > 0)
         .collect::<Vec<_>>();
     let selected = pick_variant(&usable)?;
     // 翻译候选：不同语言且行非空；同分时同样优先靠前者。
@@ -669,6 +701,8 @@ fn parse_plain_lyrics(body: &Value) -> Option<Lyrics> {
             .map(str::to_string),
         lines: value
             .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
             .map(|line| LyricLine {
                 start_ms: None,
                 text: line.to_string(),
@@ -1017,18 +1051,92 @@ mod tests {
     }
 
     #[test]
+    fn structured_lyrics_collapse_blank_breaks_and_drop_edge_padding() {
+        let body = serde_json::json!({
+            "lyricsList": {
+                "structuredLyrics": [{
+                    "synced": true,
+                    "line": [
+                        {"start": 0, "value": ""},
+                        {"start": 1000, "value": " First line "},
+                        {"start": 2000, "value": "   "},
+                        {"start": 2500, "value": ""},
+                        {"start": 3000, "value": "Second line"},
+                        {"start": 4000, "value": ""}
+                    ]
+                }]
+            }
+        });
+
+        let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
+        assert_eq!(lyrics.lines.len(), 3);
+        assert_eq!(lyrics.lines[0].text, "First line");
+        assert_eq!(lyrics.lines[1].text, "");
+        assert_eq!(lyrics.lines[1].start_ms, Some(2000));
+        assert_eq!(lyrics.lines[2].text, "Second line");
+    }
+
+    #[test]
+    fn structured_variant_ranking_counts_content_instead_of_blank_rows() {
+        let body = serde_json::json!({
+            "lyricsList": { "structuredLyrics": [
+                {
+                    "lang": "zho",
+                    "synced": true,
+                    "line": [
+                        {"start": 0, "value": "Only real line"},
+                        {"start": 1000, "value": ""},
+                        {"start": 2000, "value": ""},
+                        {"start": 3000, "value": ""}
+                    ]
+                },
+                {
+                    "lang": "eng",
+                    "synced": true,
+                    "line": [
+                        {"start": 0, "value": "First real line"},
+                        {"start": 1000, "value": "Second real line"}
+                    ]
+                }
+            ]}
+        });
+
+        let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
+        assert_eq!(lyrics.lines.len(), 2);
+        assert_eq!(lyrics.lines[0].text, "First real line");
+        assert_eq!(lyrics.lines[1].text, "Second real line");
+    }
+
+    #[test]
     fn parses_plain_lyrics_lines() {
         let body = serde_json::json!({
             "lyrics": {
                 "artist": "Artist",
                 "title": "Song",
-                "value": "First line\nSecond line"
+                "value": " First line \n\n   \nSecond line"
             }
         });
 
         let lyrics = parse_plain_lyrics(&body).expect("plain lyrics should parse");
         assert!(!lyrics.is_synced());
         assert_eq!(lyrics.lines.len(), 2);
+        assert_eq!(lyrics.lines[0].text, "First line");
         assert_eq!(lyrics.lines[1].text, "Second line");
+    }
+
+    #[test]
+    fn blank_synced_lines_never_receive_translation_text() {
+        let mut primary = vec![
+            test_lyric_line(Some(0), "original"),
+            test_lyric_line(Some(5_000), ""),
+        ];
+        let candidate = vec![
+            test_lyric_line(Some(0), "翻译"),
+            test_lyric_line(Some(5_000), "不应写入间奏行"),
+        ];
+
+        pair_translations(&mut primary, &candidate);
+        assert_eq!(primary[0].translation.as_deref(), Some("翻译"));
+        assert_eq!(primary[1].translation, None);
     }
 }

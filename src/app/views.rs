@@ -2970,15 +2970,24 @@ impl NavidromeApp {
                 .track_scroll(&self.lyrics_scroll_handle)
                 .child(div().h(px(240.0)).flex_none())
                 .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
+                    if lyric_line.text.trim().is_empty() {
+                        // 同步歌词里的空行是间奏/清屏标记。保留其列表索引和
+                        // 时间轴位置，但不要让它占用普通歌词至少 64px 的行高。
+                        return div()
+                            .id(SharedString::from(format!(
+                                "lyric-break-{}-{index}",
+                                song.id
+                            )))
+                            .w_full()
+                            .h(px(20.0))
+                            .flex_none()
+                            .into_any_element();
+                    }
                     let current = synced && active_line == Some(index);
                     let distance = active_line
                         .map(|active| active.abs_diff(index))
                         .unwrap_or(usize::MAX);
-                    let text = if lyric_line.text.is_empty() {
-                        " ".to_string()
-                    } else {
-                        lyric_line.text.clone()
-                    };
+                    let text = lyric_line.text.clone();
                     let start_ms = lyric_line.start_ms;
                     let translation = lyric_line
                         .translation
