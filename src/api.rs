@@ -515,11 +515,6 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
         .and_then(Value::as_i64)
         .unwrap_or_default();
     let raw_lines = variant.get("line")?.as_array()?;
-    let synced = variant
-        .get("synced")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || raw_lines.iter().any(|line| line.get("start").is_some());
     let mut lines = Vec::with_capacity(raw_lines.len());
     for line in raw_lines {
         let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
@@ -533,15 +528,10 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
             .trim()
             .to_string();
 
+        // 空白行在不同歌词源中可能代表排版、间奏或清屏，含义并不一致。
+        // UI 不为它们创建列表项，保证任意歌曲的可见行间距一致。
         if text.is_empty() {
-            // 同步歌词的空行通常是间奏/清屏时间点：保留一个即可，渲染层
-            // 会把它画成紧凑间隔。无时间轴歌词的空行没有语义，直接丢弃。
-            let consecutive_blank = lines
-                .last()
-                .is_some_and(|previous: &LyricLine| previous.text.is_empty());
-            if !synced || lines.is_empty() || consecutive_blank {
-                continue;
-            }
+            continue;
         }
 
         lines.push(LyricLine {
@@ -549,10 +539,6 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
             text,
             translation: None,
         });
-    }
-    // 尾部空行只会制造列表尾部空白；最后一句继续高亮比滚到空行自然。
-    if lines.last().is_some_and(|line| line.text.is_empty()) {
-        lines.pop();
     }
     Some(lines)
 }
@@ -1051,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_lyrics_collapse_blank_breaks_and_drop_edge_padding() {
+    fn structured_lyrics_drop_all_blank_rows() {
         let body = serde_json::json!({
             "lyricsList": {
                 "structuredLyrics": [{
@@ -1069,11 +1055,9 @@ mod tests {
         });
 
         let lyrics = parse_structured_lyrics(&body).expect("structured lyrics should parse");
-        assert_eq!(lyrics.lines.len(), 3);
+        assert_eq!(lyrics.lines.len(), 2);
         assert_eq!(lyrics.lines[0].text, "First line");
-        assert_eq!(lyrics.lines[1].text, "");
-        assert_eq!(lyrics.lines[1].start_ms, Some(2000));
-        assert_eq!(lyrics.lines[2].text, "Second line");
+        assert_eq!(lyrics.lines[1].text, "Second line");
     }
 
     #[test]
