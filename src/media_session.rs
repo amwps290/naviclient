@@ -1,6 +1,6 @@
 //! Platform media controls. Commands are consumed on the UI thread so every
 //! control surface shares the same queue, persistence, and playback behavior.
-#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#![cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,8 +13,13 @@ use crate::{audio::PlaybackState, models::Song};
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::MediaSession;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::MediaSession;
 
 #[derive(Debug)]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub enum MediaCommand {
     Play,
     Pause,
@@ -38,6 +43,7 @@ pub struct MediaUpdate<'a> {
     pub cover: Option<&'a Arc<Image>>,
     pub playback: &'a PlaybackState,
     pub position: Duration,
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub volume: f32,
     pub can_play: bool,
     pub can_next: bool,
@@ -63,12 +69,12 @@ pub fn seek_offset(position: Duration, offset_us: i64, duration: Option<Duration
     duration.map_or(target, |limit| target.min(limit))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub struct MediaSession;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 impl MediaSession {
-    pub fn new(_: &tokio::runtime::Handle) -> Self {
+    pub fn new(_: &tokio::runtime::Handle, _: Option<isize>) -> Self {
         Self
     }
     pub fn update(&mut self, _: MediaUpdate<'_>) {}

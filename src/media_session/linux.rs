@@ -148,7 +148,7 @@ pub struct MediaSession {
 }
 
 impl MediaSession {
-    pub fn new(runtime: &Handle) -> Self {
+    pub fn new(runtime: &Handle, _window_handle: Option<isize>) -> Self {
         let (tx, commands) = mpsc::sync_channel(32);
         let bridge = Bridge {
             state: Arc::new(RwLock::new(Snapshot::default())),

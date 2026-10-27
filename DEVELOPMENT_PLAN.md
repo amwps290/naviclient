@@ -260,7 +260,9 @@ cargo build -j 8
 
 Linux 实现提交：`d381bbf`
 
-Linux MPRIS 已实现，Windows/macOS 后续接入。已用私有 D-Bus 会话与真实应用窗口
+Linux MPRIS 已实现；Windows SMTC 已接入代码并通过 Linux 到 Windows GNU target 的
+整项目交叉编译，待 Windows 实机验收媒体键、蓝牙耳机和系统媒体浮层。macOS 后续接入。
+Linux 已用私有 D-Bus 会话与真实应用窗口
 验证歌曲/封面、播放/暂停、上一首/下一首、音量、绝对/相对跳转、Seeked 信号
 （含恢复会话首次播放前的跳转）、最小化控制和退出注销。进度按需读取，不广播逐帧更新；封面仅发布本地临时文件 URL。
 
@@ -274,7 +276,7 @@ Linux MPRIS 已实现，Windows/macOS 后续接入。已用私有 D-Bus 会话�
 ### 平台范围
 
 - [x] Linux：MPRIS
-- [ ] Windows：System Media Transport Controls
+- [x] Windows：System Media Transport Controls（代码完成，待实机验收）
 - [ ] macOS：Now Playing / MediaPlayer
 
 ### 公共能力

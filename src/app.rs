@@ -387,7 +387,7 @@ impl NavidromeApp {
         let api = Api::new(&config.server_url, &config.username, &active_password).ok();
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
-        let media_session = MediaSession::new(runtime.handle());
+        let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
         let audio_cache_dir = config::audio_cache_dir(&config);
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
