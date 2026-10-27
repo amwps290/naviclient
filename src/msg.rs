@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use gpui_kit::{Hsla, Image as GpuiImage};
 
+use crate::import::{ImportedPlaylist, MatchedSongs};
 use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
@@ -67,6 +68,21 @@ pub enum Msg {
     Cover {
         id: String,
         result: Result<DecodedCover, String>,
+    },
+    /// 外部歌单链接解析 + 拉取完成（app/import.rs 的第一阶段）。
+    ImportResolved {
+        generation: u64,
+        result: Result<ImportedPlaylist, String>,
+    },
+    /// 匹配进度（每完成一首一条，代价很小，UI 循环 50ms 消费）。
+    ImportProgress {
+        generation: u64,
+        done: usize,
+    },
+    /// 匹配完成（第二阶段）：结果与导入曲目一一对应。
+    ImportMatched {
+        generation: u64,
+        result: Result<MatchedSongs, String>,
     },
 }
 

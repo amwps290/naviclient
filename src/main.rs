@@ -11,6 +11,7 @@ mod audio;
 mod config;
 #[cfg(test)]
 mod i18n_tests;
+mod import;
 mod media_session;
 mod models;
 mod msg;

@@ -3607,6 +3607,16 @@ impl NavidromeApp {
                                     })),
                             )
                             .child(
+                                Button::new("import-playlist")
+                                    .label(t!("Import playlist"))
+                                    .outline()
+                                    .small()
+                                    .disabled(self.api.is_none() || self.playlist_ui.busy)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_import_dialog(window, cx);
+                                    })),
+                            )
+                            .child(
                                 Button::new("refresh-playlists")
                                     .icon(AppIcon::Refresh)
                                     .label(t!("Refresh"))

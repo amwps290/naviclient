@@ -22,6 +22,11 @@ pub(super) struct PlaylistUi {
 }
 
 impl PlaylistUi {
+    /// 对话框是否打开（导入向导等兄弟模块只关心这个布尔）。
+    pub fn dialog_open(&self) -> bool {
+        self.dialog.is_some()
+    }
+
     pub fn reset(&mut self) {
         *self = Self {
             generation: self.generation.wrapping_add(1),
@@ -80,7 +85,7 @@ impl NavidromeApp {
         });
     }
 
-    fn start_playlist_edit(&mut self, edit: PlaylistEdit, cx: &mut Context<Self>) {
+    pub(super) fn start_playlist_edit(&mut self, edit: PlaylistEdit, cx: &mut Context<Self>) {
         if self.playlist_ui.busy {
             return;
         }
@@ -112,7 +117,11 @@ impl NavidromeApp {
         self.playlist_ui.generation = self.playlist_ui.generation.wrapping_add(1);
         match result {
             Ok(edited) => {
-                if self.playlist_ui.dialog.take().is_some() {
+                // 导入向导的确认阶段也是走 start_playlist_edit 提交的；
+                // 对话框同一时间只有一个，两个向导谁开着关谁的。
+                let import_dialog_open = self.import_ui.stage.is_some();
+                self.import_ui.reset();
+                if self.playlist_ui.dialog.take().is_some() || import_dialog_open {
                     self.playlist_ui.input_subscription = None;
                     window.close_dialog(cx);
                 }
@@ -138,6 +147,11 @@ impl NavidromeApp {
             Err(error) => {
                 if self.playlist_ui.dialog.is_some() {
                     self.playlist_ui.error = Some(error.clone());
+                }
+                // 创建导入歌单失败：退回审查阶段改名字重试，不要把用户
+                // 踢回粘贴链接重新来一遍。
+                if self.import_ui.stage == Some(ImportStage::Review) {
+                    self.import_ui.error = Some(error.clone());
                 }
                 self.notify_error(error);
             }

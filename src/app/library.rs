@@ -875,6 +875,15 @@ impl NavidromeApp {
                         }
                     }
                 }
+                Msg::ImportResolved { generation, result } => {
+                    self.finish_import_resolve(generation, result, cx);
+                }
+                Msg::ImportProgress { generation, done } => {
+                    self.finish_import_progress(generation, done);
+                }
+                Msg::ImportMatched { generation, result } => {
+                    self.finish_import_match(generation, result, window, cx);
+                }
             }
         }
         changed

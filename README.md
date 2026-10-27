@@ -51,6 +51,14 @@ JavaScript runtime.
   waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
+- Import playlists from NetEase Cloud Music: paste a share link (direct links
+  and `163cn.tv` short links are resolved), metadata is fetched through the
+  public v6 playlist and batched song-detail APIs (no login or audio streams),
+  and unavailable entries are retried before being clearly reported. Each
+  track is fuzzy-matched against your own library using title, primary artist
+  and duration, then reviewed side by side as matched, unmatched or unchecked
+  before a same-named Navidrome playlist is created. Matching runs four workers
+  with live progress, tolerates isolated request failures and remains cancellable
 - Independent shuffle toggle and repeat control (off / all / one) in the
   player's transport controls, persisted across restarts. Shuffle keeps a
   play history so Previous returns actually played tracks and short-term

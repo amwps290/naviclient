@@ -62,10 +62,12 @@ mod tests;
 
 mod covers;
 mod helpers;
+mod import;
 mod library;
 mod playlists;
 mod queue;
 mod views;
+use self::import::{ImportStage, ImportUi};
 use helpers::*;
 use playlists::{PlaylistUi, SongMenuContext};
 
@@ -287,6 +289,7 @@ pub struct NavidromeApp {
     vinyl_cover: VinylCover,
     state: AppState,
     playlist_ui: PlaylistUi,
+    import_ui: ImportUi,
     search_input: Entity<InputState>,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
@@ -467,6 +470,7 @@ impl NavidromeApp {
             vinyl_cover: VinylCover::default(),
             state: AppState::default(),
             playlist_ui: PlaylistUi::default(),
+            import_ui: ImportUi::default(),
             search_input: search_input.clone(),
             server_input,
             username_input,
@@ -1860,6 +1864,7 @@ impl NavidromeApp {
         self.audio.stop();
         self.state = AppState::default();
         self.playlist_ui.reset();
+        self.import_ui.reset();
         self.resume_position = None;
         self.reconnect = None;
         self.reconnect_attempts = None;
