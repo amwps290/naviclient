@@ -19,6 +19,10 @@ pub(super) struct StreamControl {
     pub(super) speculative: bool,
     /// 最近一次向播放器交付解码数据的时刻（`now_ms`），用于检测播放停滞。
     last_data_ms: AtomicU64,
+    /// 播放器为等待网络而消耗的人工静音帧。底层输出时钟会把这些帧
+    /// 当成正常音频时间，状态层需要扣除它们，避免进度在缓冲时继续前进。
+    synthetic_silence_frames: AtomicU64,
+    synthetic_silence_rate: AtomicU64,
     /// 读取链路上最后一次失败的原因；解码器吞掉 I/O 错误时靠它还原现场。
     last_io_error: Mutex<Option<FailureError>>,
 }
@@ -49,6 +53,8 @@ impl StreamControl {
             fully_decoded: AtomicBool::new(false),
             speculative,
             last_data_ms: AtomicU64::new(now_ms()),
+            synthetic_silence_frames: AtomicU64::new(0),
+            synthetic_silence_rate: AtomicU64::new(0),
             last_io_error: Mutex::new(None),
         })
     }
@@ -61,6 +67,25 @@ impl StreamControl {
     /// 数据已经停止流入多久。
     pub(super) fn idle(&self) -> Duration {
         Duration::from_millis(now_ms().saturating_sub(self.last_data_ms.load(Ordering::Relaxed)))
+    }
+
+    /// 记录一次为了等待解码数据而注入的静音帧（每声道一组样本算一帧）。
+    pub(super) fn mark_synthetic_silence_frame(&self, sample_rate: SampleRate) {
+        self.synthetic_silence_rate
+            .store(u64::from(sample_rate.get()), Ordering::Relaxed);
+        self.synthetic_silence_frames
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 人工静音占用的播放时钟时间；真实曲目位置应扣除这部分。
+    pub(super) fn synthetic_silence_duration(&self) -> Duration {
+        let frames = self.synthetic_silence_frames.load(Ordering::Relaxed);
+        let rate = self.synthetic_silence_rate.load(Ordering::Relaxed);
+        if frames == 0 || rate == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(frames as f64 / rate as f64)
+        }
     }
 
     /// 供读取链路上报失败原因；保留第一次（通常最接近根因）。

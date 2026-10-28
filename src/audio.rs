@@ -973,8 +973,15 @@ fn run_playback(
                 Command::SetOutputDevice(target) => {
                     // 先记录当前输出进度与出声状态（旧 Player 释放前）。
                     let had_output = !player.empty();
-                    let position = position_offset
-                        .saturating_add(player.get_pos().saturating_sub(track_boundary));
+                    let synthetic_silence = decode_progress
+                        .as_ref()
+                        .map(|control| control.synthetic_silence_duration())
+                        .unwrap_or_default();
+                    let position = logical_playback_position(
+                        position_offset,
+                        player.get_pos().saturating_sub(track_boundary),
+                        synthetic_silence,
+                    );
                     match open_audio_device(target.as_deref()) {
                         Ok((mut new_sink, new_name)) => {
                             let channels = new_sink.config().channel_count();
@@ -1174,8 +1181,13 @@ fn run_playback(
             preloader.poll();
         }
 
+        let output_position = player.get_pos().saturating_sub(track_boundary);
+        let synthetic_silence = decode_progress
+            .as_ref()
+            .map(|control| control.synthetic_silence_duration())
+            .unwrap_or_default();
         let position =
-            position_offset.saturating_add(player.get_pos().saturating_sub(track_boundary));
+            logical_playback_position(position_offset, output_position, synthetic_silence);
         let fully_buffered = decode_progress
             .as_ref()
             .is_some_and(|control| control.fully_decoded.load(Ordering::Acquire));
@@ -1285,7 +1297,9 @@ fn run_playback(
             .and_then(|shared| *shared)
             .unwrap_or((0.0, 0.0));
         set_state(&state, |s| {
-            s.position = position;
+            // 元数据时长和解码时长可能有少量舍入差异；对外状态始终保持
+            // position <= duration，时间文本、进度条和媒体会话读取同一值。
+            s.position = duration.map_or(position, |limit| position.min(limit));
             s.buffered = buffered;
             s.fully_buffered = fully_buffered;
             s.transition_id = transition_id;
@@ -1660,6 +1674,7 @@ impl Iterator for BufferedStreamSource {
                         });
                         return self.fail(error);
                     }
+                    self.control.mark_synthetic_silence_frame(self.sample_rate);
                     self.silence_remaining = usize::from(self.channels.get()).saturating_sub(1);
                     return Some(0.0);
                 }
@@ -2448,6 +2463,16 @@ fn seek_target(current: u64, len: Option<u64>, from: SeekFrom) -> io::Result<u64
     Ok(target)
 }
 
+/// 把输出设备时钟换算成真实曲目位置。网络停滞时注入的静音会推进
+/// `Player::get_pos()`，但它没有消费歌曲内容，因此必须扣除。
+fn logical_playback_position(
+    position_offset: Duration,
+    output_position: Duration,
+    synthetic_silence: Duration,
+) -> Duration {
+    position_offset.saturating_add(output_position.saturating_sub(synthetic_silence))
+}
+
 fn io_error(error: anyhow::Error) -> io::Error {
     match error.downcast::<FailureError>() {
         Ok(failure) => failure_io(failure.kind, failure.detail),
@@ -2740,6 +2765,34 @@ mod tests {
         assert_eq!(
             progress.buffered_duration(Duration::from_secs(200)),
             Duration::from_secs(50)
+        );
+    }
+
+    #[test]
+    fn synthetic_stall_silence_does_not_advance_the_track_position() {
+        let control = StreamControl::new(false);
+        let sample_rate = SampleRate::new(1_000).unwrap();
+        for _ in 0..2_500 {
+            control.mark_synthetic_silence_frame(sample_rate);
+        }
+
+        let synthetic_silence = control.synthetic_silence_duration();
+        assert_eq!(synthetic_silence, Duration::from_millis(2_500));
+        assert_eq!(
+            logical_playback_position(
+                Duration::from_secs(40),
+                Duration::from_millis(12_500),
+                synthetic_silence,
+            ),
+            Duration::from_secs(50)
+        );
+        assert_eq!(
+            logical_playback_position(
+                Duration::from_secs(40),
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+            ),
+            Duration::from_secs(40)
         );
     }
 
