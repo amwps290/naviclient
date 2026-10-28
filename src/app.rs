@@ -18,6 +18,7 @@ use gpui_kit::component::{
     notification::{Notification, NotificationType},
     scroll::{ScrollableElement, Scrollbar},
     slider::{Slider, SliderEvent, SliderState, SliderValue},
+    switch::Switch,
     tooltip::Tooltip,
     v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable,
     Sizable, Theme, ThemeMode, TitleBar, WindowExt,
@@ -113,6 +114,15 @@ struct Reconnect {
     song_id: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SettingsSection {
+    #[default]
+    Servers,
+    Playback,
+    Desktop,
+    Appearance,
+}
+
 struct AppState {
     server: Option<ServerInfo>,
     view: View,
@@ -173,6 +183,8 @@ struct AppState {
     requested_covers: HashSet<String>,
     status: String,
     settings_open: bool,
+    /// 设置页左侧导航当前选中的分组。
+    settings_section: SettingsSection,
     /// 设置页当前正在编辑的服务器条目 id（行内铅笔按钮打开）。
     /// None = 没有展开的编辑表单；未配置的激活条目（首次运行/刚新增）
     /// 无需显式目标也会直出表单。保存或切换/删除服务器会经
@@ -258,6 +270,7 @@ impl Default for AppState {
             requested_covers: HashSet::new(),
             status: t!("Not connected").to_string(),
             settings_open: false,
+            settings_section: SettingsSection::default(),
             editing_server: None,
             song_list_selected: None,
             song_list_multi: None,
@@ -2931,6 +2944,7 @@ impl NavidromeApp {
                         .h(px(32.0))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.state.settings_open = true;
+                            this.state.settings_section = SettingsSection::Servers;
                             this.refresh_output_devices(cx);
                             cx.notify();
                         })),
@@ -3008,6 +3022,7 @@ impl NavidromeApp {
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.settings_open = true;
+                        this.state.settings_section = SettingsSection::Servers;
                         this.refresh_output_devices(cx);
                         cx.notify();
                     })),

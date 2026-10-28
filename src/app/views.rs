@@ -2308,8 +2308,9 @@ impl NavidromeApp {
             .child(
                 v_flex()
                     .id("settings-card")
-                    .w(px(760.0))
-                    .max_w(relative(0.92))
+                    .w(px(960.0))
+                    .h(px(650.0))
+                    .max_w(relative(0.94))
                     .max_h(relative(0.88))
                     .mt(px(48.0))
                     .bg(cx.theme().background)
@@ -2350,29 +2351,201 @@ impl NavidromeApp {
                             ),
                     )
                     .child(
-                        // 原生 overflow_y_scroll + 手动滚动条图层：
-                        // overflow_y_scrollbar 的包装器根节点是 size_full，
-                        // 在自动高度的卡片里百分比解析为 0 会整体塌缩。
-                        div()
+                        h_flex()
                             .id("settings-body")
+                            .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.settings_scroll)
-                            .vertical_scrollbar(&self.settings_scroll)
-                            .p_6()
-                            .child(self.render_settings(cx)),
+                            .items_stretch()
+                            .child(self.render_settings_navigation(cx))
+                            .child(
+                                // 仅右侧内容区滚动，左侧分组导航始终可见。
+                                div()
+                                    .id("settings-content")
+                                    .flex_1()
+                                    .min_w_0()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.settings_scroll)
+                                    .vertical_scrollbar(&self.settings_scroll)
+                                    .px_6()
+                                    .py_5()
+                                    .child(self.render_settings(cx)),
+                            ),
                     ),
+            )
+            .into_any_element()
+    }
+
+    fn render_settings_navigation(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let selected = self.state.settings_section;
+        v_flex()
+            .w(px(184.0))
+            .flex_none()
+            .gap_1()
+            .p_3()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().secondary.opacity(0.25))
+            .child(
+                Button::new("settings-nav-servers")
+                    .w_full()
+                    .h(px(36.0))
+                    .justify_start()
+                    .accessibility_label(t!("Servers"))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(20.0))
+                                    .flex_none()
+                                    .flex()
+                                    .justify_center()
+                                    .child(Icon::new(AppIcon::Server).with_size(px(16.0))),
+                            )
+                            .child(div().text_sm().child(t!("Servers"))),
+                    )
+                    .ghost()
+                    .selected(selected == SettingsSection::Servers)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_section = SettingsSection::Servers;
+                        this.settings_scroll.scroll_to_top_of_item(0);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("settings-nav-playback")
+                    .w_full()
+                    .h(px(36.0))
+                    .justify_start()
+                    .accessibility_label(t!("Playback"))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(20.0))
+                                    .flex_none()
+                                    .flex()
+                                    .justify_center()
+                                    .child(Icon::new(AppIcon::VolumeHigh).with_size(px(16.0))),
+                            )
+                            .child(div().text_sm().child(t!("Playback"))),
+                    )
+                    .ghost()
+                    .selected(selected == SettingsSection::Playback)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_section = SettingsSection::Playback;
+                        this.settings_scroll.scroll_to_top_of_item(0);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("settings-nav-desktop")
+                    .w_full()
+                    .h(px(36.0))
+                    .justify_start()
+                    .accessibility_label(t!("Desktop"))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(20.0))
+                                    .flex_none()
+                                    .flex()
+                                    .justify_center()
+                                    .child(Icon::new(AppIcon::MiniPlayer).with_size(px(16.0))),
+                            )
+                            .child(div().text_sm().child(t!("Desktop"))),
+                    )
+                    .ghost()
+                    .selected(selected == SettingsSection::Desktop)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_section = SettingsSection::Desktop;
+                        this.settings_scroll.scroll_to_top_of_item(0);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("settings-nav-appearance")
+                    .w_full()
+                    .h(px(36.0))
+                    .justify_start()
+                    .accessibility_label(t!("Appearance"))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(20.0))
+                                    .flex_none()
+                                    .flex()
+                                    .justify_center()
+                                    .child(Icon::new(AppIcon::Settings).with_size(px(16.0))),
+                            )
+                            .child(div().text_sm().child(t!("Appearance"))),
+                    )
+                    .ghost()
+                    .selected(selected == SettingsSection::Appearance)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_section = SettingsSection::Appearance;
+                        this.settings_scroll.scroll_to_top_of_item(0);
+                        cx.notify();
+                    })),
             )
             .into_any_element()
     }
 
     pub(super) fn render_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let cache_dir = config::audio_cache_dir(&self.config);
+        let (title, description) = match self.state.settings_section {
+            SettingsSection::Servers => (
+                t!("Servers"),
+                t!("Manage server connections and library access."),
+            ),
+            SettingsSection::Playback => (
+                t!("Playback"),
+                t!("Configure streaming, audio output, and listening preferences."),
+            ),
+            SettingsSection::Desktop => (
+                t!("Desktop"),
+                t!("Control notifications and window behavior."),
+            ),
+            SettingsSection::Appearance => (
+                t!("Appearance"),
+                t!("Choose the theme and interface language."),
+            ),
+        };
         v_flex()
             .w_full()
             .max_w(px(840.0))
-            .gap_6()
+            .gap_5()
             .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(description),
+                    ),
+            )
+            .when(self.state.settings_section == SettingsSection::Servers, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
@@ -2384,7 +2557,7 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Servers")),
+                                    .child(t!("Connections")),
                             )
                             .child(
                                 h_flex()
@@ -2419,15 +2592,15 @@ impl NavidromeApp {
                             ),
                     )
                     .child(self.render_server_status_card(cx)),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Playback, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child(t!("Playback")),
+                                    .child(t!("Streaming & cache")),
                     )
                     .child(
                         v_flex()
@@ -2478,31 +2651,52 @@ impl NavidromeApp {
                                     ),
                             )
                             .child(
-                                v_flex()
-                                    .gap_2()
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .gap_4()
                                     .child(
                                         div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
+                                            .text_sm()
                                             .child(t!("Streaming quality")),
                                     )
-                                    .child(h_flex().gap_2().flex_wrap().children(
-                                        TranscodingQuality::ALL.into_iter().map(|quality| {
-                                            Button::new(SharedString::from(format!(
-                                                "quality-{}",
-                                                quality.cache_profile()
-                                            )))
-                                            .label(quality.label())
-                                            .selected(self.config.transcoding_quality == quality)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.set_transcoding_quality(quality, cx);
-                                            }))
-                                        }),
-                                    )),
+                                    .child({
+                                        let app = cx.entity().downgrade();
+                                        Button::new("streaming-quality-select")
+                                            .w(px(220.0))
+                                            .justify_between()
+                                            .label(self.config.transcoding_quality.label())
+                                            .dropdown_caret(true)
+                                            .outline()
+                                            .dropdown_menu(move |menu, _, cx| {
+                                                app.update(cx, |this, cx| {
+                                                    let mut menu = menu;
+                                                    for quality in TranscodingQuality::ALL {
+                                                        menu = menu.item(
+                                                            PopupMenuItem::new(quality.label())
+                                                                .checked(
+                                                                    this.config
+                                                                        .transcoding_quality
+                                                                        == quality,
+                                                                )
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        this.set_transcoding_quality(
+                                                                            quality, cx,
+                                                                        );
+                                                                    },
+                                                                )),
+                                                        );
+                                                    }
+                                                    menu
+                                                })
+                                                .expect("app owns streaming quality menu")
+                                            })
+                                    }),
                             ),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Playback, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
@@ -2536,48 +2730,78 @@ impl NavidromeApp {
                             .child(
                                 h_flex()
                                     .gap_2()
+                                    .items_center()
                                     .flex_wrap()
-                                    .child(
-                                        Button::new("output-device-default")
-                                            .label(t!("System default"))
-                                            .tooltip(t!("Follow the OS default output device"))
-                                            .selected(self.config.output_device.is_none())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.set_output_device(None, cx);
-                                            })),
-                                    )
-                                    .children(
-                                        self.state
-                                            .output_devices
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(index, (name, is_default))| {
-                                                let name_for_click = name.clone();
-                                                // 按钮元素 id 用索引：设备名可能含特殊字符。
-                                                Button::new(SharedString::from(format!(
-                                                    "output-device-{index}"
-                                                )))
-                                                .label(if *is_default {
-                                                    t!("%{name} (default)", name = name)
-                                                } else {
-                                                    t!("%{name}", name = name)
-                                                })
-                                                .selected(
-                                                    self.config.output_device
-                                                        .as_deref()
-                                                        .is_some_and(|selected| selected == name)
-                                                )
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.set_output_device(
-                                                        Some(name_for_click.clone()),
-                                                        cx,
+                                    .child({
+                                        let app = cx.entity().downgrade();
+                                        let selected_label = self
+                                            .config
+                                            .output_device
+                                            .clone()
+                                            .unwrap_or_else(|| t!("System default").to_string());
+                                        Button::new("output-device-select")
+                                            .w(px(300.0))
+                                            .max_w_full()
+                                            .justify_between()
+                                            .label(selected_label.clone())
+                                            .tooltip(selected_label)
+                                            .dropdown_caret(true)
+                                            .outline()
+                                            .dropdown_menu(move |menu, _, cx| {
+                                                app.update(cx, |this, cx| {
+                                                    let mut menu = menu.item(
+                                                        PopupMenuItem::new(t!("System default"))
+                                                            .checked(
+                                                                this.config.output_device.is_none(),
+                                                            )
+                                                            .on_click(cx.listener(
+                                                                |this, _, _, cx| {
+                                                                    this.set_output_device(None, cx);
+                                                                },
+                                                            )),
                                                     );
-                                                }))
-                                            }),
-                                    )
+                                                    for (name, is_default) in
+                                                        &this.state.output_devices
+                                                    {
+                                                        let name_for_click = name.clone();
+                                                        let label = if *is_default {
+                                                            t!(
+                                                                "%{name} (default)",
+                                                                name = name
+                                                            )
+                                                        } else {
+                                                            t!("%{name}", name = name)
+                                                        };
+                                                        menu = menu.item(
+                                                            PopupMenuItem::new(label)
+                                                                .checked(
+                                                                    this.config
+                                                                        .output_device
+                                                                        .as_deref()
+                                                                        == Some(name.as_str()),
+                                                                )
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        this.set_output_device(
+                                                                            Some(
+                                                                                name_for_click
+                                                                                    .clone(),
+                                                                            ),
+                                                                            cx,
+                                                                        );
+                                                                    },
+                                                                )),
+                                                        );
+                                                    }
+                                                    menu
+                                                })
+                                                .expect("app owns output device menu")
+                                            })
+                                    })
                                     .child(
                                         Button::new("refresh-output-devices")
-                                            .label(t!("Refresh devices"))
+                                            .icon(AppIcon::Refresh)
+                                            .tooltip(t!("Refresh devices"))
                                             .ghost()
                                             .small()
                                             .loading(self.state.output_devices_loading)
@@ -2587,8 +2811,8 @@ impl NavidromeApp {
                                     ),
                             ),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Playback, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
@@ -2598,7 +2822,9 @@ impl NavidromeApp {
                             .child(t!("Volume normalization")),
                     )
                     .child(
-                        v_flex()
+                        h_flex()
+                            .justify_between()
+                            .items_center()
                             .gap_4()
                             .p_4()
                             .rounded_lg()
@@ -2606,34 +2832,55 @@ impl NavidromeApp {
                             .border_color(cx.theme().border)
                             .bg(cx.theme().secondary.opacity(0.2))
                             .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
                                     .child(
-                                        t!("Adjust per-song loudness with ReplayGain so quiet and loud tracks play at a similar level."
-                                        ),
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(
+                                                t!("Adjust per-song loudness with ReplayGain so quiet and loud tracks play at a similar level."
+                                                ),
+                                            ),
                                     ),
                             )
-                            .child(
-                                h_flex().gap_2().flex_wrap().children(
-                                    VolumeNormalization::ALL.into_iter().map(|mode| {
-                                        // 元素 ID 用 Debug 名（Off/Track/Album）保持稳定，
-                                        // 显示文案随界面语言变。
-                                        Button::new(SharedString::from(format!(
-                                            "volume-normalization-{mode:?}"
-                                        )))
-                                        .label(mode.label())
-                                        .tooltip(mode.tooltip())
-                                        .selected(self.config.volume_normalization == mode)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.set_volume_normalization(mode, cx);
-                                        }))
-                                    }),
-                                ),
-                            ),
+                            .child({
+                                let app = cx.entity().downgrade();
+                                Button::new("volume-normalization-select")
+                                    .w(px(220.0))
+                                    .justify_between()
+                                    .label(self.config.volume_normalization.label())
+                                    .tooltip(self.config.volume_normalization.tooltip())
+                                    .dropdown_caret(true)
+                                    .outline()
+                                    .dropdown_menu(move |menu, _, cx| {
+                                        app.update(cx, |this, cx| {
+                                            let mut menu = menu;
+                                            for mode in VolumeNormalization::ALL {
+                                                menu = menu.item(
+                                                    PopupMenuItem::new(mode.label())
+                                                        .checked(
+                                                            this.config.volume_normalization
+                                                                == mode,
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.set_volume_normalization(
+                                                                    mode, cx,
+                                                                );
+                                                            },
+                                                        )),
+                                                );
+                                            }
+                                            menu
+                                        })
+                                        .expect("app owns volume normalization menu")
+                                    })
+                            }),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Playback, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
@@ -2643,7 +2890,9 @@ impl NavidromeApp {
                             .child(t!("Lyrics")),
                     )
                     .child(
-                        v_flex()
+                        h_flex()
+                            .justify_between()
+                            .items_center()
                             .gap_4()
                             .p_4()
                             .rounded_lg()
@@ -2651,45 +2900,43 @@ impl NavidromeApp {
                             .border_color(cx.theme().border)
                             .bg(cx.theme().secondary.opacity(0.2))
                             .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
                                     .child(
-                                        t!("Show translated lyrics under the original line when the server provides another language variant."
-                                        ),
+                                        div()
+                                            .text_sm()
+                                            .child(t!("Show translation")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(
+                                                t!("Show translated lyrics under the original line when the server provides another language variant."
+                                                ),
+                                            ),
                                     ),
                             )
                             .child(
-                                h_flex().gap_2().children(
-                                    [
-                                        (t!("Show translation"), true),
-                                        (t!("Original only"), false),
-                                    ]
-                                        .into_iter()
-                                        .map(|(label, show)| {
-                                            Button::new(SharedString::from(format!(
-                                                "lyrics-translation-{show}"
-                                            )))
-                                            .label(label)
-                                            .selected(
-                                                self.config.show_lyrics_translation == show,
-                                            )
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.set_show_lyrics_translation(show, cx);
-                                            }))
-                                        }),
-                                ),
+                                Switch::new("lyrics-translation-switch")
+                                    .checked(self.config.show_lyrics_translation)
+                                    .accessibility_label(t!("Show translation"))
+                                    .on_change(cx.listener(|this, checked, _, cx| {
+                                        this.set_show_lyrics_translation(*checked, cx);
+                                    })),
                             ),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Desktop, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child(t!("Desktop")),
+                                    .child(t!("System integration")),
                     )
                     .child(
                         v_flex()
@@ -2725,30 +2972,12 @@ impl NavidromeApp {
                                             ),
                                     )
                                     .child(
-                                        h_flex().gap_1().children(
-                                            [
-                                                (t!("On"), true),
-                                                (t!("Off"), false),
-                                            ]
-                                            .map(|(label, value)| {
-                                                Button::new(SharedString::from(format!(
-                                                    "track-notifications-{value}"
-                                                )))
-                                                    .label(label)
-                                                    .selected(
-                                                        self.config.show_track_notifications
-                                                            == value,
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, _, _, cx| {
-                                                            this.set_show_track_notifications(
-                                                                value, cx,
-                                                            );
-                                                        },
-                                                    ))
-                                                },
-                                            ),
-                                        ),
+                                        Switch::new("track-notifications-switch")
+                                            .checked(self.config.show_track_notifications)
+                                            .accessibility_label(t!("Now-playing notifications"))
+                                            .on_change(cx.listener(|this, checked, _, cx| {
+                                                this.set_show_track_notifications(*checked, cx);
+                                            })),
                                     ),
                             )
                             .child(
@@ -2777,39 +3006,24 @@ impl NavidromeApp {
                                             ),
                                     )
                                     .child(
-                                        h_flex().gap_1().children(
-                                            [
-                                                (t!("On"), true),
-                                                (t!("Off"), false),
-                                            ]
-                                            .map(|(label, value)| {
-                                                Button::new(SharedString::from(format!(
-                                                    "close-minimizes-{value}"
-                                                )))
-                                                    .label(label)
-                                                    .selected(
-                                                        self.config.close_minimizes == value,
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, _, _, cx| {
-                                                            this.set_close_minimizes(value, cx);
-                                                        },
-                                                    ))
-                                                },
-                                            ),
-                                        ),
+                                        Switch::new("close-minimizes-switch")
+                                            .checked(self.config.close_minimizes)
+                                            .accessibility_label(t!("Close button minimizes"))
+                                            .on_change(cx.listener(|this, checked, _, cx| {
+                                                this.set_close_minimizes(*checked, cx);
+                                            })),
                                     ),
                             ),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Appearance, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .child(t!("Appearance")),
+                                    .child(t!("Theme")),
                     )
                     .child(
                         v_flex()
@@ -2819,12 +3033,6 @@ impl NavidromeApp {
                             .border_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().secondary.opacity(0.2))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Theme")),
-                            )
                             .child(
                                 h_flex().gap_2().children(
                                     [
@@ -2850,8 +3058,8 @@ impl NavidromeApp {
                                 ),
                             ),
                     ),
-            )
-            .child(
+            ))
+            .when(self.state.settings_section == SettingsSection::Appearance, |settings| settings.child(
                 v_flex()
                     .gap_3()
                     .child(
@@ -2861,38 +3069,59 @@ impl NavidromeApp {
                             .child(t!("Language")),
                     )
                     .child(
-                        v_flex()
-                            .gap_3()
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .gap_4()
                             .p_4()
                             .rounded_lg()
                             .border_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().secondary.opacity(0.2))
                             .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Interface language. Changes apply instantly.")),
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(t!(
+                                                "Interface language. Changes apply instantly."
+                                            )),
+                                    ),
                             )
-                            .child(
-                                h_flex().gap_2().flex_wrap().children(
-                                    LanguagePreference::ALL
-                                        .into_iter()
-                                        .map(|preference| {
-                                            Button::new(SharedString::from(format!(
-                                                "language-{}",
-                                                preference.locale_code()
-                                            )))
-                                            .label(preference.native_label())
-                                            .selected(self.config.language == preference)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.set_language(preference, cx);
-                                            }))
-                                        }),
-                                ),
-                            ),
+                            .child({
+                                let app = cx.entity().downgrade();
+                                Button::new("language-select")
+                                    .w(px(220.0))
+                                    .justify_between()
+                                    .label(self.config.language.native_label())
+                                    .dropdown_caret(true)
+                                    .outline()
+                                    .dropdown_menu(move |menu, _, cx| {
+                                        app.update(cx, |this, cx| {
+                                            let mut menu = menu;
+                                            for preference in LanguagePreference::ALL {
+                                                menu = menu.item(
+                                                    PopupMenuItem::new(preference.native_label())
+                                                        .checked(
+                                                            this.config.language == preference,
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.set_language(preference, cx);
+                                                            },
+                                                        )),
+                                                );
+                                            }
+                                            menu
+                                        })
+                                        .expect("app owns language menu")
+                                    })
+                            }),
                     ),
-            )
+            ))
             .into_any_element()
     }
 
