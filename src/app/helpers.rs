@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::{
-    hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Modifiers, Pixels,
+    hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Keystroke, Pixels,
 };
 
 use crate::audio::{PlaybackState, StreamFailure};
 use crate::models::{
-    Artist, ArtistSort, PlayModes, RepeatMode, Song, TranscodingQuality, VolumeNormalization,
+    Artist, ArtistSort, PlayModes, RepeatMode, ShortcutAction, Song, TranscodingQuality,
+    VolumeNormalization,
 };
 use crate::msg::DecodedCover;
 
@@ -375,63 +376,69 @@ pub(super) fn album_page_offset(page: usize, page_size: usize) -> u32 {
     (page as u32) * (page_size as u32)
 }
 
-/// 键盘快捷键动作。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Shortcut {
-    TogglePlayback,
-    Previous,
-    Next,
-    SeekBack,
-    SeekForward,
-    VolumeUp,
-    VolumeDown,
-    ToggleMute,
-    ToggleNowPlaying,
-    ToggleQueue,
-    CloseOverlays,
-    FocusSearch,
-    SelectPrevious,
-    SelectNext,
-    PlaySelected,
-    SelectAll,
-    None,
+/// 按用户配置匹配快捷键动作。配置缺少新增动作时由 `binding` 回退默认值。
+pub(super) fn match_shortcut(
+    settings: &crate::models::ShortcutSettings,
+    keystroke: &Keystroke,
+) -> Option<ShortcutAction> {
+    ShortcutAction::ALL.into_iter().find(|action| {
+        Keystroke::parse(settings.binding(*action)).is_ok_and(|binding| {
+            binding.key == keystroke.key && binding.modifiers == keystroke.modifiers
+        })
+    })
 }
 
-/// 将按键映射为快捷键动作（纯逻辑，便于测试）。
-pub(super) fn match_shortcut(key: &str, mods: Modifiers) -> Shortcut {
-    if mods.control && !mods.alt && !mods.shift && !mods.platform {
-        match key {
-            "f" => return Shortcut::FocusSearch,
-            "left" => return Shortcut::Previous,
-            "right" => return Shortcut::Next,
-            "a" => return Shortcut::SelectAll,
-            _ => {}
-        }
+pub(super) fn shortcut_label(action: ShortcutAction) -> std::borrow::Cow<'static, str> {
+    match action {
+        ShortcutAction::TogglePlayback => t!("Play / pause"),
+        ShortcutAction::Previous => t!("Previous track"),
+        ShortcutAction::Next => t!("Next track"),
+        ShortcutAction::SeekBack => t!("Seek backward 5 seconds"),
+        ShortcutAction::SeekForward => t!("Seek forward 5 seconds"),
+        ShortcutAction::VolumeUp => t!("Volume up"),
+        ShortcutAction::VolumeDown => t!("Volume down"),
+        ShortcutAction::ToggleMute => t!("Mute / unmute"),
+        ShortcutAction::ToggleNowPlaying => t!("Open / close now playing"),
+        ShortcutAction::ToggleQueue => t!("Open / close queue"),
+        ShortcutAction::FocusSearch => t!("Focus search"),
+        ShortcutAction::CloseOverlays => t!("Close overlay / go back"),
+        ShortcutAction::SelectPrevious => t!("Select previous song"),
+        ShortcutAction::SelectNext => t!("Select next song"),
+        ShortcutAction::SelectAll => t!("Select all songs"),
+        ShortcutAction::PlaySelected => t!("Play selected song"),
     }
-    // Shift+↑/↓：歌曲列表键盘导航（与音量键让开）。
-    if mods.shift && !mods.control && !mods.alt && !mods.platform {
-        match key {
-            "up" => return Shortcut::SelectPrevious,
-            "down" => return Shortcut::SelectNext,
-            _ => {}
-        }
-    }
-    if mods.modified() {
-        return Shortcut::None;
-    }
-    match key {
-        "space" => Shortcut::TogglePlayback,
-        "left" => Shortcut::SeekBack,
-        "right" => Shortcut::SeekForward,
-        "up" => Shortcut::VolumeUp,
-        "down" => Shortcut::VolumeDown,
-        "m" => Shortcut::ToggleMute,
-        "l" => Shortcut::ToggleNowPlaying,
-        "q" => Shortcut::ToggleQueue,
-        "enter" => Shortcut::PlaySelected,
-        "escape" => Shortcut::CloseOverlays,
-        _ => Shortcut::None,
-    }
+}
+
+pub(super) fn shortcut_display(binding: &str) -> String {
+    Keystroke::parse(binding)
+        .map(|keystroke| keystroke.to_string())
+        .unwrap_or_else(|_| binding.to_string())
+}
+
+pub(super) fn shortcut_conflict(
+    settings: &crate::models::ShortcutSettings,
+    target: ShortcutAction,
+    binding: &str,
+) -> Option<ShortcutAction> {
+    let normalized = Keystroke::parse(binding).ok()?.unparse();
+    ShortcutAction::ALL.into_iter().find(|action| {
+        *action != target
+            && Keystroke::parse(settings.binding(*action))
+                .is_ok_and(|candidate| candidate.unparse() == normalized)
+    })
+}
+
+pub(super) fn global_shortcut_conflict(
+    settings: &crate::models::GlobalShortcutSettings,
+    target: ShortcutAction,
+    binding: &str,
+) -> Option<ShortcutAction> {
+    let normalized = Keystroke::parse(binding).ok()?.unparse();
+    ShortcutAction::GLOBAL_PLAYBACK.into_iter().find(|action| {
+        *action != target
+            && Keystroke::parse(settings.binding(*action))
+                .is_ok_and(|candidate| candidate.unparse() == normalized)
+    })
 }
 
 /// Shift 范围选择锚点的优先级：已有同作用域多选的锚点（允许连续

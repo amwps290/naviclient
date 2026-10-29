@@ -44,12 +44,15 @@ use crate::audio::{
     PLAYBACK_RECONNECT_ATTEMPTS,
 };
 use crate::config;
+use crate::global_shortcuts::{
+    GlobalShortcutEvent, GlobalShortcutManager, ValidationError as GlobalShortcutValidationError,
+};
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
     Genre, LanguagePreference, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode,
-    SearchResults, ServerInfo, ServerProfile, Song, ThemePreference, TranscodingQuality,
-    VolumeNormalization,
+    SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
+    TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
@@ -121,6 +124,7 @@ enum SettingsSection {
     Playback,
     Desktop,
     Appearance,
+    Shortcuts,
 }
 
 struct AppState {
@@ -185,6 +189,18 @@ struct AppState {
     settings_open: bool,
     /// 设置页左侧导航当前选中的分组。
     settings_section: SettingsSection,
+    /// 设置页正在等待用户按下组合键的快捷键动作。
+    recording_shortcut: Option<ShortcutAction>,
+    /// 最近一次录入与另一个动作冲突：（正在编辑，已占用动作）。
+    shortcut_conflict: Option<(ShortcutAction, ShortcutAction)>,
+    /// 设置页正在等待用户按下系统全局组合键的播放动作。
+    recording_global_shortcut: Option<ShortcutAction>,
+    /// 最近一次全局组合键与另一个全局动作冲突。
+    global_shortcut_conflict: Option<(ShortcutAction, ShortcutAction)>,
+    /// 最近一次全局组合键录入未通过安全性/键位校验。
+    global_shortcut_validation: Option<(ShortcutAction, GlobalShortcutValidationError)>,
+    /// Windows 注册失败的动作（通常是组合键已被其他程序占用）。
+    global_shortcut_failures: HashSet<ShortcutAction>,
     /// 设置页当前正在编辑的服务器条目 id（行内铅笔按钮打开）。
     /// None = 没有展开的编辑表单；未配置的激活条目（首次运行/刚新增）
     /// 无需显式目标也会直出表单。保存或切换/删除服务器会经
@@ -271,6 +287,12 @@ impl Default for AppState {
             status: t!("Not connected").to_string(),
             settings_open: false,
             settings_section: SettingsSection::default(),
+            recording_shortcut: None,
+            shortcut_conflict: None,
+            recording_global_shortcut: None,
+            global_shortcut_conflict: None,
+            global_shortcut_validation: None,
+            global_shortcut_failures: HashSet::new(),
             editing_server: None,
             song_list_selected: None,
             song_list_multi: None,
@@ -298,6 +320,7 @@ pub struct NavidromeApp {
     next_preload: Option<NextPreload>,
     preload_serial: u64,
     media_session: MediaSession,
+    global_shortcuts: GlobalShortcutManager,
     default_cover: Arc<GpuiImage>,
     vinyl_cover: VinylCover,
     state: AppState,
@@ -338,7 +361,7 @@ pub struct NavidromeApp {
     last_tray_paused: Option<bool>,
     main_hwnd: Option<isize>,
     quitting: Arc<AtomicBool>,
-    last_shortcut_key: String,
+    last_shortcut: String,
     last_shortcut_at: std::time::Instant,
     resume_position: Option<Duration>,
     /// 播放因网络/服务端问题中断后的自动重连计划。
@@ -401,6 +424,7 @@ impl NavidromeApp {
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
+        let global_shortcuts = GlobalShortcutManager::new(&config.global_shortcuts);
         let audio_cache_dir = config::audio_cache_dir(&config);
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
@@ -479,6 +503,7 @@ impl NavidromeApp {
             next_preload: None,
             preload_serial: 0,
             media_session,
+            global_shortcuts,
             default_cover,
             vinyl_cover: VinylCover::default(),
             state: AppState::default(),
@@ -515,7 +540,7 @@ impl NavidromeApp {
             last_tray_paused: None,
             main_hwnd: None,
             quitting: Arc::new(AtomicBool::new(false)),
-            last_shortcut_key: String::new(),
+            last_shortcut: String::new(),
             last_shortcut_at: std::time::Instant::now(),
             resume_position: None,
             reconnect: None,
@@ -659,6 +684,7 @@ impl NavidromeApp {
                     .update_in(cx, |this, window, cx| {
                         this.sync_gapless_transition();
                         let mut changed = this.poll_tray_commands(window);
+                        changed |= this.poll_global_shortcuts(window, cx);
                         changed |= this.poll_media_commands(window, cx);
                         // 单实例激活信号：显示并置前窗口。
                         if single_instance::poll_activation() {
@@ -1241,6 +1267,39 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let can_record_shortcut =
+            self.state.settings_open && self.state.settings_section == SettingsSection::Shortcuts;
+        if !can_record_shortcut {
+            self.cancel_shortcut_recording();
+        }
+        if let Some(action) = self.state.recording_global_shortcut {
+            if keystroke.key == "escape" {
+                self.cancel_shortcut_recording();
+                cx.notify();
+                return;
+            }
+            if !matches!(
+                keystroke.key.as_str(),
+                "control" | "shift" | "alt" | "platform" | "function"
+            ) {
+                self.assign_global_shortcut(action, keystroke, cx);
+            }
+            return;
+        }
+        if let Some(action) = self.state.recording_shortcut {
+            if keystroke.key == "escape" {
+                self.cancel_shortcut_recording();
+                cx.notify();
+                return;
+            }
+            if !matches!(
+                keystroke.key.as_str(),
+                "control" | "shift" | "alt" | "platform" | "function"
+            ) {
+                self.assign_shortcut(action, keystroke, cx);
+            }
+            return;
+        }
         if window.has_active_dialog(cx)
             || window.has_focused_input(cx)
             || self
@@ -1251,57 +1310,49 @@ impl NavidromeApp {
         {
             return;
         }
-        let shortcut = match_shortcut(&keystroke.key, keystroke.modifiers);
-        if shortcut == Shortcut::None {
+        let Some(shortcut) = match_shortcut(&self.config.shortcuts, keystroke) else {
             return;
-        }
+        };
         // 忽略按住重复触发的同一按键（250ms 内同键视为重复）。
         let now = std::time::Instant::now();
-        let repeated = self.last_shortcut_key == keystroke.key
+        let pressed_shortcut = keystroke.unparse();
+        let repeated = self.last_shortcut == pressed_shortcut
             && now.duration_since(self.last_shortcut_at) < Duration::from_millis(250);
-        self.last_shortcut_key = keystroke.key.clone();
+        self.last_shortcut = pressed_shortcut;
         self.last_shortcut_at = now;
         // 选择移动豁免重复保护：按住 Shift+↑/↓ 可连续移动。
-        if repeated && !matches!(shortcut, Shortcut::SelectPrevious | Shortcut::SelectNext) {
+        if repeated
+            && !matches!(
+                shortcut,
+                ShortcutAction::SelectPrevious | ShortcutAction::SelectNext
+            )
+        {
             return;
         }
         match shortcut {
-            Shortcut::SelectPrevious => {
+            ShortcutAction::SelectPrevious => {
                 self.move_song_selection(-1, cx);
             }
-            Shortcut::SelectNext => {
+            ShortcutAction::SelectNext => {
                 self.move_song_selection(1, cx);
             }
-            Shortcut::SelectAll => {
+            ShortcutAction::SelectAll => {
                 self.select_all_songs(cx);
             }
-            Shortcut::PlaySelected => {
+            ShortcutAction::PlaySelected => {
                 self.play_selected_song(cx);
             }
-            Shortcut::TogglePlayback => {
-                self.toggle_playback();
-                cx.notify();
+            ShortcutAction::TogglePlayback
+            | ShortcutAction::Previous
+            | ShortcutAction::Next
+            | ShortcutAction::SeekBack
+            | ShortcutAction::SeekForward
+            | ShortcutAction::VolumeUp
+            | ShortcutAction::VolumeDown
+            | ShortcutAction::ToggleMute => {
+                self.execute_playback_shortcut(shortcut, window, cx);
             }
-            Shortcut::Previous => {
-                self.skip(-1);
-                cx.notify();
-            }
-            Shortcut::Next => {
-                self.skip(1);
-                cx.notify();
-            }
-            Shortcut::SeekBack => {
-                self.seek_by(-5);
-                cx.notify();
-            }
-            Shortcut::SeekForward => {
-                self.seek_by(5);
-                cx.notify();
-            }
-            Shortcut::VolumeUp => self.adjust_volume(0.05, window, cx),
-            Shortcut::VolumeDown => self.adjust_volume(-0.05, window, cx),
-            Shortcut::ToggleMute => self.toggle_mute(window, cx),
-            Shortcut::ToggleNowPlaying => {
+            ShortcutAction::ToggleNowPlaying => {
                 if self.state.view == View::NowPlaying {
                     self.leave_now_playing();
                 } else {
@@ -1309,7 +1360,7 @@ impl NavidromeApp {
                 }
                 cx.notify();
             }
-            Shortcut::ToggleQueue => {
+            ShortcutAction::ToggleQueue => {
                 if self.state.view == View::Queue {
                     self.state.view = self.state.view_before_now_playing;
                 } else {
@@ -1320,7 +1371,7 @@ impl NavidromeApp {
                 }
                 cx.notify();
             }
-            Shortcut::CloseOverlays => {
+            ShortcutAction::CloseOverlays => {
                 if self.state.song_list_multi.is_some() {
                     // 多选活跃时 Esc 只清空多选，不连带关闭页面/设置。
                     self.clear_song_multi();
@@ -1336,7 +1387,7 @@ impl NavidromeApp {
                 }
                 cx.notify();
             }
-            Shortcut::FocusSearch => {
+            ShortcutAction::FocusSearch => {
                 // 先切到搜索页，再聚焦搜索框。
                 self.state.settings_open = false;
                 self.state.view = View::Search;
@@ -1346,8 +1397,187 @@ impl NavidromeApp {
                     .search_input
                     .update_in(&mut async_cx, |input, window, cx| input.focus(window, cx));
             }
-            Shortcut::None => {}
         }
+    }
+
+    fn execute_playback_shortcut(
+        &mut self,
+        action: ShortcutAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ShortcutAction::TogglePlayback => self.toggle_playback(),
+            ShortcutAction::Previous => self.skip(-1),
+            ShortcutAction::Next => self.skip(1),
+            ShortcutAction::SeekBack => self.seek_by(-5),
+            ShortcutAction::SeekForward => self.seek_by(5),
+            ShortcutAction::VolumeUp => self.adjust_volume(0.05, window, cx),
+            ShortcutAction::VolumeDown => self.adjust_volume(-0.05, window, cx),
+            ShortcutAction::ToggleMute => self.toggle_mute(window, cx),
+            _ => return,
+        }
+        cx.notify();
+    }
+
+    fn start_shortcut_recording(&mut self, action: ShortcutAction, global: bool) {
+        self.global_shortcuts.suspend();
+        self.state.recording_shortcut = (!global).then_some(action);
+        self.state.recording_global_shortcut = global.then_some(action);
+        self.state.shortcut_conflict = None;
+        self.state.global_shortcut_conflict = None;
+        self.state.global_shortcut_validation = None;
+    }
+
+    fn cancel_shortcut_recording(&mut self) {
+        let was_recording = self.state.recording_shortcut.take().is_some();
+        let was_recording_global = self.state.recording_global_shortcut.take().is_some();
+        self.state.shortcut_conflict = None;
+        self.state.global_shortcut_conflict = None;
+        self.state.global_shortcut_validation = None;
+        if was_recording || was_recording_global {
+            self.global_shortcuts.update(&self.config.global_shortcuts);
+        }
+    }
+
+    fn assign_shortcut(
+        &mut self,
+        action: ShortcutAction,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) {
+        let binding = keystroke.unparse();
+        if let Some(existing) = shortcut_conflict(&self.config.shortcuts, action, &binding) {
+            self.state.shortcut_conflict = Some((action, existing));
+            cx.notify();
+            return;
+        }
+        let previous = self.config.shortcuts.clone();
+        self.config.shortcuts.set(action, binding);
+        if let Err(error) = config::save(&self.config) {
+            self.config.shortcuts = previous;
+            self.notify_error(t!(
+                "Shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.cancel_shortcut_recording();
+        cx.notify();
+    }
+
+    fn assign_global_shortcut(
+        &mut self,
+        action: ShortcutAction,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) {
+        let binding = keystroke.unparse();
+        if let Err(error) = crate::global_shortcuts::validate(&binding) {
+            self.state.global_shortcut_validation = Some((action, error));
+            self.state.global_shortcut_conflict = None;
+            cx.notify();
+            return;
+        }
+        if let Some(existing) =
+            global_shortcut_conflict(&self.config.global_shortcuts, action, &binding)
+        {
+            self.state.global_shortcut_conflict = Some((action, existing));
+            self.state.global_shortcut_validation = None;
+            cx.notify();
+            return;
+        }
+        let previous = self.config.global_shortcuts.clone();
+        self.config.global_shortcuts.set(action, binding);
+        if let Err(error) = config::save(&self.config) {
+            self.config.global_shortcuts = previous;
+            self.notify_error(t!(
+                "Global shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.state.global_shortcut_failures.remove(&action);
+        self.cancel_shortcut_recording();
+        cx.notify();
+    }
+
+    fn reset_shortcut(&mut self, action: ShortcutAction, cx: &mut Context<Self>) {
+        if let Some(existing) =
+            shortcut_conflict(&self.config.shortcuts, action, action.default_binding())
+        {
+            self.cancel_shortcut_recording();
+            self.state.shortcut_conflict = Some((action, existing));
+            cx.notify();
+            return;
+        }
+        let previous = self.config.shortcuts.clone();
+        self.config.shortcuts.reset(action);
+        if let Err(error) = config::save(&self.config) {
+            self.config.shortcuts = previous;
+            self.notify_error(t!(
+                "Shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.cancel_shortcut_recording();
+        cx.notify();
+    }
+
+    fn reset_all_shortcuts(&mut self, cx: &mut Context<Self>) {
+        let previous = self.config.shortcuts.clone();
+        self.config.shortcuts.reset_all();
+        if let Err(error) = config::save(&self.config) {
+            self.config.shortcuts = previous;
+            self.notify_error(t!(
+                "Shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.cancel_shortcut_recording();
+        cx.notify();
+    }
+
+    fn reset_global_shortcut(&mut self, action: ShortcutAction, cx: &mut Context<Self>) {
+        let default = action
+            .default_global_binding()
+            .expect("global shortcut actions have defaults");
+        if let Some(existing) =
+            global_shortcut_conflict(&self.config.global_shortcuts, action, default)
+        {
+            self.cancel_shortcut_recording();
+            self.state.global_shortcut_conflict = Some((action, existing));
+            self.state.global_shortcut_validation = None;
+            cx.notify();
+            return;
+        }
+        let previous = self.config.global_shortcuts.clone();
+        self.config.global_shortcuts.reset(action);
+        if let Err(error) = config::save(&self.config) {
+            self.config.global_shortcuts = previous;
+            self.notify_error(t!(
+                "Global shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.state.global_shortcut_failures.remove(&action);
+        self.cancel_shortcut_recording();
+        self.global_shortcuts.update(&self.config.global_shortcuts);
+        cx.notify();
+    }
+
+    fn reset_all_global_shortcuts(&mut self, cx: &mut Context<Self>) {
+        let previous = self.config.global_shortcuts.clone();
+        self.config.global_shortcuts.reset_all();
+        if let Err(error) = config::save(&self.config) {
+            self.config.global_shortcuts = previous;
+            self.notify_error(t!(
+                "Global shortcut save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.state.global_shortcut_failures.clear();
+        self.cancel_shortcut_recording();
+        self.global_shortcuts.update(&self.config.global_shortcuts);
+        cx.notify();
     }
 
     /// 手动重试当前由：从出错位置（有位置时）重新拉流，并重置自动重连计数。
@@ -1448,6 +1678,25 @@ impl NavidromeApp {
             self.resume_position = Some(position);
             self.media_session.restored_position_changed();
         }
+    }
+
+    fn poll_global_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        for _ in 0..32 {
+            let Some(event) = self.global_shortcuts.try_recv() else {
+                break;
+            };
+            changed = true;
+            match event {
+                GlobalShortcutEvent::Triggered(action) => {
+                    self.execute_playback_shortcut(action, window, cx);
+                }
+                GlobalShortcutEvent::RegistrationReport { failures } => {
+                    self.state.global_shortcut_failures = failures.into_iter().collect();
+                }
+            }
+        }
+        changed
     }
 
     fn poll_media_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -3341,6 +3590,8 @@ impl Render for NavidromeApp {
                                                     !this.state.settings_open;
                                                 if this.state.settings_open {
                                                     this.refresh_output_devices(cx);
+                                                } else {
+                                                    this.cancel_shortcut_recording();
                                                 }
                                                 cx.notify();
                                             })),

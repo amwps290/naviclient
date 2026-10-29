@@ -9,6 +9,7 @@ mod app;
 mod assets;
 mod audio;
 mod config;
+mod global_shortcuts;
 #[cfg(test)]
 mod i18n_tests;
 mod import;

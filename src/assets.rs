@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 41] = [
+const ICON_FILES: [&str; 42] = [
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -46,6 +46,7 @@ const ICON_FILES: [&str; 41] = [
     "cloud-off.svg",
     "trash.svg",
     "pencil.svg",
+    "keyboard.svg",
 ];
 
 pub struct Assets;
@@ -86,6 +87,7 @@ pub enum AppIcon {
     ServerOff,
     Trash,
     Pencil,
+    Keyboard,
 }
 
 #[derive(Clone, Copy)]
@@ -135,6 +137,7 @@ impl IconNamed for AppIcon {
             Self::ServerOff => "icons/cloud-off.svg",
             Self::Trash => "icons/trash.svg",
             Self::Pencil => "icons/pencil.svg",
+            Self::Keyboard => "icons/keyboard.svg",
         }
         .into()
     }
@@ -211,6 +214,7 @@ impl AssetSource for Assets {
             "icons/cloud-off.svg" => Some(include_bytes!("../assets/icons/cloud-off.svg")),
             "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
             "icons/pencil.svg" => Some(include_bytes!("../assets/icons/pencil.svg")),
+            "icons/keyboard.svg" => Some(include_bytes!("../assets/icons/keyboard.svg")),
             _ => None,
         };
 
@@ -263,6 +267,7 @@ mod tests {
             super::AppIcon::Trash,
             super::AppIcon::Refresh,
             super::AppIcon::Eq,
+            super::AppIcon::Keyboard,
         ] {
             let path = icon.path();
             let loaded = Assets.load(&path).expect("asset lookup should not error");
