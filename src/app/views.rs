@@ -17,6 +17,7 @@ impl NavidromeApp {
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
+        self.mark_cover_image_used(&cover);
         img(cover)
             .size(px(size))
             // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
@@ -39,6 +40,7 @@ impl NavidromeApp {
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
+        self.mark_cover_image_used(&cover);
         let label_size = size * 0.5;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - size * 0.018;
@@ -1497,6 +1499,8 @@ impl NavidromeApp {
             .is_some_and(|playing| playing.id == song.id)
             && (!editable || self.state.queue_index == Some(index));
         let animated = current && playback.active && !playback.paused;
+        let row_accent = self.now_playing_accent(cx);
+        let row_accent_foreground = accent_foreground(row_accent);
         let album = if song.album.trim().is_empty() {
             t!("Unknown album").to_string()
         } else {
@@ -1514,7 +1518,7 @@ impl NavidromeApp {
             .relative()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
-            .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
+            .hover(|style| style.bg(row_accent.opacity(0.08)))
             .cursor_pointer();
         let keyboard_selected =
             self.state
@@ -1527,38 +1531,58 @@ impl NavidromeApp {
             .song_list_multi
             .as_ref()
             .is_some_and(|multi| multi.scope == scope && multi.indices.contains(&index));
-        // 高亮优先级：多选 > 键盘光标 > 正在播放。
-        // accent 是背景 token（亮色 neutral-100），做行高亮近似不可见；
-        // 沿用框架选中行语义色 list_active，键盘光标用其半透明弱化。
+        // 高亮优先级：多选 > 列表光标 > 正在播放。列表选择继承当前
+        // 封面强调色，让媒体库与正在播放页使用同一种音乐氛围。
         let row = if multi_selected {
-            row.bg(cx.theme().list_active)
+            row.bg(row_accent.opacity(0.16))
         } else if keyboard_selected {
-            row.bg(cx.theme().list_active.opacity(0.5))
+            row.bg(row_accent.opacity(0.1))
         } else if current {
-            row.bg(cx.theme().info.opacity(0.1))
+            row.bg(row_accent.opacity(0.07))
         } else {
             row
         };
-        // 多选行左侧竖条：不依赖色彩感知也能明确区分选中态。
-        let row = row.when(multi_selected, |row| {
-            row.child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(3.0))
-                    .bg(cx.theme().list_active_border),
-            )
-        });
-        row.child(
+        let position_indicator = if multi_selected {
             div()
-                .w(px(34.0))
-                .h_full()
+                .size(px(22.0))
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(self.favorite_button(FavoriteKind::Song, &song.id, cx)),
+                .rounded_md()
+                .bg(row_accent)
+                .child(
+                    Icon::new(KitIcon::Check)
+                        .with_size(px(13.0))
+                        .text_color(row_accent_foreground),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .text_xs()
+                .text_center()
+                .font_weight(if keyboard_selected {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::NORMAL
+                })
+                .text_color(if keyboard_selected || current {
+                    row_accent
+                } else {
+                    cx.theme().muted_foreground
+                })
+                .child((index + 1).to_string())
+                .into_any_element()
+        };
+        row.child(
+            div()
+                .w(px(28.0))
+                .h_full()
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(position_indicator),
         )
         .child(
             div()
@@ -1570,7 +1594,11 @@ impl NavidromeApp {
                 .justify_center()
                 .rounded_lg()
                 .border_1()
-                .border_color(cx.theme().border.opacity(0.7))
+                .border_color(if current {
+                    row_accent.opacity(0.42)
+                } else {
+                    cx.theme().border.opacity(0.7)
+                })
                 .bg(cx.theme().background)
                 .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
         )
@@ -1581,7 +1609,7 @@ impl NavidromeApp {
                 .min_w_0()
                 .gap_2()
                 .text_color(if current {
-                    cx.theme().info
+                    row_accent
                 } else {
                     cx.theme().foreground
                 })
@@ -1636,11 +1664,12 @@ impl NavidromeApp {
                 .child(format_duration(song.duration)),
         )
         .child(
-            // 行尾操作列：固定宽度、常规布局，不再用悬浮层盖住行内容。
+            // 常规列表只保留收藏、播放与更多操作；“下一首/加入队列”等
+            // 低频动作仍完整保留在右键和省略号菜单中。
             h_flex()
                 .flex_none()
                 .h_full()
-                .w(px(if editable { 124.0 } else { 92.0 }))
+                .w(px(if editable { 124.0 } else { 100.0 }))
                 .items_center()
                 .justify_end()
                 .gap_0p5()
@@ -1686,34 +1715,21 @@ impl NavidromeApp {
                     )
                 })
                 .when(!editable, |slot| {
-                    slot.child(
-                        Button::new(SharedString::from(format!("play-next-{key}")))
-                            .icon(PlayerIcon::Next)
-                            .tooltip(t!("Play next"))
-                            .ghost()
-                            .small()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(song) = this.song_for_scope(scope, index) {
-                                    this.insert_next(song.clone());
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("add-to-queue-{key}")))
-                            .icon(AppIcon::Queue)
-                            .tooltip(t!("Add to queue"))
-                            .ghost()
-                            .small()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(song) = this.song_for_scope(scope, index) {
-                                    this.add_to_queue(song.clone());
-                                }
-                                cx.notify();
-                            })),
-                    )
+                    slot.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
+                        .child(
+                            Button::new(SharedString::from(format!("play-song-{key}")))
+                                .icon(PlayerIcon::Play)
+                                .tooltip(t!("Play"))
+                                .ghost()
+                                .small()
+                                .text_color(row_accent)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.select_song_row(scope, index);
+                                    this.play_song_at_scope(scope, index);
+                                    cx.notify();
+                                })),
+                        )
                 })
                 .child(
                     div()
@@ -1743,15 +1759,14 @@ impl NavidromeApp {
         )
         .on_click(
             cx.listener(move |this, event: &gpui_kit::ClickEvent, _, cx| {
-                let modifiers = event.modifiers();
-                if modifiers.control && !modifiers.alt && !modifiers.platform {
-                    this.toggle_song_multi(scope, index);
-                } else if modifiers.shift && !modifiers.alt && !modifiers.platform {
-                    this.range_song_multi(scope, index);
-                } else {
-                    // 普通单击：退出多选并立即播放该歌曲
-                    this.clear_song_multi();
-                    this.play_song_at_scope(scope, index);
+                match song_row_click_action(event.modifiers(), event.click_count()) {
+                    SongRowClickAction::ToggleMulti => this.toggle_song_multi(scope, index),
+                    SongRowClickAction::RangeMulti => this.range_song_multi(scope, index),
+                    SongRowClickAction::Select => this.select_song_row(scope, index),
+                    SongRowClickAction::Play => {
+                        this.select_song_row(scope, index);
+                        this.play_song_at_scope(scope, index);
+                    }
                 }
                 cx.notify();
             }),
@@ -4755,6 +4770,7 @@ impl NavidromeApp {
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
+        self.mark_cover_image_used(&cover);
 
         let (base, raw_accent) = self.now_playing_palette(cx);
         let accent = self.now_playing_accent(cx);

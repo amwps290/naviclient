@@ -351,7 +351,7 @@ fn write_genres_at(path: &Path, genres: &[Genre]) -> Result<()> {
 }
 
 /// 读取封面磁盘缓存；未命中返回 None。
-/// 网络请求固定使用 500px 档位，缓存键只需封面 id。
+/// 同一封面 id 只保留一份原始响应字节；请求尺寸调整不影响旧缓存兼容性。
 pub fn read_cover_cache(
     config: &Config,
     server_id: Option<&str>,

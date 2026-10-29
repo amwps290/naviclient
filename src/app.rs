@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -185,6 +185,8 @@ struct AppState {
     covers: HashMap<String, Arc<GpuiImage>>,
     cover_palettes: HashMap<String, (Hsla, Hsla)>,
     requested_covers: HashSet<String>,
+    failed_covers: HashSet<String>,
+    failed_cover_order: VecDeque<String>,
     status: String,
     settings_open: bool,
     /// 设置页左侧导航当前选中的分组。
@@ -284,6 +286,8 @@ impl Default for AppState {
             covers: HashMap::new(),
             cover_palettes: HashMap::new(),
             requested_covers: HashSet::new(),
+            failed_covers: HashSet::new(),
+            failed_cover_order: VecDeque::new(),
             status: t!("Not connected").to_string(),
             settings_open: false,
             settings_section: SettingsSection::default(),
@@ -351,6 +355,13 @@ pub struct NavidromeApp {
     /// 由 UI 循环统一用 window.push_notification 冲刷。
     pending_notifications: Vec<(NotificationType, SharedString)>,
     cover_slots: Arc<tokio::sync::Semaphore>,
+    /// GPUI 会把 `Image` 解码结果保留在全局资产缓存和窗口纹理中；这里只
+    /// 记录最近实际渲染过的图片 id，并把超限项排队到 UI 轮询器显式释放。
+    cover_image_lru: RefCell<VecDeque<u64>>,
+    pending_cover_image_evictions: RefCell<VecDeque<u64>>,
+    /// 状态整体重置或同一 id 的源图片被替换时，仍需保留图片句柄到下一次
+    /// UI 轮询，才能从 GPUI 全局资产缓存与窗口 atlas 中成对移除。
+    pending_cover_asset_releases: RefCell<VecDeque<Arc<GpuiImage>>>,
     title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
     tray_rx: Receiver<TrayCommand>,
     /// 切歌系统通知发送器（同 ID 替换防堆积）。
@@ -533,6 +544,9 @@ impl NavidromeApp {
             song_list_scrolls: RefCell::new(HashMap::new()),
             pending_notifications: Vec::new(),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            cover_image_lru: RefCell::new(VecDeque::new()),
+            pending_cover_image_evictions: RefCell::new(VecDeque::new()),
+            pending_cover_asset_releases: RefCell::new(VecDeque::new()),
             title_width_cache: RefCell::new(HashMap::new()),
             tray_rx: mpsc::channel().1,
             track_notifier: notify::TrackNotifier::new(),
@@ -677,7 +691,7 @@ impl NavidromeApp {
             let mut previous_playback = None;
             let mut playback_dirty = false;
             let mut last_playback_render = std::time::Instant::now();
-            let mut was_foreground = false;
+            let mut was_visible = false;
             loop {
                 Timer::after(Duration::from_millis(50)).await;
                 if this
@@ -694,6 +708,7 @@ impl NavidromeApp {
                         }
                         this.maybe_save_session();
                         changed |= this.poll_messages(window, cx);
+                        this.release_unused_cover_textures(window, cx);
                         // 冲刷排队的 Toast：gpui-component 的通知系统由窗口 Root
                         // 托管（自动消失、可关闭、主题化），需要 Window 句柄。
                         for (kind, message) in this.pending_notifications.drain(..) {
@@ -718,10 +733,12 @@ impl NavidromeApp {
                         changed |= this.vinyl_cover.poll_ready();
                         let playback = this.audio.state();
                         this.sync_media_session(&playback);
-                        let foreground = window.is_visible() && window.is_window_active();
+                        // 可见但未聚焦的窗口仍应更新进度、歌词和动画。只有真正
+                        // 隐藏/最小化时才暂停重绘，避免切到别的应用后界面“冻住”。
+                        let visible = window.is_visible();
                         changed |= this.vinyl_cover.tick(
                             std::time::Instant::now(),
-                            foreground
+                            visible
                                 && this.state.view == View::NowPlaying
                                 && !this.state.settings_open
                                 && !this.mini_mode
@@ -740,7 +757,7 @@ impl NavidromeApp {
                             },
                         );
                         previous_playback = Some(playback);
-                        if !foreground {
+                        if !visible {
                             this.vinyl_cover.cancel_pending();
                         }
                         // Keep polling messages/audio while idle, but don't redraw the
@@ -754,8 +771,8 @@ impl NavidromeApp {
                             Duration::from_millis(250)
                         };
                         if changed
-                            || foreground
-                                && (!was_foreground
+                            || visible
+                                && (!was_visible
                                     || transport_changed
                                     || scrolling
                                     || playback_dirty && last_playback_render.elapsed() >= interval)
@@ -764,7 +781,7 @@ impl NavidromeApp {
                             last_playback_render = std::time::Instant::now();
                             cx.notify();
                         }
-                        was_foreground = foreground;
+                        was_visible = visible;
                     })
                     .is_err()
                 {
@@ -2124,6 +2141,11 @@ impl NavidromeApp {
     fn reconnect_active_server(&mut self) {
         self.cancel_next_preload();
         self.audio.stop();
+        self.pending_cover_asset_releases
+            .borrow_mut()
+            .extend(self.state.covers.values().cloned());
+        self.cover_image_lru.borrow_mut().clear();
+        self.pending_cover_image_evictions.borrow_mut().clear();
         self.state = AppState::default();
         self.playlist_ui.reset();
         self.import_ui.reset();
@@ -3384,13 +3406,13 @@ impl Render for NavidromeApp {
             .and_then(|id| self.state.covers.get(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
+        self.mark_cover_image_used(&cover);
         let animate_cover = self.state.view == View::NowPlaying
             && !self.mini_mode
             && !self.state.settings_open
             && playback.active
             && !playback.paused
-            && window.is_visible()
-            && window.is_window_active();
+            && window.is_visible();
         self.vinyl_cover
             .prepare(cover, animate_cover, &self.runtime, window);
         let progress = playback

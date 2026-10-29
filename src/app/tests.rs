@@ -1,5 +1,6 @@
 //! 应用层纯逻辑测试（从 app.rs 拆出）。
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use gpui_kit::hsla;
@@ -10,8 +11,8 @@ use super::{
     history_index_after_insert, loudness_gain_factor, match_shortcut, normalize_volume,
     playback_technical_info, queue_index_after_move, queue_index_after_remove, range_anchor,
     readable_accent, reconnect_decision, replay_gain_factor, restored_volume, seek_target,
-    selection_range, shortcut_conflict, should_scrobble, sort_album_songs, sort_artists,
-    ReconnectDecision, ShuffleHistory,
+    selection_range, shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs,
+    sort_artists, touch_lru, ReconnectDecision, ShuffleHistory, SongRowClickAction,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
@@ -922,4 +923,50 @@ fn cover_request_needed_never_burns_an_id_against_a_palette_revisit() {
     assert!(cover_request_needed(false, false, false));
     assert!(cover_request_needed(false, false, true));
     assert!(cover_request_needed(false, true, false));
+}
+
+#[test]
+fn cover_texture_lru_refreshes_usage_and_evicts_the_oldest() {
+    let mut lru = VecDeque::new();
+    assert_eq!(touch_lru(&mut lru, 1, 3), None);
+    assert_eq!(touch_lru(&mut lru, 2, 3), None);
+    assert_eq!(touch_lru(&mut lru, 3, 3), None);
+    assert_eq!(lru, VecDeque::from([3, 2, 1]));
+
+    assert_eq!(touch_lru(&mut lru, 1, 3), None);
+    assert_eq!(lru, VecDeque::from([1, 3, 2]));
+    assert_eq!(touch_lru(&mut lru, 4, 3), Some(2));
+    assert_eq!(lru, VecDeque::from([4, 1, 3]));
+}
+
+#[test]
+fn song_rows_select_on_single_click_and_play_on_double_click() {
+    assert_eq!(
+        song_row_click_action(Modifiers::default(), 1),
+        SongRowClickAction::Select
+    );
+    assert_eq!(
+        song_row_click_action(Modifiers::default(), 2),
+        SongRowClickAction::Play
+    );
+    assert_eq!(
+        song_row_click_action(
+            Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+            1,
+        ),
+        SongRowClickAction::ToggleMulti
+    );
+    assert_eq!(
+        song_row_click_action(
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+            1,
+        ),
+        SongRowClickAction::RangeMulti
+    );
 }

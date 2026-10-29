@@ -107,7 +107,9 @@ JavaScript runtime.
 - ReplayGain volume normalization (Off / Track / Album) so loud and quiet
   tracks play at a similar level, with peak-based anti-clipping; falls back to
   locally measured loudness when the server provides no ReplayGain metadata
-- Double-click song playback with highlighted and animated now-playing rows
+- Single-click song selection, double-click playback, and highlighted animated
+  now-playing rows; frequent actions stay inline while the full action set remains
+  available from the row menu
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
 - Create, rename, and delete Navidrome playlists; add songs or whole albums,
   save the current queue as a playlist, and move or remove individual entries.
@@ -134,13 +136,16 @@ JavaScript runtime.
   Controls work while minimized; a missing session bus does not prevent startup.
 - Repeated songs and albums have independent hover controls, including across
   Home sections and within the playback queue
-- Rotating vinyl cover art while the lyrics page is playing in the foreground;
-  pauses at the current angle and reuses cached textures at up to 20 fps.
-  Only the current cover is cached (180 frames at 192×192, about 25 MiB of
+- Rotating vinyl cover art while the lyrics page is visible;
+  pauses only when the window is hidden and reuses cached textures at up to 20 fps.
+  Only the current cover is cached (120 frames at 192×192, about 17 MiB of
   pixels plus GPU atlas storage); preparation runs once in a throttled background
   worker, delivering the next visible frames first so rotation starts without
   waiting for the full cache. Its resolution is capped on high-DPI displays to
   keep memory bounded.
+- Cover loading keeps at most four downloads/decodes in flight, requests 384px
+  artwork, and explicitly evicts decoded GPUI textures with a 96-item LRU to
+  bound the largest cover-related GPU/system-memory allocation.
 - Mini-player mode that shrinks the main window into a compact, always-on-top
   widget (260x56) with cover art, song title, prev/next/play controls, a thin
   bottom progress line, and a dynamic cover-colored animated background. The

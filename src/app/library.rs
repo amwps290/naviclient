@@ -698,8 +698,15 @@ impl NavidromeApp {
                     self.playlist_ui.list_loading = false;
                     match result {
                         Ok(playlists) => {
+                            let covers = playlists
+                                .iter()
+                                .filter_map(|playlist| playlist.cover_art.clone())
+                                .collect();
                             self.state.playlists_visible = playlists.len().min(50);
                             self.state.playlists = playlists;
+                            // 歌单列表此前只渲染 coverArt，却从未请求它，因此即使
+                            // Navidrome 返回了封面 id，也会永远停在默认图。
+                            self.preload_covers(covers);
                         }
                         Err(error) => self.playlist_read_error(error),
                     }
@@ -798,8 +805,24 @@ impl NavidromeApp {
                     {
                         match result {
                             Ok(details) => {
-                                self.state.current_playlist = Some(details.playlist);
+                                let mut playlist = details.playlist;
                                 let songs = details.songs;
+                                // 部分兼容服务器不给歌单自身 coverArt；打开详情后
+                                // 用第一首带封面的曲目兜底，并回写列表项供返回时复用。
+                                if playlist.cover_art.is_none() {
+                                    playlist.cover_art =
+                                        songs.iter().find_map(|song| song.cover_art.clone());
+                                }
+                                let cover = playlist.cover_art.clone();
+                                if let Some(list_item) = self
+                                    .state
+                                    .playlists
+                                    .iter_mut()
+                                    .find(|item| item.id == playlist.id)
+                                {
+                                    list_item.cover_art = cover.clone();
+                                }
+                                self.state.current_playlist = Some(playlist);
                                 // 只预加载首屏封面，滚动时按需补齐。
                                 let covers = songs
                                     .iter()
@@ -807,6 +830,7 @@ impl NavidromeApp {
                                     .take(40)
                                     .collect();
                                 self.state.playlist_songs = songs;
+                                self.ensure_cover(cover.as_deref(), true);
                                 self.preload_covers(covers);
                             }
                             Err(error) => self.notify_error(error),
@@ -847,18 +871,23 @@ impl NavidromeApp {
                     }
                 }
                 Msg::Cover { id, result } => {
+                    self.state.requested_covers.remove(&id);
                     if let Ok(decoded) = result {
                         let decoded_ok = decoded.image.is_some() || decoded.palette.is_some();
                         if let Some(palette) = decoded.palette {
                             self.state.cover_palettes.insert(id.clone(), palette);
                         }
                         if let Some(image) = decoded.image {
-                            self.state.covers.insert(id.clone(), image);
+                            self.mark_cover_image_used(&image);
+                            let image_id = image.id();
+                            if let Some(previous) = self.state.covers.insert(id.clone(), image) {
+                                if image_id != previous.id() {
+                                    self.queue_cover_asset_release(previous);
+                                }
+                            }
                         }
-                        // 只有真正解出了内容才解除在途标记；失败保持标记，
-                        // 避免坏封面在队列/网格渲染中每帧重试。
-                        if decoded_ok {
-                            self.state.requested_covers.remove(&id);
+                        if !decoded_ok {
+                            self.remember_failed_cover(id.clone());
                         }
                         // 正在播放曲目的封面若被网格档（无调色板）抢先
                         // 解码，立刻补提一次调色板——命中封面磁盘缓存，
@@ -873,6 +902,10 @@ impl NavidromeApp {
                                 self.ensure_cover(Some(&id), true);
                             }
                         }
+                    } else {
+                        // 失败缓存保持有界；避免坏封面在每次渲染时无限重试，
+                        // 也避免浏览超大曲库时失败 id 永久增长。
+                        self.remember_failed_cover(id);
                     }
                 }
                 Msg::ImportResolved { generation, result } => {

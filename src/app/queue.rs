@@ -44,6 +44,15 @@ impl NavidromeApp {
         self.save_session();
     }
 
+    /// 普通单击只移动列表光标，不中断当前播放；双击或 Enter 才播放。
+    pub(super) fn select_song_row(&mut self, scope: &'static str, index: usize) {
+        if index >= self.songs_for_scope(scope).map_or(0, <[Song]>::len) {
+            return;
+        }
+        self.clear_song_multi();
+        self.state.song_list_selected = Some((scope, index));
+    }
+
     /// 取得（或首次创建）某作用域歌曲列表的滚动句柄。
     pub(super) fn song_list_scroll(&self, scope: &'static str) -> UniformListScrollHandle {
         self.song_list_scrolls
@@ -327,10 +336,6 @@ impl NavidromeApp {
         let pending: Vec<String> = songs[first..last]
             .iter()
             .filter_map(|song| song.cover_art.clone())
-            .filter(|cover| {
-                !self.state.covers.contains_key(cover)
-                    && !self.state.requested_covers.contains(cover)
-            })
             .collect();
         if pending.is_empty() {
             return;

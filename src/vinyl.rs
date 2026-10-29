@@ -14,11 +14,11 @@ use gpui_kit::{
 use image::{imageops::FilterType, DynamicImage, Frame, ImageDecoder, ImageReader, RgbaImage};
 use tokio::runtime::Runtime;
 
-// 25.3 MiB of pixel data, plus at most the same amount of atlas image data.
+// 16.9 MiB of pixel data, plus at most the same amount of atlas image data.
 // The label is at most 184 logical pixels across; cap high-DPI rasterization
 // too, rather than letting a retina display multiply the cache size by four.
 const SIDE: u32 = 192;
-const FRAMES: usize = 180;
+const FRAMES: usize = 120;
 
 struct Pending {
     cancel: Arc<AtomicBool>,
@@ -315,8 +315,8 @@ mod tests {
     fn frame_interpolation_wraps_without_a_jump() {
         assert_eq!(frame_pair(0.0), (0, 1, 0.0));
         assert_eq!(frame_pair(1.0), (0, 1, 0.0));
-        let (first, next, blend) = frame_pair(179.5 / 180.0);
-        assert_eq!((first, next), (179, 0));
+        let (first, next, blend) = frame_pair(119.5 / 120.0);
+        assert_eq!((first, next), (119, 0));
         assert!((blend - 0.5).abs() < 0.0001);
     }
 
@@ -385,10 +385,10 @@ mod tests {
         assert!(cover.tick(ready + Duration::from_millis(10_040), true));
 
         let phase = cover.phase();
-        assert!(!cover.tick(ready + Duration::from_millis(10_090), true));
+        assert!(!cover.tick(ready + Duration::from_millis(10_140), true));
         assert_eq!(cover.phase(), phase); // Wait for frame 2, without a jump.
         cover.frames[2] = Some(frame);
-        assert!(cover.tick(ready + Duration::from_millis(10_140), true));
+        assert!(cover.tick(ready + Duration::from_millis(10_190), true));
         assert!((cover.phase() - phase - 0.05 / 18.0).abs() < 0.00001);
     }
 

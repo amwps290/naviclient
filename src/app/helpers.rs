@@ -2,11 +2,13 @@
 //! 增益/对比度/格式化等无副作用的函数与小型数据类型。
 
 use rust_i18n::t;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::{
-    hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Keystroke, Pixels,
+    hsla, px, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, Keystroke, Modifiers,
+    Pixels,
 };
 
 use crate::audio::{PlaybackState, StreamFailure};
@@ -501,6 +503,40 @@ pub(super) fn cover_request_needed(
     want_palette: bool,
 ) -> bool {
     !(have_image && (!want_palette || have_palette))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SongRowClickAction {
+    Select,
+    Play,
+    ToggleMulti,
+    RangeMulti,
+}
+
+/// 歌曲行遵循桌面媒体库语义：单击选择、双击播放；Ctrl/Shift 保留多选。
+pub(super) fn song_row_click_action(
+    modifiers: Modifiers,
+    click_count: usize,
+) -> SongRowClickAction {
+    if modifiers.control && !modifiers.alt && !modifiers.platform {
+        SongRowClickAction::ToggleMulti
+    } else if modifiers.shift && !modifiers.alt && !modifiers.platform {
+        SongRowClickAction::RangeMulti
+    } else if click_count >= 2 {
+        SongRowClickAction::Play
+    } else {
+        SongRowClickAction::Select
+    }
+}
+
+/// 更新最近使用队列，返回因超限被淘汰的最旧键。
+pub(super) fn touch_lru(lru: &mut VecDeque<u64>, key: u64, capacity: usize) -> Option<u64> {
+    debug_assert!(capacity > 0);
+    if let Some(index) = lru.iter().position(|candidate| *candidate == key) {
+        lru.remove(index);
+    }
+    lru.push_front(key);
+    (lru.len() > capacity).then(|| lru.pop_back()).flatten()
 }
 
 pub(super) fn decode_cover(bytes: Vec<u8>, want_palette: bool) -> DecodedCover {
