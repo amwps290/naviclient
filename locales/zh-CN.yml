@@ -96,7 +96,7 @@
 "Configure a server to load lyrics": "配置服务器后即可加载歌词"
 "Configure your Navidrome server": "配置你的 Navidrome 服务器"
 "Connected": "已连接"
-"Connected to Navidrome API %{version}": "已连接 Navidrome API %{version}"
+"Continue listening": "继续聆听"
 "Connected · %{app} %{version}": "已连接 · %{app} %{version}"
 "Connecting to server...": "正在连接服务器..."
 "Connecting…": "正在连接…"

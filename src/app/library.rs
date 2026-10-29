@@ -615,12 +615,16 @@ impl NavidromeApp {
                     self.state.recent_albums_loading = false;
                     match result {
                         Ok(albums) => {
+                            let featured_cover =
+                                albums.first().and_then(|album| album.cover_art.clone());
                             let covers: Vec<String> = albums
                                 .iter()
                                 .filter_map(|item| item.cover_art.clone())
+                                .skip(featured_cover.is_some() as usize)
                                 .take(30)
                                 .collect();
                             self.state.recent_albums = albums;
+                            self.ensure_cover(featured_cover.as_deref(), true);
                             self.preload_covers(covers);
                         }
                         Err(error) => {

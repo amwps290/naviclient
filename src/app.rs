@@ -260,7 +260,7 @@ impl Default for AppState {
             genre_albums_exhausted: false,
             genre_albums_page_failed: false,
             search_filter: SearchFilter::default(),
-            collapsed_sections: HashSet::new(),
+            collapsed_sections: HashSet::from(["random".to_string()]),
             current_artist: None,
             artist_albums: Vec::new(),
             current_album: None,

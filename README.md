@@ -89,7 +89,10 @@ JavaScript runtime.
   Search reload only that view's data instead of the whole library; a failed
   album page (Albums or a genre page) shows an inline "try again" row, empty
   search results and empty genres get explicit empty states
-- Collapsible Home sections keep the page compact as more album lists are added
+- A listening-first Home surface: the current track (or latest recent album)
+  becomes a cover-colored Continue Listening feature, while recent, frequent,
+  newest, and random albums are limited to short previews with Random collapsed
+  by default
 - Responsive desktop compact mode below 1040px: the sidebar becomes an icon rail,
   the player narrows its metadata/control zones, and song tables hide secondary
   columns and actions without removing them from menus

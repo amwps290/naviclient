@@ -3874,6 +3874,251 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    fn home_feature_colors(
+        &self,
+        cover_id: Option<&str>,
+        cx: &Context<Self>,
+    ) -> (Hsla, Hsla, Hsla) {
+        let (base, raw_accent) = cover_id
+            .and_then(|id| self.state.cover_palettes.get(id).copied())
+            .unwrap_or((cx.theme().info, cx.theme().chart_2));
+        let light = cx.theme().background.l >= 0.5;
+        let start = cx
+            .theme()
+            .secondary
+            .blend(base.opacity(if light { 0.24 } else { 0.18 }));
+        let end = cx
+            .theme()
+            .background
+            .blend(raw_accent.opacity(if light { 0.18 } else { 0.14 }));
+        (
+            start,
+            end,
+            readable_accent(raw_accent, cx.theme().background),
+        )
+    }
+
+    /// Home 的唯一主焦点：优先继续当前播放；无播放会话时展示最近专辑。
+    /// 使用既有封面调色板与播放器按钮语言，不引入新的品牌色或装饰体系。
+    fn render_home_feature(
+        &self,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        let compact = compact_window_layout(f32::from(window.viewport_size().width));
+        let art_size = if compact { 104.0 } else { 136.0 };
+        let feature_height = if compact { 144.0 } else { 176.0 };
+
+        if let Some(song) = &self.state.now_playing {
+            let playback = self.audio.state();
+            let is_playing = playback.active && !playback.paused;
+            let (surface_start, surface_end, accent) =
+                self.home_feature_colors(song.cover_art.as_deref(), cx);
+            let play_style = ButtonCustomVariant::new(cx)
+                .color(accent)
+                .foreground(accent_foreground(accent))
+                .hover(adjust_lightness(accent, 0.05))
+                .active(adjust_lightness(accent, -0.05));
+            return Some(
+                h_flex()
+                    .id("home-continue-listening")
+                    .w_full()
+                    .h(px(feature_height))
+                    .p_5()
+                    .gap_5()
+                    .items_center()
+                    .rounded_lg()
+                    .bg(linear_gradient(
+                        118.0,
+                        linear_color_stop(surface_start, 0.0),
+                        linear_color_stop(surface_end, 1.0),
+                    ))
+                    .child(
+                        div()
+                            .id("home-feature-cover")
+                            .flex_none()
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_now_playing();
+                                cx.notify();
+                            }))
+                            .child(self.render_cover(song.cover_art.as_deref(), art_size, cx)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(accent)
+                                    .child(t!("Continue listening")),
+                            )
+                            .child(
+                                div()
+                                    .text_2xl()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(song.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .child(if song.album.trim().is_empty() {
+                                        song.artist.clone()
+                                    } else {
+                                        format!("{} · {}", song.artist, song.album)
+                                    }),
+                            )
+                            .child(
+                                h_flex()
+                                    .pt_2()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("home-feature-playback")
+                                            .label(if is_playing {
+                                                t!("Pause")
+                                            } else {
+                                                t!("Play")
+                                            })
+                                            .icon(if is_playing {
+                                                PlayerIcon::Pause
+                                            } else {
+                                                PlayerIcon::Play
+                                            })
+                                            .custom(play_style)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_playback();
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("home-feature-now-playing")
+                                            .label(t!("Now Playing"))
+                                            .ghost()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_now_playing();
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        let album = self.state.recent_albums.first()?.clone();
+        let (surface_start, surface_end, accent) =
+            self.home_feature_colors(album.cover_art.as_deref(), cx);
+        let play_style = ButtonCustomVariant::new(cx)
+            .color(accent)
+            .foreground(accent_foreground(accent))
+            .hover(adjust_lightness(accent, 0.05))
+            .active(adjust_lightness(accent, -0.05));
+        let album_for_cover = album.clone();
+        let album_for_play = album.clone();
+        let album_for_open = album.clone();
+        Some(
+            h_flex()
+                .id("home-recent-feature")
+                .w_full()
+                .h(px(feature_height))
+                .p_5()
+                .gap_5()
+                .items_center()
+                .rounded_lg()
+                .bg(linear_gradient(
+                    118.0,
+                    linear_color_stop(surface_start, 0.0),
+                    linear_color_stop(surface_end, 1.0),
+                ))
+                .child(
+                    div()
+                        .id("home-feature-album-cover")
+                        .flex_none()
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_album(album_for_cover.clone());
+                            cx.notify();
+                        }))
+                        .child(self.render_cover(album.cover_art.as_deref(), art_size, cx)),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(accent)
+                                .child(t!("Recently played")),
+                        )
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .truncate()
+                                .child(album.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child(album.artist.clone()),
+                        )
+                        .child(
+                            h_flex()
+                                .pt_2()
+                                .gap_2()
+                                .child(
+                                    Button::new("home-feature-play-album")
+                                        .label(t!("Play album"))
+                                        .icon(PlayerIcon::Play)
+                                        .custom(play_style)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.play_album(album_for_play.clone());
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("home-feature-open-album")
+                                        .label(t!("Go to album"))
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.open_album(album_for_open.clone());
+                                            cx.notify();
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_home_primary_section(
+        &self,
+        title: impl Into<SharedString>,
+        content: gpui_kit::AnyElement,
+    ) -> gpui_kit::AnyElement {
+        v_flex()
+            .gap_3()
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title.into()),
+            )
+            .child(content)
+            .into_any_element()
+    }
+
     /// Home 页专辑区块的通用内容：加载骨架 / 空状态提示 / 专辑网格。
     pub(super) fn render_home_album_content(
         &self,
@@ -3907,78 +4152,93 @@ impl NavidromeApp {
         cx.notify();
     }
 
+    fn render_home(&self, window: &mut Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let feature_uses_recent =
+            self.state.now_playing.is_none() && !self.state.recent_albums.is_empty();
+        let recent_start = usize::from(feature_uses_recent);
+        let recent_end = (recent_start + 6).min(self.state.recent_albums.len());
+        let recent_preview = &self.state.recent_albums[recent_start..recent_end];
+        let frequent_preview =
+            &self.state.frequent_albums[..self.state.frequent_albums.len().min(6)];
+        let newest_preview = &self.state.newest_albums[..self.state.newest_albums.len().min(6)];
+        let random_preview = &self.state.random_albums[..self.state.random_albums.len().min(6)];
+        let status = if self.state.server.is_some() {
+            format!("{} · {}", self.active_server_label(), t!("Connected"))
+        } else {
+            self.state.status.clone()
+        };
+
+        v_flex()
+            .gap_6()
+            .child(self.page_header(t!("Home"), status, cx))
+            .when_some(self.render_home_feature(window, cx), |this, feature| {
+                this.child(feature)
+            })
+            .when(
+                !recent_preview.is_empty() || self.state.recent_albums_loading,
+                |this| {
+                    this.child(self.render_home_primary_section(
+                        t!("Recently played"),
+                        self.render_home_album_content(
+                            "recent",
+                            recent_preview,
+                            self.state.recent_albums_loading,
+                            t!("Nothing played yet — recently played albums will appear here."),
+                            cx,
+                            window,
+                        ),
+                    ))
+                },
+            )
+            .child(self.render_home_section(
+                "frequent",
+                t!("Frequently played"),
+                self.render_home_album_content(
+                    "frequent",
+                    frequent_preview,
+                    self.state.frequent_albums_loading,
+                    t!("Nothing frequently played yet — your most-played albums will appear here."),
+                    cx,
+                    window,
+                ),
+                cx,
+            ))
+            .child(self.render_home_section(
+                "newest",
+                t!("Newest albums"),
+                self.render_home_album_content(
+                    "newest",
+                    newest_preview,
+                    self.state.newest_albums_loading,
+                    t!("No albums in your library yet."),
+                    cx,
+                    window,
+                ),
+                cx,
+            ))
+            .child(self.render_home_section(
+                "random",
+                t!("Random albums"),
+                self.render_home_album_content(
+                    "random",
+                    random_preview,
+                    self.state.random_albums_loading,
+                    t!("No random albums to show — refresh the library for a fresh pick."),
+                    cx,
+                    window,
+                ),
+                cx,
+            ))
+            .into_any_element()
+    }
+
     pub(super) fn render_content(
         &self,
         window: &mut Window,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         match self.state.view {
-            View::Home => v_flex()
-                .gap_5()
-                .child(
-                    self.page_header(
-                        t!("Home"),
-                        self.state
-                            .server
-                            .as_ref()
-                            .map(|info| t!("Connected to Navidrome API %{version}", version = info.version).to_string())
-                            .unwrap_or_else(|| self.state.status.clone()),
-                        cx,
-                    ),
-                )
-                .child(self.render_home_section(
-                    "recent",
-                    t!("Recently played"),
-                    self.render_home_album_content(
-                        "recent",
-                        &self.state.recent_albums,
-                        self.state.recent_albums_loading,
-                        t!("Nothing played yet — recently played albums will appear here."),
-                        cx,
-                        window,
-                    ),
-                    cx,
-                ))
-                .child(self.render_home_section(
-                    "frequent",
-                    t!("Frequently played"),
-                    self.render_home_album_content(
-                        "frequent",
-                        &self.state.frequent_albums,
-                        self.state.frequent_albums_loading,
-                        t!("Nothing frequently played yet — your most-played albums will appear here."),
-                        cx,
-                        window,
-                    ),
-                    cx,
-                ))
-                .child(self.render_home_section(
-                    "random",
-                    t!("Random albums"),
-                    self.render_home_album_content(
-                        "random",
-                        &self.state.random_albums,
-                        self.state.random_albums_loading,
-                        t!("No random albums to show — refresh the library for a fresh pick."),
-                        cx,
-                        window,
-                    ),
-                    cx,
-                ))
-                .child(self.render_home_section(
-                    "newest",
-                    t!("Newest albums"),
-                    self.render_home_album_content(
-                        "newest",
-                        &self.state.newest_albums,
-                        self.state.newest_albums_loading,
-                        t!("No albums in your library yet."),
-                        cx,
-                        window,
-                    ),
-                    cx,
-                ))
-                .into_any_element(),
+            View::Home => self.render_home(window, cx),
             View::Favorites => {
                 let favorites = &self.state.favorites;
                 let total =
@@ -3990,7 +4250,10 @@ impl NavidromeApp {
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
                             t!("Favorites"),
-                            t!("%{total} starred items from your Navidrome library", total = total),
+                            t!(
+                                "%{total} starred items from your Navidrome library",
+                                total = total
+                            ),
                             cx,
                         )))
                         .child(self.header_refresh_button(
@@ -4003,12 +4266,10 @@ impl NavidromeApp {
                 );
 
                 if total == 0 {
-                    content = content.child(
-                        div()
-                            .py_8()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t!("Click a heart on a song, album, or artist to add it here.")),
-                    );
+                    content =
+                        content.child(div().py_8().text_color(cx.theme().muted_foreground).child(
+                            t!("Click a heart on a song, album, or artist to add it here."),
+                        ));
                 }
                 if !favorites.artists.is_empty() {
                     content = content
@@ -4052,7 +4313,10 @@ impl NavidromeApp {
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
                             t!("Artists"),
-                            t!("%{count} artists in your library", count = self.state.artists.len()),
+                            t!(
+                                "%{count} artists in your library",
+                                count = self.state.artists.len()
+                            ),
                             cx,
                         )))
                         .child(self.render_artist_sort_button(cx))
@@ -4080,7 +4344,10 @@ impl NavidromeApp {
                         .gap_3()
                         .child(div().flex_1().child(self.page_header(
                             t!("Albums"),
-                            t!("%{count} albums in your library", count = self.state.albums.len()),
+                            t!(
+                                "%{count} albums in your library",
+                                count = self.state.albums.len()
+                            ),
                             cx,
                         )))
                         .child(self.render_album_sort_button(cx))
@@ -4112,9 +4379,15 @@ impl NavidromeApp {
                 // 有旧数据（磁盘缓存）时直接渲染，仅在后台重验证中提示；
                 // 首次无缓存才显示骨架屏。
                 let subtitle = if self.state.genres_loading && !self.state.genres.is_empty() {
-                    t!("%{count} genres — refreshing…", count = self.state.genres.len())
+                    t!(
+                        "%{count} genres — refreshing…",
+                        count = self.state.genres.len()
+                    )
                 } else {
-                    t!("%{count} genres in your library", count = self.state.genres.len())
+                    t!(
+                        "%{count} genres in your library",
+                        count = self.state.genres.len()
+                    )
                 };
                 v_flex()
                     .gap_5()
@@ -4123,11 +4396,11 @@ impl NavidromeApp {
                             .w_full()
                             .items_end()
                             .gap_3()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(self.page_header(t!("Genres"), subtitle, cx)),
-                            )
+                            .child(div().flex_1().child(self.page_header(
+                                t!("Genres"),
+                                subtitle,
+                                cx,
+                            )))
                             .child(self.header_refresh_button(
                                 "refresh-genres",
                                 t!("Refresh genres"),
@@ -4212,8 +4485,16 @@ impl NavidromeApp {
                                     .owner
                                     .as_deref()
                                     .filter(|owner| !owner.trim().is_empty())
-                                    .map(|owner| t!("%{track_count} tracks | %{owner}", track_count = track_count, owner = owner))
-                                    .unwrap_or_else(|| t!("%{track_count} tracks", track_count = track_count));
+                                    .map(|owner| {
+                                        t!(
+                                            "%{track_count} tracks | %{owner}",
+                                            track_count = track_count,
+                                            owner = owner
+                                        )
+                                    })
+                                    .unwrap_or_else(|| {
+                                        t!("%{track_count} tracks", track_count = track_count)
+                                    });
 
                                 h_flex()
                                     .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
@@ -4694,14 +4975,17 @@ impl NavidromeApp {
                 .h_full()
                 .min_h_0()
                 .gap_5()
-                .child(self.page_header(
-                    t!("Queue"),
-                    t!("%{count} tracks in the current queue",
-                        count = self.state.queue.len()
-                    )
-                    .to_string(),
-                    cx,
-                ))
+                .child(
+                    self.page_header(
+                        t!("Queue"),
+                        t!(
+                            "%{count} tracks in the current queue",
+                            count = self.state.queue.len()
+                        )
+                        .to_string(),
+                        cx,
+                    ),
+                )
                 .when(self.state.queue.is_empty(), |this| {
                     this.child(
                         div()
