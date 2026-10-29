@@ -6,13 +6,14 @@ use std::time::Duration;
 use gpui_kit::hsla;
 
 use super::{
-    accent_foreground, advance_index, album_page_offset, contrast_ratio, cover_request_needed,
-    effective_volume, extract_cover_palette, format_file_size, global_shortcut_conflict,
-    history_index_after_insert, loudness_gain_factor, match_shortcut, normalize_volume,
-    playback_technical_info, queue_index_after_move, queue_index_after_remove, range_anchor,
-    readable_accent, reconnect_decision, replay_gain_factor, restored_volume, seek_target,
-    selection_range, shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs,
-    sort_artists, touch_lru, ReconnectDecision, ShuffleHistory, SongRowClickAction,
+    accent_foreground, advance_index, album_page_offset, compact_song_columns,
+    compact_window_layout, contrast_ratio, cover_request_needed, effective_volume,
+    extract_cover_palette, format_file_size, global_shortcut_conflict, history_index_after_insert,
+    loudness_gain_factor, match_shortcut, normalize_volume, playback_technical_info,
+    queue_index_after_move, queue_index_after_remove, range_anchor, readable_accent,
+    reconnect_decision, replay_gain_factor, restored_volume, seek_target, selection_range,
+    shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs, sort_artists,
+    touch_lru, ReconnectDecision, ShuffleHistory, SongRowClickAction,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
@@ -969,4 +970,14 @@ fn song_rows_select_on_single_click_and_play_on_double_click() {
         ),
         SongRowClickAction::RangeMulti
     );
+}
+
+#[test]
+fn compact_layout_breakpoints_preserve_regular_desktop_widths() {
+    assert!(compact_window_layout(900.0));
+    assert!(compact_window_layout(1039.0));
+    assert!(!compact_window_layout(1040.0));
+    assert!(!compact_song_columns(0.0));
+    assert!(compact_song_columns(844.0));
+    assert!(!compact_song_columns(900.0));
 }

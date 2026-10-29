@@ -30,6 +30,14 @@ pub(super) const ALBUM_PAGE_SIZE: usize = 100;
 /// 歌曲行高：60px 内容 + 1px 顶部边框。uniform_list 限高模式和封面预取都依赖它。
 pub(super) const SONG_ROW_HEIGHT: f32 = 61.0;
 
+pub(super) fn compact_window_layout(viewport_width: f32) -> bool {
+    viewport_width < 1_040.0
+}
+
+pub(super) fn compact_song_columns(content_width: f32) -> bool {
+    content_width > 0.0 && content_width < 900.0
+}
+
 pub(super) fn item_instance_key(scope: &str, kind: &str, index: usize, id: &str) -> String {
     format!("{scope}/{kind}/{index}/{id}")
 }

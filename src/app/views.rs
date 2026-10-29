@@ -1185,13 +1185,17 @@ impl NavidromeApp {
             return div().into_any_element();
         }
         let handle = self.song_list_scroll(scope);
+        let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
+        let compact_columns = compact_song_columns(list_width);
         // 专辑 / 播放列表详情和队列页中表格占满剩余高度（表头固定，列表内部滚动）；
         // 收藏与搜索页的歌曲表格与其他分区共存，限制高度独立滚动。
         let fill = matches!(scope, "album-detail" | "playlist-detail" | "queue");
         let rows = cx.processor(move |this, range: Range<usize>, _window, cx| {
             let playback = this.audio.state();
             range
-                .map(|index| this.render_song_row(scope, index, editable, &playback, cx))
+                .map(|index| {
+                    this.render_song_row(scope, index, editable, compact_columns, &playback, cx)
+                })
                 .collect::<Vec<_>>()
         });
         // 限高模式：显式给出列表高度 min(行数×行高, 视口)，不依赖 max_h。
@@ -1235,18 +1239,29 @@ impl NavidromeApp {
                     .bg(cx.theme().secondary)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(div().w(px(34.0)))
+                    .child(div().w(px(28.0)))
                     .child(div().w(px(42.0)))
                     .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
+                    .when(!compact_columns, |this| {
+                        this.child(
+                            div()
+                                .flex_1()
+                                .flex_grow(2.0)
+                                .max_w(px(180.0))
+                                .child(t!("Artist")),
+                        )
+                    })
                     .child(
                         div()
-                            .flex_1()
-                            .flex_grow(2.0)
-                            .max_w(px(180.0))
-                            .child(t!("Artist")),
+                            .w(px(if compact_columns { 48.0 } else { 64.0 }))
+                            .text_right()
+                            .child(t!("Time")),
                     )
-                    .child(div().w(px(64.0)).text_right().child(t!("Time")))
-                    .child(div().w(px(if editable { 124.0 } else { 92.0 }))),
+                    .child(div().w(px(match (editable, compact_columns) {
+                        (true, true) | (false, true) => 60.0,
+                        (true, false) => 124.0,
+                        (false, false) => 100.0,
+                    }))),
             )
             .child(list)
             .child(Scrollbar::vertical(&handle))
@@ -1482,6 +1497,7 @@ impl NavidromeApp {
         scope: &'static str,
         index: usize,
         editable: bool,
+        compact_columns: bool,
         playback: &PlaybackState,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
@@ -1641,23 +1657,25 @@ impl NavidromeApp {
                         ),
                 ),
         )
+        .when(!compact_columns, |row| {
+            row.child(
+                div()
+                    .flex_1()
+                    .flex_grow(2.0)
+                    .max_w(px(180.0))
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.song_artist_link(
+                        SharedString::from(format!("song-row-artist-{key}")),
+                        song,
+                        cx,
+                    )),
+            )
+        })
         .child(
             div()
-                .flex_1()
-                .flex_grow(2.0)
-                .max_w(px(180.0))
-                .min_w_0()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(self.song_artist_link(
-                    SharedString::from(format!("song-row-artist-{key}")),
-                    song,
-                    cx,
-                )),
-        )
-        .child(
-            div()
-                .w(px(64.0))
+                .w(px(if compact_columns { 48.0 } else { 64.0 }))
                 .text_sm()
                 .text_right()
                 .text_color(cx.theme().muted_foreground)
@@ -1669,11 +1687,15 @@ impl NavidromeApp {
             h_flex()
                 .flex_none()
                 .h_full()
-                .w(px(if editable { 124.0 } else { 100.0 }))
+                .w(px(match (editable, compact_columns) {
+                    (true, true) | (false, true) => 60.0,
+                    (true, false) => 124.0,
+                    (false, false) => 100.0,
+                }))
                 .items_center()
                 .justify_end()
                 .gap_0p5()
-                .when(editable, |slot| {
+                .when(editable && !compact_columns, |slot| {
                     slot.child(
                         Button::new(SharedString::from(format!("queue-up-{key}")))
                             .icon(AppIcon::ChevronUp)
@@ -1700,7 +1722,9 @@ impl NavidromeApp {
                                 cx.notify();
                             })),
                     )
-                    .child(
+                })
+                .when(editable, |slot| {
+                    slot.child(
                         Button::new(SharedString::from(format!("queue-remove-{key}")))
                             .icon(AppIcon::Close)
                             .tooltip(t!("Remove from queue"))
@@ -1714,22 +1738,24 @@ impl NavidromeApp {
                             })),
                     )
                 })
-                .when(!editable, |slot| {
+                .when(!editable && !compact_columns, |slot| {
                     slot.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
-                        .child(
-                            Button::new(SharedString::from(format!("play-song-{key}")))
-                                .icon(PlayerIcon::Play)
-                                .tooltip(t!("Play"))
-                                .ghost()
-                                .small()
-                                .text_color(row_accent)
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select_song_row(scope, index);
-                                    this.play_song_at_scope(scope, index);
-                                    cx.notify();
-                                })),
-                        )
+                })
+                .when(!editable, |slot| {
+                    slot.child(
+                        Button::new(SharedString::from(format!("play-song-{key}")))
+                            .icon(PlayerIcon::Play)
+                            .tooltip(t!("Play"))
+                            .ghost()
+                            .small()
+                            .text_color(row_accent)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.select_song_row(scope, index);
+                                this.play_song_at_scope(scope, index);
+                                cx.notify();
+                            })),
+                    )
                 })
                 .child(
                     div()
@@ -5066,9 +5092,14 @@ impl NavidromeApp {
             (playback.buffered.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
         };
         let queue_open = self.state.view == View::Queue;
+        let viewport_width = f32::from(window.viewport_size().width);
+        let compact_player = compact_window_layout(viewport_width);
+        let song_info_width = if compact_player { 200.0 } else { 260.0 };
+        let player_cover_size = if compact_player { 48.0 } else { 60.0 };
+        let right_controls_width = if compact_player { 180.0 } else { 260.0 };
         // 窄窗口优先保证控制按钮的呼吸空间，隐藏格式胶囊（信息仍在
         // 正在播放页可见）。
-        let show_technical_chip = f32::from(window.viewport_size().width) >= 1080.0;
+        let show_technical_chip = viewport_width >= 1080.0;
         let output_volume = effective_volume(self.config.volume, self.muted);
         let volume_icon = if self.muted || output_volume <= 0.001 {
             AppIcon::VolumeMuted
@@ -5102,18 +5133,18 @@ impl NavidromeApp {
             };
             h_flex()
                 .id("now-playing-info")
-                .w(px(260.0))
+                .w(px(song_info_width))
                 .flex_shrink_0()
                 .min_w_0()
                 .overflow_hidden()
-                .gap_3()
+                .gap(if compact_player { px(8.0) } else { px(12.0) })
                 .p_1()
                 .items_center()
                 .cursor_pointer()
                 .rounded(px(12.0))
                 .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
                 .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
-                .child(self.render_cover(song.cover_art.as_deref(), 60.0, cx))
+                .child(self.render_cover(song.cover_art.as_deref(), player_cover_size, cx))
                 .child(
                     v_flex()
                         .flex_1()
@@ -5121,7 +5152,8 @@ impl NavidromeApp {
                         .gap_1()
                         .child(
                             div()
-                                .text_base()
+                                .when(compact_player, |this| this.text_sm())
+                                .when(!compact_player, |this| this.text_base())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(song.title.clone()),
@@ -5146,14 +5178,14 @@ impl NavidromeApp {
                 .into_any_element()
         } else {
             h_flex()
-                .w(px(260.0))
+                .w(px(song_info_width))
                 .flex_shrink_0()
                 .min_w_0()
                 .overflow_hidden()
-                .gap_3()
+                .gap(if compact_player { px(8.0) } else { px(12.0) })
                 .p_1()
                 .items_center()
-                .child(self.render_cover(None, 60.0, cx))
+                .child(self.render_cover(None, player_cover_size, cx))
                 .child(
                     v_flex()
                         .flex_1()
@@ -5161,7 +5193,8 @@ impl NavidromeApp {
                         .gap_1()
                         .child(
                             div()
-                                .text_base()
+                                .when(compact_player, |this| this.text_sm())
+                                .when(!compact_player, |this| this.text_base())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(t!("No track playing")),
@@ -5178,14 +5211,15 @@ impl NavidromeApp {
         };
 
         let right_controls = h_flex()
-            .w(px(260.0))
+            .w(px(right_controls_width))
             .h(px(40.0))
             .min_w_0()
             .flex_shrink_0()
             .justify_end()
             .items_center()
-            .gap_2()
-            .pl_3()
+            .gap(if compact_player { px(4.0) } else { px(8.0) })
+            .when(compact_player, |this| this.pl_2())
+            .when(!compact_player, |this| this.pl_3())
             .border_l_1()
             .border_color(cx.theme().border.opacity(0.8))
             .when_some(
@@ -5361,10 +5395,11 @@ impl NavidromeApp {
             );
 
         h_flex()
-            .h(px(88.0))
-            .px_4()
+            .h(px(if compact_player { 82.0 } else { 88.0 }))
+            .when(compact_player, |this| this.px_3())
+            .when(!compact_player, |this| this.px_4())
             .py_2()
-            .gap_4()
+            .gap(if compact_player { px(8.0) } else { px(16.0) })
             .items_center()
             .justify_between()
             .border_t_1()

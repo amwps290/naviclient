@@ -3010,8 +3010,15 @@ impl NavidromeApp {
     }
 
     /// 侧边栏底部的折叠/展开按钮；状态持久化到配置。
-    fn sidebar_collapse_toggle(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        let collapsed = self.config.sidebar_collapsed;
+    fn sidebar_collapse_toggle(
+        &self,
+        collapsed: bool,
+        auto_collapsed: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        if auto_collapsed {
+            return div().mt_auto().into_any_element();
+        }
         let button = Button::new("sidebar-collapse-toggle")
             .icon(if collapsed {
                 KitIcon::PanelLeftOpen
@@ -3060,6 +3067,7 @@ impl NavidromeApp {
         label: impl Into<SharedString>,
         icon: impl IconNamed,
         count: Option<usize>,
+        collapsed: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let label: SharedString = label.into();
@@ -3072,7 +3080,6 @@ impl NavidromeApp {
                     | (View::Genres, View::GenreDetail)
                     | (View::Playlists, View::PlaylistDetail)
             );
-        let collapsed = self.config.sidebar_collapsed;
         if collapsed {
             // 折叠态：图标按钮居中、拉高加大点击区，标签退化为 tooltip。
             let button = Button::new(SharedString::from(format!("nav-{nav_id}")))
@@ -3166,7 +3173,7 @@ impl NavidromeApp {
     /// 侧边栏顶部的服务器胶囊：单行全圆角胶囊（状态圆点 + 当前
     /// 服务器名 + 下拉箭头），点击打开设置（切换/新增/删除都在
     /// 那里）。折叠态只显示图标按钮。
-    fn render_sidebar_server(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    fn render_sidebar_server(&self, collapsed: bool, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let connected = self.state.server.is_some();
         let label = self.active_server_label();
         let status = if self.state.loading {
@@ -3199,7 +3206,7 @@ impl NavidromeApp {
             AppIcon::ServerOff
         };
 
-        if self.config.sidebar_collapsed {
+        if collapsed {
             return div()
                 .w_full()
                 .flex()
@@ -3446,6 +3453,11 @@ impl Render for NavidromeApp {
         }
 
         let settings_open = self.state.settings_open;
+        let viewport_width = f32::from(window.viewport_size().width);
+        // 900px 级窗口采用结构化紧凑模式：侧栏只保留图标，释放宽度给
+        // 内容和播放器；用户保存的展开偏好在窗口恢复宽度后自动回来。
+        let auto_collapsed_sidebar = compact_window_layout(viewport_width);
+        let sidebar_collapsed = self.config.sidebar_collapsed || auto_collapsed_sidebar;
 
         if self.state.view == View::NowPlaying {
             let (cover_base, cover_accent) = self.now_playing_palette(cx);
@@ -3628,11 +3640,7 @@ impl Render for NavidromeApp {
                     .min_h_0()
                     .child(
                         v_flex()
-                            .w(px(if self.config.sidebar_collapsed {
-                                56.0
-                            } else {
-                                216.0
-                            }))
+                            .w(px(if sidebar_collapsed { 56.0 } else { 216.0 }))
                             .h_full()
                             .p_3()
                             .gap_1()
@@ -3641,8 +3649,8 @@ impl Render for NavidromeApp {
                             .bg(cx.theme().sidebar)
                             // 当前服务器：多服务器下必须一眼可见正在浏览谁的库，
                             // 点击进入设置切换。
-                            .child(self.render_sidebar_server(cx))
-                            .when(!self.config.sidebar_collapsed, |this| {
+                            .child(self.render_sidebar_server(sidebar_collapsed, cx))
+                            .when(!sidebar_collapsed, |this| {
                                 this.child(
                                     div()
                                         .px_2()
@@ -3653,7 +3661,14 @@ impl Render for NavidromeApp {
                                         .child(t!("LIBRARY")),
                                 )
                             })
-                            .child(self.nav_button(View::Home, t!("Home"), AppIcon::Home, None, cx))
+                            .child(self.nav_button(
+                                View::Home,
+                                t!("Home"),
+                                AppIcon::Home,
+                                None,
+                                sidebar_collapsed,
+                                cx,
+                            ))
                             .child(self.nav_button(
                                 View::Favorites,
                                 t!("Favorites"),
@@ -3663,6 +3678,7 @@ impl Render for NavidromeApp {
                                         + self.state.favorites.albums.len()
                                         + self.state.favorites.songs.len(),
                                 ),
+                                sidebar_collapsed,
                                 cx,
                             ))
                             .child(self.nav_button(
@@ -3670,6 +3686,7 @@ impl Render for NavidromeApp {
                                 t!("Artists"),
                                 AppIcon::Artists,
                                 Some(self.state.artists.len()),
+                                sidebar_collapsed,
                                 cx,
                             ))
                             .child(
@@ -3682,6 +3699,7 @@ impl Render for NavidromeApp {
                                     self.state
                                         .albums_exhausted
                                         .then_some(self.state.albums.len()),
+                                    sidebar_collapsed,
                                     cx,
                                 ),
                             )
@@ -3690,6 +3708,7 @@ impl Render for NavidromeApp {
                                 t!("Genres"),
                                 AppIcon::Genres,
                                 Some(self.state.genres.len()),
+                                sidebar_collapsed,
                                 cx,
                             ))
                             .child(self.nav_button(
@@ -3697,6 +3716,7 @@ impl Render for NavidromeApp {
                                 t!("Playlists"),
                                 AppIcon::Playlists,
                                 Some(self.state.playlists.len()),
+                                sidebar_collapsed,
                                 cx,
                             ))
                             .child(self.nav_button(
@@ -3704,9 +3724,14 @@ impl Render for NavidromeApp {
                                 t!("Search"),
                                 KitIcon::Search,
                                 None,
+                                sidebar_collapsed,
                                 cx,
                             ))
-                            .child(self.sidebar_collapse_toggle(cx)),
+                            .child(self.sidebar_collapse_toggle(
+                                sidebar_collapsed,
+                                auto_collapsed_sidebar,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -3718,7 +3743,8 @@ impl Render for NavidromeApp {
                             .on_scroll_wheel(cx.listener(|this, _, _, _| {
                                 this.maybe_load_more_content();
                             }))
-                            .p_6()
+                            .when(compact_window_layout(viewport_width), |this| this.p_4())
+                            .when(!compact_window_layout(viewport_width), |this| this.p_6())
                             .child(self.render_content(window, cx)),
                     )
                     // 设置为内容区覆盖层：点击背景关闭，标题栏与播放条保持可操作。
