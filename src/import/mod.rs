@@ -4,13 +4,14 @@
 //! 变体，链接识别（`resolve`）与拉取（`fetch`）都收口在这里；上层
 //! （`src/app/import.rs`）只面对统一的 `ImportedPlaylist`。
 //!
-//! P1 支持网易云音乐（公开歌单，无需登录、无需加密签名，走 v6 详情接口，
-//! 再按 `trackIds` 补齐歌曲元数据）。QQ 音乐等平台后续按同样方式追加即可。
+//! 支持网易云音乐与 QQ 音乐公开歌单。两个来源都只读取匹配所需元数据，
+//! 不获取音源，也不要求用户提供第三方平台账号。
 //!
 //! 只取元数据用于匹配用户自己的 Navidrome 曲库，不获取音源。
 
 mod matcher;
 mod netease;
+mod qq;
 
 pub use matcher::match_playlist;
 
@@ -52,7 +53,7 @@ pub struct ImportedTrack {
 pub struct ImportedPlaylist {
     pub name: String,
     pub tracks: Vec<ImportedTrack>,
-    /// 网易云仍在歌单中声明、但歌曲详情接口已无法公开返回的曲目数。
+    /// 来源仍在歌单中声明、但公开接口已无法返回元数据的曲目数。
     pub unavailable_tracks: usize,
 }
 
@@ -61,6 +62,8 @@ pub struct ImportedPlaylist {
 pub enum PlaylistSource {
     /// 网易云音乐歌单 id。
     Netease { id: String },
+    /// QQ 音乐歌单 id（disstid）。
+    Qq { id: String },
 }
 
 impl PlaylistSource {
@@ -71,17 +74,18 @@ impl PlaylistSource {
     /// 路径中碰巧包含平台域名的任意网址当成歌单。
     pub fn parse_known_url(url: &str) -> Option<Self> {
         let parsed = parse_http_url(url)?;
-        if parsed.host_str() != Some("music.163.com") {
-            return None;
+        match parsed.host_str()? {
+            "music.163.com" => playlist_id(&parsed).map(|id| Self::Netease { id }),
+            "y.qq.com" | "i.y.qq.com" => qq_playlist_id(&parsed).map(|id| Self::Qq { id }),
+            _ => None,
         }
-        let id = playlist_id(&parsed)?;
-        Some(Self::Netease { id })
     }
 
     /// 拉取歌单元数据。
     pub async fn fetch(&self, http: &reqwest::Client) -> Result<ImportedPlaylist> {
         match self {
             Self::Netease { id } => netease::fetch(http, id).await,
+            Self::Qq { id } => qq::fetch(http, id).await,
         }
     }
 }
@@ -93,9 +97,9 @@ pub async fn resolve(input: &str, http: &reqwest::Client) -> Result<PlaylistSour
     if let Some(source) = PlaylistSource::parse_known_url(url) {
         return Ok(source);
     }
-    // 短链（分享 App 生成）：302 落到 music.163.com 的正式链接上。
-    // 客户端重定向策略只允许 163cn.tv / music.163.com，最终地址再次解析。
-    if is_netease_short_url(url) {
+    // 分享 App 生成的短链：网易云落到 music.163.com，QQ 音乐落到
+    // y.qq.com / i.y.qq.com。重定向白名单限制在两个平台的官方域名。
+    if is_supported_short_url(url) {
         let response = http
             .get(url)
             .header(reqwest::header::USER_AGENT, BROWSER_UA)
@@ -180,8 +184,30 @@ fn is_netease_short_url(raw: &str) -> bool {
     parse_http_url(raw).is_some_and(|url| url.host_str() == Some("163cn.tv"))
 }
 
+fn is_qq_short_url(raw: &str) -> bool {
+    parse_http_url(raw).is_some_and(|url| {
+        matches!(url.host_str(), Some("c.y.qq.com" | "c6.y.qq.com"))
+            && url.path() == "/base/fcgi-bin/u"
+    })
+}
+
+fn is_supported_short_url(raw: &str) -> bool {
+    is_netease_short_url(raw) || is_qq_short_url(raw)
+}
+
 fn is_allowed_import_host(url: &Url) -> bool {
-    matches!(url.host_str(), Some("163cn.tv" | "music.163.com"))
+    matches!(
+        url.host_str(),
+        Some(
+            "163cn.tv"
+                | "music.163.com"
+                | "y.qq.com"
+                | "i.y.qq.com"
+                | "u.y.qq.com"
+                | "c.y.qq.com"
+                | "c6.y.qq.com"
+        )
+    )
 }
 
 /// 从已经确认是歌单的路由中取 id。hash 路由优先于外层页面 query，避免
@@ -198,6 +224,19 @@ fn playlist_id(url: &Url) -> Option<String> {
         .and_then(|mut segments| segments.next_back())
         == Some("playlist");
     path_is_playlist.then(|| query_id(url.query().unwrap_or_default()))?
+}
+
+/// QQ 音乐网页新版路由为 `/n/ryqq[_v2]/playlist/{id}`，旧版可能带
+/// `.html`；移动分享页则把 id 放在 `taoge.html?id=...` 查询参数中。
+fn qq_playlist_id(url: &Url) -> Option<String> {
+    if url.host_str() == Some("i.y.qq.com") && url.path().ends_with("/share/details/taoge.html") {
+        return query_id(url.query().unwrap_or_default());
+    }
+    let segments: Vec<_> = url.path_segments()?.collect();
+    let id = segments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "playlist").then(|| pair[1].trim_end_matches(".html")))?;
+    (!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())).then(|| id.to_string())
 }
 
 fn query_id(query: &str) -> Option<String> {

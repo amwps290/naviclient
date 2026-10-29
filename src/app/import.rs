@@ -326,7 +326,9 @@ impl NavidromeApp {
                         .child(
                             div()
                                 .text_sm()
-                                .child(t!("Paste a NetEase Cloud Music playlist link.")),
+                                .child(t!(
+                                    "Paste a NetEase Cloud Music or QQ Music playlist link."
+                                )),
                         )
                         .child(Input::new(input).w_full())
                         .child(
@@ -334,7 +336,7 @@ impl NavidromeApp {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(t!(
-                                "Direct links, hash links, and full share messages are supported."
+                                "Direct links, mobile share links, short links, and full share messages are supported."
                             )),
                         );
                 }
@@ -484,7 +486,7 @@ impl NavidromeApp {
                             .text_sm()
                             .text_color(cx.theme().foreground)
                             .child(t!(
-                                "%{count} tracks are unavailable from NetEase and were skipped before matching.",
+                                "%{count} tracks are unavailable from the source service and were skipped before matching.",
                                 count = unavailable_count
                             )),
                     );
