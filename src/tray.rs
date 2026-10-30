@@ -95,9 +95,9 @@ mod linux {
     pub struct LinuxTray {
         tx: std::sync::mpsc::Sender<TrayCommand>,
         paused: bool,
-        /// 播放/暂停双态图标（assets/gen_tray_icon.py 生成的圆形暮色
-        /// 徽章：播放 = 八分音符，暂停 = 双竖条），各预置多个尺寸供
-        /// SNI 宿主挑选，避免宿主用低质量缩放。
+        /// 播放/暂停双态图标（与应用主图标共用黑胶 + 唱针标记，唱片
+        /// 中心以播放/暂停符号区分状态），各预置多个尺寸供 SNI 宿主
+        /// 挑选，避免宿主用低质量缩放。
         icon_playing: Vec<Icon>,
         icon_paused: Vec<Icon>,
     }
@@ -315,10 +315,10 @@ fn pump_windows_messages() {
     }
 }
 
-/// 生成 32x32 RGBA 托盘图标（使用默认封面图）。
+/// 生成 32x32 RGBA 托盘图标（使用独立应用图标，而不是默认封面）。
 #[cfg(target_os = "windows")]
 fn tray_icon_rgba() -> Result<Vec<u8>> {
-    let bytes = include_bytes!("../assets/default-cover.png");
+    let bytes = include_bytes!("../assets/app-icon.png");
     let image = image::load_from_memory(bytes)
         .context("failed to decode tray icon")?
         .resize(32, 32, image::imageops::FilterType::Triangle)

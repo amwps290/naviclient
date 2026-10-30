@@ -43,6 +43,9 @@ tempfile = "3"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows = { version = "0.61", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_WinRT"] }
 
+[build-dependencies]
+embed-resource = "3.0.11"
+
 [profile.release]
 # 发布体积优化（MSVC 后端，调试符号走外部 PDB，exe 无内嵌符号）。
 # 逐项实测：基线 34.6MB → +thin LTO/CGU=1/strip 31.2MB → fat LTO

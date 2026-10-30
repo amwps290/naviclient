@@ -4740,6 +4740,7 @@ dependencies = [
  "biquad",
  "cpal",
  "directories",
+ "embed-resource",
  "env_logger",
  "gpui-kit",
  "gpui-pre",
