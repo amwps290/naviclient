@@ -1957,8 +1957,8 @@ impl NavidromeApp {
             .w_full()
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().secondary.opacity(0.35))
+            .border_color(cx.theme().border.opacity(0.72))
+            .bg(cx.theme().secondary.opacity(0.18))
             // ---- 上：服务器列表 ----
             .child(
                 v_flex()
@@ -2448,8 +2448,6 @@ impl NavidromeApp {
                     .max_h(relative(if compact { 0.94 } else { 0.88 }))
                     .mt(px(if compact { 16.0 } else { 48.0 }))
                     .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
                     .rounded_xl()
                     .shadow_xl()
                     .overflow_hidden()
@@ -2716,10 +2714,9 @@ impl NavidromeApp {
                         v_flex()
                             .gap_4()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 v_flex()
                                     .gap_2()
@@ -2819,10 +2816,9 @@ impl NavidromeApp {
                         v_flex()
                             .gap_4()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child({
                                 let playback = self.audio.state();
                                 let active = match playback.output_name.as_deref() {
@@ -2937,10 +2933,9 @@ impl NavidromeApp {
                             .items_center()
                             .gap_4()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -3005,10 +3000,9 @@ impl NavidromeApp {
                             .items_center()
                             .gap_4()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -3052,10 +3046,9 @@ impl NavidromeApp {
                         v_flex()
                             .gap_5()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 h_flex()
                                     .justify_between()
@@ -3139,10 +3132,9 @@ impl NavidromeApp {
                         v_flex()
                             .gap_3()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 h_flex().gap_2().children(
                                     [
@@ -3184,10 +3176,9 @@ impl NavidromeApp {
                             .items_center()
                             .gap_4()
                             .p_4()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().secondary.opacity(0.2))
+                            .border_t_1()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.72))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -3372,8 +3363,7 @@ impl NavidromeApp {
                 v_flex()
                     .rounded_lg()
                     .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().secondary.opacity(0.2))
+                    .border_color(cx.theme().border.opacity(0.72))
                     .overflow_hidden()
                     .children(
                         actions.iter().enumerate().map(|(index, action)| {
@@ -3476,8 +3466,7 @@ impl NavidromeApp {
         v_flex()
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().secondary.opacity(0.2))
+            .border_color(cx.theme().border.opacity(0.72))
             .overflow_hidden()
             .children(
                 ShortcutAction::GLOBAL_PLAYBACK
