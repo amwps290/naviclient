@@ -513,9 +513,10 @@ impl NavidromeApp {
                 Button::new("player-eq")
                     .icon(AppIcon::Eq)
                     .tooltip(t!("Equalizer"))
-                    .ghost()
+                    .custom(self.player_toggle_style(enabled, cx))
                     .with_size(px(30.0))
-                    .rounded_full(),
+                    .rounded_full()
+                    .toggled(enabled),
             )
             .content(move |_, _, popover_cx| {
                 // accent 是背景 token，做文字/进度色在亮色主题里几乎不可见。
@@ -5630,10 +5631,10 @@ impl NavidromeApp {
                             self.config.shortcuts.binding(ShortcutAction::ToggleQueue)
                         )
                     ))
-                    .ghost()
+                    .custom(self.player_toggle_style(queue_open, cx))
                     .with_size(px(30.0))
                     .rounded_full()
-                    .selected(queue_open)
+                    .toggled(queue_open)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.settings_open = false;
                         this.state.queue_drawer_open = !this.state.queue_drawer_open;

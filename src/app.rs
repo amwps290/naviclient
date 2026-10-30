@@ -3343,19 +3343,40 @@ impl NavidromeApp {
             }))
     }
 
+    /// 播放条模式开关的统一视觉语言：关闭时保持安静，开启时使用当前
+    /// 封面强调色。与播放按钮、进度条共用色源，避免默认灰色选中态
+    /// 让随机、循环、EQ 和队列看起来像普通悬停。
+    fn player_toggle_style(&self, active: bool, cx: &Context<Self>) -> ButtonCustomVariant {
+        let accent = self.now_playing_accent(cx);
+        if active {
+            ButtonCustomVariant::new(cx)
+                .color(accent.opacity(0.12))
+                .foreground(accent)
+                .hover(accent.opacity(0.18))
+                .active(accent.opacity(0.24))
+        } else {
+            ButtonCustomVariant::new(cx)
+                .color(cx.theme().transparent)
+                .foreground(cx.theme().muted_foreground)
+                .hover(accent.opacity(0.08))
+                .active(accent.opacity(0.14))
+        }
+    }
+
     /// 随机开关按钮：开启时高亮；与循环模式相互独立。
     fn shuffle_button(&self, cx: &Context<Self>) -> Button {
+        let active = self.state.playback_modes.shuffle;
         Button::new("player-shuffle")
             .icon(AppIcon::Shuffle)
-            .tooltip(if self.state.playback_modes.shuffle {
+            .tooltip(if active {
                 t!("Shuffle on")
             } else {
                 t!("Shuffle off")
             })
-            .ghost()
+            .custom(self.player_toggle_style(active, cx))
             .with_size(px(30.0))
             .rounded_full()
-            .selected(self.state.playback_modes.shuffle)
+            .toggled(active)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.toggle_shuffle(cx);
             }))
@@ -3372,10 +3393,10 @@ impl NavidromeApp {
                 AppIcon::Repeat
             })
             .tooltip(repeat.tooltip())
-            .ghost()
+            .custom(self.player_toggle_style(repeat != RepeatMode::Off, cx))
             .with_size(px(30.0))
             .rounded_full()
-            .selected(repeat != RepeatMode::Off)
+            .toggled(repeat != RepeatMode::Off)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.cycle_repeat(cx);
             }))
