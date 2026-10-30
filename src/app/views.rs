@@ -2351,7 +2351,42 @@ impl NavidromeApp {
     }
     /// 设置覆盖层：盖住侧边栏与内容区，点击背景或 Esc 关闭；
     /// 标题栏和底部播放条不被遮挡，改设置时也能控制播放。
-    pub(super) fn render_settings_overlay(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    pub(super) fn render_settings_overlay(
+        &self,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let settings_content = div()
+            .id("settings-content")
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.settings_scroll)
+            .vertical_scrollbar(&self.settings_scroll)
+            .when(compact, |this| this.px_5().py_4())
+            .when(!compact, |this| this.px_6().py_5())
+            .child(self.render_settings(cx));
+        let settings_body = if compact {
+            v_flex()
+                .id("settings-body")
+                .flex_1()
+                .min_h_0()
+                .items_stretch()
+                .child(self.render_settings_navigation(true, cx))
+                .child(settings_content)
+                .into_any_element()
+        } else {
+            h_flex()
+                .id("settings-body")
+                .flex_1()
+                .min_h_0()
+                .items_stretch()
+                .child(self.render_settings_navigation(false, cx))
+                .child(settings_content)
+                .into_any_element()
+        };
+
         div()
             .id("settings-backdrop")
             .absolute()
@@ -2375,9 +2410,9 @@ impl NavidromeApp {
                     .id("settings-card")
                     .w(px(960.0))
                     .h(px(650.0))
-                    .max_w(relative(0.94))
-                    .max_h(relative(0.88))
-                    .mt(px(48.0))
+                    .max_w(relative(if compact { 0.96 } else { 0.94 }))
+                    .max_h(relative(if compact { 0.94 } else { 0.88 }))
+                    .mt(px(if compact { 16.0 } else { 48.0 }))
                     .bg(cx.theme().background)
                     .border_1()
                     .border_color(cx.theme().border)
@@ -2391,8 +2426,8 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .flex_none()
-                            .px_5()
-                            .py_3()
+                            .when(compact, |this| this.px_4().py_2())
+                            .when(!compact, |this| this.px_5().py_3())
                             .justify_between()
                             .items_center()
                             .border_b_1()
@@ -2416,193 +2451,130 @@ impl NavidromeApp {
                                     })),
                             ),
                     )
-                    .child(
-                        h_flex()
-                            .id("settings-body")
-                            .flex_1()
-                            .min_h_0()
-                            .items_stretch()
-                            .child(self.render_settings_navigation(cx))
-                            .child(
-                                // 仅右侧内容区滚动，左侧分组导航始终可见。
-                                div()
-                                    .id("settings-content")
-                                    .flex_1()
-                                    .min_w_0()
-                                    .min_h_0()
-                                    .overflow_y_scroll()
-                                    .track_scroll(&self.settings_scroll)
-                                    .vertical_scrollbar(&self.settings_scroll)
-                                    .px_6()
-                                    .py_5()
-                                    .child(self.render_settings(cx)),
-                            ),
-                    ),
+                    .child(settings_body),
             )
             .into_any_element()
     }
 
-    fn render_settings_navigation(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        let selected = self.state.settings_section;
-        v_flex()
-            .w(px(184.0))
-            .flex_none()
-            .gap_1()
-            .p_3()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().secondary.opacity(0.25))
+    fn settings_navigation_button(
+        &self,
+        id: &'static str,
+        section: SettingsSection,
+        label: SharedString,
+        icon: AppIcon,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let selected = self.state.settings_section == section;
+        let button = Button::new(id)
+            .w_full()
+            .h(px(36.0))
+            .when(!compact, |this| this.justify_start())
+            .accessibility_label(label.clone())
             .child(
-                Button::new("settings-nav-servers")
+                h_flex()
                     .w_full()
-                    .h(px(36.0))
-                    .justify_start()
-                    .accessibility_label(t!("Servers"))
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .when(!compact, |this| this.justify_start())
                     .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_center()
-                                    .child(Icon::new(AppIcon::Server).with_size(px(16.0))),
-                            )
-                            .child(div().text_sm().child(t!("Servers"))),
+                        div()
+                            .w(px(20.0))
+                            .flex_none()
+                            .flex()
+                            .justify_center()
+                            .child(Icon::new(icon).with_size(px(16.0))),
                     )
-                    .ghost()
-                    .selected(selected == SettingsSection::Servers)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings_section = SettingsSection::Servers;
-                        this.cancel_shortcut_recording();
-                        this.settings_scroll.scroll_to_top_of_item(0);
-                        cx.notify();
-                    })),
+                    .child(div().min_w_0().text_sm().truncate().child(label)),
             )
-            .child(
-                Button::new("settings-nav-playback")
-                    .w_full()
-                    .h(px(36.0))
-                    .justify_start()
-                    .accessibility_label(t!("Playback"))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_center()
-                                    .child(Icon::new(AppIcon::VolumeHigh).with_size(px(16.0))),
-                            )
-                            .child(div().text_sm().child(t!("Playback"))),
-                    )
-                    .ghost()
-                    .selected(selected == SettingsSection::Playback)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings_section = SettingsSection::Playback;
-                        this.cancel_shortcut_recording();
-                        this.settings_scroll.scroll_to_top_of_item(0);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("settings-nav-desktop")
-                    .w_full()
-                    .h(px(36.0))
-                    .justify_start()
-                    .accessibility_label(t!("Desktop"))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_center()
-                                    .child(Icon::new(AppIcon::MiniPlayer).with_size(px(16.0))),
-                            )
-                            .child(div().text_sm().child(t!("Desktop"))),
-                    )
-                    .ghost()
-                    .selected(selected == SettingsSection::Desktop)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings_section = SettingsSection::Desktop;
-                        this.cancel_shortcut_recording();
-                        this.settings_scroll.scroll_to_top_of_item(0);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("settings-nav-appearance")
-                    .w_full()
-                    .h(px(36.0))
-                    .justify_start()
-                    .accessibility_label(t!("Appearance"))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_center()
-                                    .child(Icon::new(AppIcon::Settings).with_size(px(16.0))),
-                            )
-                            .child(div().text_sm().child(t!("Appearance"))),
-                    )
-                    .ghost()
-                    .selected(selected == SettingsSection::Appearance)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings_section = SettingsSection::Appearance;
-                        this.cancel_shortcut_recording();
-                        this.settings_scroll.scroll_to_top_of_item(0);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("settings-nav-shortcuts")
-                    .w_full()
-                    .h(px(36.0))
-                    .justify_start()
-                    .accessibility_label(t!("Shortcuts"))
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .justify_center()
-                                    .child(Icon::new(AppIcon::Keyboard).with_size(px(16.0))),
-                            )
-                            .child(div().text_sm().child(t!("Shortcuts"))),
-                    )
-                    .ghost()
-                    .selected(selected == SettingsSection::Shortcuts)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.cancel_shortcut_recording();
-                        this.state.settings_section = SettingsSection::Shortcuts;
-                        this.settings_scroll.scroll_to_top_of_item(0);
-                        cx.notify();
-                    })),
-            )
-            .into_any_element()
+            .ghost()
+            .selected(selected)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.cancel_shortcut_recording();
+                this.state.settings_section = section;
+                this.settings_scroll.scroll_to_top_of_item(0);
+                cx.notify();
+            }));
+
+        if compact {
+            div().flex_1().min_w_0().child(button).into_any_element()
+        } else {
+            button.into_any_element()
+        }
+    }
+
+    fn render_settings_navigation(
+        &self,
+        compact: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let buttons = vec![
+            self.settings_navigation_button(
+                "settings-nav-servers",
+                SettingsSection::Servers,
+                t!("Servers").into(),
+                AppIcon::Server,
+                compact,
+                cx,
+            ),
+            self.settings_navigation_button(
+                "settings-nav-playback",
+                SettingsSection::Playback,
+                t!("Playback").into(),
+                AppIcon::VolumeHigh,
+                compact,
+                cx,
+            ),
+            self.settings_navigation_button(
+                "settings-nav-desktop",
+                SettingsSection::Desktop,
+                t!("Desktop").into(),
+                AppIcon::MiniPlayer,
+                compact,
+                cx,
+            ),
+            self.settings_navigation_button(
+                "settings-nav-appearance",
+                SettingsSection::Appearance,
+                t!("Appearance").into(),
+                AppIcon::Settings,
+                compact,
+                cx,
+            ),
+            self.settings_navigation_button(
+                "settings-nav-shortcuts",
+                SettingsSection::Shortcuts,
+                t!("Shortcuts").into(),
+                AppIcon::Keyboard,
+                compact,
+                cx,
+            ),
+        ];
+
+        if compact {
+            h_flex()
+                .w_full()
+                .flex_none()
+                .gap_1()
+                .p_2()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().secondary.opacity(0.25))
+                .children(buttons)
+                .into_any_element()
+        } else {
+            v_flex()
+                .w(px(184.0))
+                .flex_none()
+                .gap_1()
+                .p_3()
+                .border_r_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().secondary.opacity(0.25))
+                .children(buttons)
+                .into_any_element()
+        }
     }
 
     pub(super) fn render_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {

@@ -3560,7 +3560,7 @@ impl Render for NavidromeApp {
                             this.child(self.render_queue_drawer(queue_drawer_width, true, cx))
                         })
                         .when(settings_open, |this| {
-                            this.child(self.render_settings_overlay(cx))
+                            this.child(self.render_settings_overlay(auto_collapsed_sidebar, cx))
                         }),
                 )
                 .child(self.render_player(window, cx))
@@ -3757,7 +3757,7 @@ impl Render for NavidromeApp {
                     })
                     // 设置为内容区覆盖层：点击背景关闭，标题栏与播放条保持可操作。
                     .when(settings_open, |row| {
-                        row.child(self.render_settings_overlay(cx))
+                        row.child(self.render_settings_overlay(auto_collapsed_sidebar, cx))
                     }),
             )
             .child(self.render_player(window, cx))
