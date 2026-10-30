@@ -176,6 +176,8 @@ struct AppState {
     pending_play_album: bool,
     queue: Vec<Song>,
     queue_index: Option<usize>,
+    /// 右侧 Up Next 抽屉；不再用独立页面替换当前浏览上下文。
+    queue_drawer_open: bool,
     now_playing: Option<Song>,
     now_playing_quality: Option<TranscodingQuality>,
     lyrics: Option<Lyrics>,
@@ -277,6 +279,7 @@ impl Default for AppState {
             pending_play_album: false,
             queue: Vec::new(),
             queue_index: None,
+            queue_drawer_open: false,
             now_playing: None,
             now_playing_quality: None,
             lyrics: None,
@@ -1378,14 +1381,7 @@ impl NavidromeApp {
                 cx.notify();
             }
             ShortcutAction::ToggleQueue => {
-                if self.state.view == View::Queue {
-                    self.state.view = self.state.view_before_now_playing;
-                } else {
-                    if self.state.view != View::NowPlaying {
-                        self.state.view_before_now_playing = self.state.view;
-                    }
-                    self.state.view = View::Queue;
-                }
+                self.state.queue_drawer_open = !self.state.queue_drawer_open;
                 cx.notify();
             }
             ShortcutAction::CloseOverlays => {
@@ -1394,6 +1390,9 @@ impl NavidromeApp {
                     self.clear_song_multi();
                 } else if self.state.settings_open {
                     self.state.settings_open = false;
+                } else if self.state.queue_drawer_open {
+                    self.state.queue_drawer_open = false;
+                    self.clear_song_multi();
                 } else if self.state.view == View::NowPlaying {
                     self.leave_now_playing();
                 } else if matches!(
@@ -3458,6 +3457,7 @@ impl Render for NavidromeApp {
         // 内容和播放器；用户保存的展开偏好在窗口恢复宽度后自动回来。
         let auto_collapsed_sidebar = compact_window_layout(viewport_width);
         let sidebar_collapsed = self.config.sidebar_collapsed || auto_collapsed_sidebar;
+        let queue_drawer_width = if auto_collapsed_sidebar { 320.0 } else { 380.0 };
 
         if self.state.view == View::NowPlaying {
             let (cover_base, cover_accent) = self.now_playing_palette(cx);
@@ -3556,6 +3556,9 @@ impl Render for NavidromeApp {
                         .min_h_0()
                         .overflow_hidden()
                         .child(self.render_now_playing(window, cx))
+                        .when(self.state.queue_drawer_open, |this| {
+                            this.child(self.render_queue_drawer(queue_drawer_width, true, cx))
+                        })
                         .when(settings_open, |this| {
                             this.child(self.render_settings_overlay(cx))
                         }),
@@ -3747,6 +3750,11 @@ impl Render for NavidromeApp {
                             .when(!compact_window_layout(viewport_width), |this| this.p_6())
                             .child(self.render_content(window, cx)),
                     )
+                    .when(self.state.queue_drawer_open, |row| {
+                        // 普通浏览页使用真正的分栏，让专辑网格和歌曲列表
+                        // 获得抽屉打开后的实际宽度并自然重排，而不是被覆盖裁切。
+                        row.child(self.render_queue_drawer(queue_drawer_width, false, cx))
+                    })
                     // 设置为内容区覆盖层：点击背景关闭，标题栏与播放条保持可操作。
                     .when(settings_open, |row| {
                         row.child(self.render_settings_overlay(cx))

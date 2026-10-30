@@ -56,7 +56,6 @@ pub(super) enum View {
     AlbumDetail,
     PlaylistDetail,
     NowPlaying,
-    Queue,
 }
 
 impl View {
@@ -72,7 +71,6 @@ impl View {
             Self::Playlists | Self::PlaylistDetail => "playlists",
             Self::Search => "search",
             Self::NowPlaying => "now-playing",
-            Self::Queue => "queue",
         }
     }
 }

@@ -65,10 +65,12 @@ impl NavidromeApp {
     /// 歌曲列表滚动时按需加载可见行的封面。
     /// 当前页面主歌曲列表对应的作用域；无列表页面返回 None。
     pub(super) fn active_song_list_scope(&self) -> Option<&'static str> {
+        if self.state.queue_drawer_open {
+            return Some("queue");
+        }
         match self.state.view {
             View::AlbumDetail => Some("album-detail"),
             View::PlaylistDetail => Some("playlist-detail"),
-            View::Queue => Some("queue"),
             View::Favorites => Some("favorites"),
             View::Search => Some("search"),
             _ => None,

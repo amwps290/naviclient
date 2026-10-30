@@ -55,6 +55,8 @@ JavaScript runtime.
   waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
+- Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
+  position stay intact while the queue is inspected or edited
 - Import playlists from NetEase Cloud Music or QQ Music: paste a direct link,
   mobile share link, official short link, or full share message. Public playlist
   metadata is fetched without a third-party login or audio streams, with source

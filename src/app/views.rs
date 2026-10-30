@@ -1186,7 +1186,8 @@ impl NavidromeApp {
         }
         let handle = self.song_list_scroll(scope);
         let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
-        let compact_columns = compact_song_columns(list_width);
+        let queue_drawer = scope == "queue" && self.state.queue_drawer_open;
+        let compact_columns = queue_drawer || compact_song_columns(list_width);
         // 专辑 / 播放列表详情和队列页中表格占满剩余高度（表头固定，列表内部滚动）；
         // 收藏与搜索页的歌曲表格与其他分区共存，限制高度独立滚动。
         let fill = matches!(scope, "album-detail" | "playlist-detail" | "queue");
@@ -1222,47 +1223,49 @@ impl NavidromeApp {
         v_flex()
             .relative()
             .w_full()
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded_lg()
             .overflow_hidden()
+            .when(!queue_drawer, |this| {
+                this.border_1().border_color(cx.theme().border).rounded_lg()
+            })
             .when(fill, |this| this.flex_1().min_h_0())
             .when(self.multi_selection_count(scope) > 0, |this| {
                 this.child(self.render_multi_action_bar(scope, cx))
             })
-            .child(
-                h_flex()
-                    .h(px(36.0))
-                    .flex_none()
-                    .px_3()
-                    .gap_3()
-                    .bg(cx.theme().secondary)
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(div().w(px(28.0)))
-                    .child(div().w(px(42.0)))
-                    .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
-                    .when(!compact_columns, |this| {
-                        this.child(
+            .when(!queue_drawer, |this| {
+                this.child(
+                    h_flex()
+                        .h(px(36.0))
+                        .flex_none()
+                        .px_3()
+                        .gap_3()
+                        .bg(cx.theme().secondary)
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(div().w(px(28.0)))
+                        .child(div().w(px(42.0)))
+                        .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
+                        .when(!compact_columns, |this| {
+                            this.child(
+                                div()
+                                    .flex_1()
+                                    .flex_grow(2.0)
+                                    .max_w(px(180.0))
+                                    .child(t!("Artist")),
+                            )
+                        })
+                        .child(
                             div()
-                                .flex_1()
-                                .flex_grow(2.0)
-                                .max_w(px(180.0))
-                                .child(t!("Artist")),
+                                .w(px(if compact_columns { 48.0 } else { 64.0 }))
+                                .text_right()
+                                .child(t!("Time")),
                         )
-                    })
-                    .child(
-                        div()
-                            .w(px(if compact_columns { 48.0 } else { 64.0 }))
-                            .text_right()
-                            .child(t!("Time")),
-                    )
-                    .child(div().w(px(match (editable, compact_columns) {
-                        (true, true) | (false, true) => 60.0,
-                        (true, false) => 124.0,
-                        (false, false) => 100.0,
-                    }))),
-            )
+                        .child(div().w(px(match (editable, compact_columns) {
+                            (true, true) | (false, true) => 60.0,
+                            (true, false) => 124.0,
+                            (false, false) => 100.0,
+                        }))),
+                )
+            })
             .child(list)
             .child(Scrollbar::vertical(&handle))
             .into_any_element()
@@ -1501,6 +1504,7 @@ impl NavidromeApp {
         playback: &PlaybackState,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let queue_drawer = scope == "queue" && self.state.queue_drawer_open;
         let Some(song) = self.song_for_scope(scope, index) else {
             return div().into_any_element();
         };
@@ -1528,9 +1532,9 @@ impl NavidromeApp {
         let row = h_flex()
             .id(SharedString::from(key.clone()))
             .w_full()
-            .h(px(60.0))
+            .h(px(if queue_drawer { 64.0 } else { 60.0 }))
             .px_3()
-            .gap_3()
+            .gap(if queue_drawer { px(8.0) } else { px(12.0) })
             .relative()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
@@ -1572,6 +1576,8 @@ impl NavidromeApp {
                         .text_color(row_accent_foreground),
                 )
                 .into_any_element()
+        } else if queue_drawer && current {
+            self.render_playing_indicator(&key, true, animated, cx)
         } else {
             div()
                 .w_full()
@@ -1592,7 +1598,7 @@ impl NavidromeApp {
         };
         row.child(
             div()
-                .w(px(28.0))
+                .w(px(if queue_drawer { 20.0 } else { 28.0 }))
                 .h_full()
                 .flex_none()
                 .flex()
@@ -1629,7 +1635,9 @@ impl NavidromeApp {
                 } else {
                     cx.theme().foreground
                 })
-                .child(self.render_playing_indicator(&key, current, animated, cx))
+                .when(!queue_drawer, |this| {
+                    this.child(self.render_playing_indicator(&key, current, animated, cx))
+                })
                 .child(
                     v_flex()
                         .flex_1()
@@ -1648,12 +1656,21 @@ impl NavidromeApp {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .line_height(rems(1.2))
-                                .child(self.song_album_link(
-                                    SharedString::from(format!("song-row-album-{key}")),
-                                    album,
-                                    song,
-                                    cx,
-                                )),
+                                .when(queue_drawer, |this| {
+                                    this.child(self.song_artist_link(
+                                        SharedString::from(format!("song-row-artist-{key}")),
+                                        song,
+                                        cx,
+                                    ))
+                                })
+                                .when(!queue_drawer, |this| {
+                                    this.child(self.song_album_link(
+                                        SharedString::from(format!("song-row-album-{key}")),
+                                        album,
+                                        song,
+                                        cx,
+                                    ))
+                                }),
                         ),
                 ),
         )
@@ -1675,7 +1692,13 @@ impl NavidromeApp {
         })
         .child(
             div()
-                .w(px(if compact_columns { 48.0 } else { 64.0 }))
+                .w(px(if queue_drawer {
+                    40.0
+                } else if compact_columns {
+                    48.0
+                } else {
+                    64.0
+                }))
                 .text_sm()
                 .text_right()
                 .text_color(cx.theme().muted_foreground)
@@ -3906,7 +3929,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> Option<gpui_kit::AnyElement> {
         let compact = compact_window_layout(f32::from(window.viewport_size().width));
-        let art_size = if compact { 104.0 } else { 136.0 };
+        let art_size = if compact { 96.0 } else { 136.0 };
         let feature_height = if compact { 144.0 } else { 176.0 };
 
         if let Some(song) = &self.state.now_playing {
@@ -3924,8 +3947,8 @@ impl NavidromeApp {
                     .id("home-continue-listening")
                     .w_full()
                     .h(px(feature_height))
-                    .p_5()
-                    .gap_5()
+                    .when(compact, |this| this.p_4().gap_4())
+                    .when(!compact, |this| this.p_5().gap_5())
                     .items_center()
                     .rounded_lg()
                     .bg(linear_gradient(
@@ -3948,7 +3971,8 @@ impl NavidromeApp {
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_2()
+                            .when(compact, |this| this.gap_1())
+                            .when(!compact, |this| this.gap_2())
                             .child(
                                 div()
                                     .text_sm()
@@ -3958,7 +3982,8 @@ impl NavidromeApp {
                             )
                             .child(
                                 div()
-                                    .text_2xl()
+                                    .when(compact, |this| this.text_xl())
+                                    .when(!compact, |this| this.text_2xl())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .truncate()
                                     .child(song.title.clone()),
@@ -3976,8 +4001,8 @@ impl NavidromeApp {
                             )
                             .child(
                                 h_flex()
-                                    .pt_2()
-                                    .gap_2()
+                                    .when(compact, |this| this.pt_1().gap_1())
+                                    .when(!compact, |this| this.pt_2().gap_2())
                                     .child(
                                         Button::new("home-feature-playback")
                                             .label(if is_playing {
@@ -4027,8 +4052,8 @@ impl NavidromeApp {
                 .id("home-recent-feature")
                 .w_full()
                 .h(px(feature_height))
-                .p_5()
-                .gap_5()
+                .when(compact, |this| this.p_4().gap_4())
+                .when(!compact, |this| this.p_5().gap_5())
                 .items_center()
                 .rounded_lg()
                 .bg(linear_gradient(
@@ -4051,7 +4076,8 @@ impl NavidromeApp {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap_2()
+                        .when(compact, |this| this.gap_1())
+                        .when(!compact, |this| this.gap_2())
                         .child(
                             div()
                                 .text_sm()
@@ -4061,7 +4087,8 @@ impl NavidromeApp {
                         )
                         .child(
                             div()
-                                .text_2xl()
+                                .when(compact, |this| this.text_xl())
+                                .when(!compact, |this| this.text_2xl())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(album.name.clone()),
@@ -4075,8 +4102,8 @@ impl NavidromeApp {
                         )
                         .child(
                             h_flex()
-                                .pt_2()
-                                .gap_2()
+                                .when(compact, |this| this.pt_1().gap_1())
+                                .when(!compact, |this| this.pt_2().gap_2())
                                 .child(
                                     Button::new("home-feature-play-album")
                                         .label(t!("Play album"))
@@ -4229,6 +4256,172 @@ impl NavidromeApp {
                 ),
                 cx,
             ))
+            .into_any_element()
+    }
+
+    pub(super) fn render_queue_drawer(
+        &self,
+        width: f32,
+        overlay: bool,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let accent = self.now_playing_accent(cx);
+        let play_all_style = ButtonCustomVariant::new(cx)
+            .color(accent)
+            .foreground(accent_foreground(accent))
+            .hover(adjust_lightness(accent, 0.05))
+            .active(adjust_lightness(accent, -0.05));
+
+        v_flex()
+            .id("queue-drawer")
+            .w(px(width))
+            .min_w_0()
+            .flex_none()
+            .when(overlay, |this| this.absolute().top_0().right_0().bottom_0())
+            .when(!overlay, |this| this.h_full())
+            .occlude()
+            .bg(cx.theme().background)
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .h(px(56.0))
+                    .flex_none()
+                    .px_4()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        v_flex()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_base()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(t!("Up next")),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("%{count} tracks", count = self.state.queue.len())),
+                            ),
+                    )
+                    .child(
+                        Button::new("close-queue-drawer")
+                            .icon(AppIcon::Close)
+                            .tooltip(t!("Close"))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.state.queue_drawer_open = false;
+                                this.clear_song_multi();
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .when(self.state.queue.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .px_6()
+                        .gap_2()
+                        .text_center()
+                        .child(
+                            Icon::new(AppIcon::Queue)
+                                .with_size(px(28.0))
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(t!("Queue is empty")),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("Start playing an album or playlist to build a queue.")),
+                        ),
+                )
+            })
+            .when(!self.state.queue.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .px_3()
+                        .py_2()
+                        .gap_1()
+                        .bg(cx.theme().secondary.opacity(0.18))
+                        .border_b_1()
+                        .border_color(cx.theme().border.opacity(0.7))
+                        .child(
+                            Button::new("drawer-queue-play-all")
+                                .icon(PlayerIcon::Play)
+                                .label(t!("Play all"))
+                                .tooltip(t!("Play all"))
+                                .custom(play_all_style)
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    let songs = this.state.queue.clone();
+                                    if !songs.is_empty() {
+                                        this.play_song_list(&songs, 0);
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("drawer-queue-clear-after")
+                                .label(t!("Clear after current"))
+                                .tooltip(t!("Clear after current"))
+                                .ghost()
+                                .small()
+                                .disabled(self.state.queue_index.is_none())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.clear_queue_after_current();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("drawer-save-queue-playlist")
+                                .icon(AppIcon::Playlists)
+                                .tooltip(t!("Save as playlist"))
+                                .ghost()
+                                .small()
+                                .disabled(self.playlist_ui.busy || self.api.is_none())
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.name_playlist(
+                                        None,
+                                        crate::playlist::song_ids(&this.state.queue),
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("drawer-queue-clear-all")
+                                .icon(AppIcon::Trash)
+                                .tooltip(t!("Clear queue"))
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.clear_queue();
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.render_song_list("queue", true, cx)),
+                )
+            })
             .into_any_element()
     }
 
@@ -4971,90 +5164,6 @@ impl NavidromeApp {
                     .into_any_element()
             }
             View::NowPlaying => self.render_now_playing(window, cx),
-            View::Queue => v_flex()
-                .h_full()
-                .min_h_0()
-                .gap_5()
-                .child(
-                    self.page_header(
-                        t!("Queue"),
-                        t!(
-                            "%{count} tracks in the current queue",
-                            count = self.state.queue.len()
-                        )
-                        .to_string(),
-                        cx,
-                    ),
-                )
-                .when(self.state.queue.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .py_8()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t!("Start playing an album or playlist to build a queue.")),
-                    )
-                })
-                .when(!self.state.queue.is_empty(), |this| {
-                    this.child(
-                        h_flex()
-                            .gap_2()
-                            .flex_wrap()
-                            .child(
-                                Button::new("queue-play-all")
-                                    .icon(PlayerIcon::Play)
-                                    .label(t!("Play all"))
-                                    .small()
-                                    .info()
-                                    .outline()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        let songs = this.state.queue.clone();
-                                        if !songs.is_empty() {
-                                            this.play_song_list(&songs, 0);
-                                        }
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("queue-clear-after")
-                                    .label(t!("Clear after current"))
-                                    .small()
-                                    .outline()
-                                    .disabled(self.state.queue_index.is_none())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.clear_queue_after_current();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("save-queue-playlist")
-                                    .label(t!("Save as playlist"))
-                                    .small()
-                                    .outline()
-                                    .disabled(self.playlist_ui.busy || self.api.is_none())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.name_playlist(
-                                            None,
-                                            crate::playlist::song_ids(&this.state.queue),
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new("queue-clear-all")
-                                    .icon(AppIcon::Close)
-                                    .label(t!("Clear queue"))
-                                    .small()
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.clear_queue();
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(self.render_song_list("queue", true, cx))
-                })
-                .into_any_element(),
         }
     }
 
@@ -5375,7 +5484,7 @@ impl NavidromeApp {
         } else {
             (playback.buffered.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
         };
-        let queue_open = self.state.view == View::Queue;
+        let queue_open = self.state.queue_drawer_open;
         let viewport_width = f32::from(window.viewport_size().width);
         let compact_player = compact_window_layout(viewport_width);
         let song_info_width = if compact_player { 200.0 } else { 260.0 };
@@ -5555,7 +5664,10 @@ impl NavidromeApp {
                     .selected(queue_open)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.settings_open = false;
-                        this.state.view = View::Queue;
+                        this.state.queue_drawer_open = !this.state.queue_drawer_open;
+                        if !this.state.queue_drawer_open {
+                            this.clear_song_multi();
+                        }
                         cx.notify();
                     })),
             )
