@@ -1183,7 +1183,34 @@ impl NavidromeApp {
             return div().into_any_element();
         };
         if songs.is_empty() {
-            return div().into_any_element();
+            return v_flex()
+                .w_full()
+                .flex_1()
+                .min_h(px(180.0))
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .px_6()
+                .text_center()
+                .child(
+                    Icon::new(AppIcon::Playlists)
+                        .with_size(px(28.0))
+                        .text_color(cx.theme().muted_foreground.opacity(0.72)),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(t!("No tracks here yet")),
+                )
+                .child(
+                    div()
+                        .max_w(px(360.0))
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("Tracks will appear here when they are available.")),
+                )
+                .into_any_element();
         }
         let handle = self.song_list_scroll(scope);
         let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
@@ -1225,9 +1252,6 @@ impl NavidromeApp {
             .relative()
             .w_full()
             .overflow_hidden()
-            .when(!queue_drawer, |this| {
-                this.border_1().border_color(cx.theme().border).rounded_lg()
-            })
             .when(fill, |this| this.flex_1().min_h_0())
             .when(self.multi_selection_count(scope) > 0, |this| {
                 this.child(self.render_multi_action_bar(scope, cx))
@@ -1239,8 +1263,11 @@ impl NavidromeApp {
                         .flex_none()
                         .px_3()
                         .gap_3()
-                        .bg(cx.theme().secondary)
+                        .border_b_1()
+                        .border_color(cx.theme().border.opacity(0.72))
+                        .bg(cx.theme().secondary.opacity(0.14))
                         .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
                         .text_color(cx.theme().muted_foreground)
                         .child(div().w(px(28.0)))
                         .child(div().w(px(42.0)))
@@ -1527,20 +1554,6 @@ impl NavidromeApp {
         } else {
             song.album.clone()
         };
-        // uniform_list 把每行当作独立根元素布局（Definite 可用宽度），
-        // 不会像普通容器那样横向拉伸，必须显式 w_full：否则行宽收缩为
-        // 内容宽度，行尾按钮、悬停/正在播放高亮都无法纵向对齐。
-        let row = h_flex()
-            .id(SharedString::from(key.clone()))
-            .w_full()
-            .h(px(if queue_drawer { 64.0 } else { 60.0 }))
-            .px_3()
-            .gap(if queue_drawer { px(8.0) } else { px(12.0) })
-            .relative()
-            .border_t_1()
-            .border_color(cx.theme().border.opacity(0.6))
-            .hover(|style| style.bg(row_accent.opacity(0.08)))
-            .cursor_pointer();
         let keyboard_selected =
             self.state
                 .song_list_selected
@@ -1552,6 +1565,34 @@ impl NavidromeApp {
             .song_list_multi
             .as_ref()
             .is_some_and(|multi| multi.scope == scope && multi.indices.contains(&index));
+        // 普通悬浮只使用主题的中性列表表面；主题色保留给多选、键盘
+        // 光标和正在播放等有明确含义的状态。已带状态的行悬浮时只略微
+        // 加深原有底色，避免鼠标经过反而削弱选中反馈。
+        let hover_background = if multi_selected {
+            row_accent.opacity(0.2)
+        } else if keyboard_selected {
+            row_accent.opacity(0.13)
+        } else if current {
+            row_accent.opacity(0.1)
+        } else {
+            cx.theme().list_hover
+        };
+        // uniform_list 把每行当作独立根元素布局（Definite 可用宽度），
+        // 不会像普通容器那样横向拉伸，必须显式 w_full：否则行宽收缩为
+        // 内容宽度，行尾按钮、悬停/正在播放高亮都无法纵向对齐。
+        let row = h_flex()
+            .id(SharedString::from(key.clone()))
+            .w_full()
+            .h(px(if queue_drawer { 64.0 } else { 60.0 }))
+            .px_3()
+            .gap(if queue_drawer { px(8.0) } else { px(12.0) })
+            .relative()
+            .when(index > 0, |this| {
+                this.border_t_1()
+                    .border_color(cx.theme().border.opacity(0.52))
+            })
+            .hover(move |style| style.bg(hover_background))
+            .cursor_pointer();
         // 高亮优先级：多选 > 列表光标 > 正在播放。列表选择继承当前
         // 封面强调色，让媒体库与正在播放页使用同一种音乐氛围。
         let row = if multi_selected {
@@ -1615,15 +1656,7 @@ impl NavidromeApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded_lg()
-                .border_1()
-                .border_color(if current {
-                    row_accent.opacity(0.42)
-                } else {
-                    cx.theme().border.opacity(0.7)
-                })
-                .bg(cx.theme().background)
-                .child(self.render_cover(song.cover_art.as_deref(), 36.0, cx)),
+                .child(self.render_cover(song.cover_art.as_deref(), 40.0, cx)),
         )
         .child(
             h_flex()
@@ -3843,27 +3876,32 @@ impl NavidromeApp {
             .gap_3()
             .child(
                 h_flex()
-                    .gap_2()
+                    .w_full()
+                    .h(px(38.0))
                     .items_center()
+                    .justify_between()
                     .cursor_pointer()
                     .id(SharedString::from(format!("home-section-{id}")))
+                    .border_b_1()
+                    .border_color(cx.theme().border.opacity(0.68))
+                    .hover(|style| style.text_color(cx.theme().primary))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_home_section(id, cx);
                     }))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title.clone()),
+                    )
                     .child(
                         Icon::new(if collapsed {
                             AppIcon::ChevronRight
                         } else {
                             AppIcon::ChevronDown
                         })
-                        .size(px(16.0))
+                        .size(px(15.0))
                         .text_color(cx.theme().muted_foreground),
-                    )
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(title.clone()),
                     ),
             )
             .when(!collapsed, |this| this.child(content))
@@ -4133,10 +4171,25 @@ impl NavidromeApp {
         if albums.is_empty() && loading {
             self.render_album_skeleton_grid(cx)
         } else if albums.is_empty() {
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(empty_text)
+            v_flex()
+                .w_full()
+                .min_h(px(132.0))
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_center()
+                .child(
+                    Icon::new(AppIcon::Albums)
+                        .with_size(px(28.0))
+                        .text_color(cx.theme().muted_foreground.opacity(0.72)),
+                )
+                .child(
+                    div()
+                        .max_w(px(420.0))
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(empty_text),
+                )
                 .into_any_element()
         } else {
             self.render_album_grid(scope, albums, cx, window)
@@ -4239,6 +4292,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let accent = self.now_playing_accent(cx);
+        let compact = width <= 340.0;
         let play_all_style = ButtonCustomVariant::new(cx)
             .color(accent)
             .foreground(accent_foreground(accent))
@@ -4326,9 +4380,10 @@ impl NavidromeApp {
                 this.child(
                     h_flex()
                         .flex_none()
-                        .px_3()
+                        .when(compact, |this| this.px_2())
+                        .when(!compact, |this| this.px_3())
                         .py_2()
-                        .gap_1()
+                        .gap_0p5()
                         .bg(cx.theme().secondary.opacity(0.18))
                         .border_b_1()
                         .border_color(cx.theme().border.opacity(0.7))
@@ -4349,7 +4404,11 @@ impl NavidromeApp {
                         )
                         .child(
                             Button::new("drawer-queue-clear-after")
-                                .label(t!("Clear after current"))
+                                .label(if compact {
+                                    t!("Clear after")
+                                } else {
+                                    t!("Clear after current")
+                                })
                                 .tooltip(t!("Clear after current"))
                                 .ghost()
                                 .small()
