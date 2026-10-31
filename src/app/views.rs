@@ -1906,7 +1906,7 @@ impl NavidromeApp {
                 Some(server) => t!(
                     "Connected · %{app} %{version}",
                     app = server.app_name.as_deref().unwrap_or("Navidrome"),
-                    version = server.version
+                    version = server.display_version()
                 )
                 .to_string(),
                 None => t!("Connected").to_string(),
@@ -1927,6 +1927,41 @@ impl NavidromeApp {
         } else {
             cx.theme().muted_foreground
         };
+        let (protocol_note, extension_note) = self
+            .state
+            .server
+            .as_ref()
+            .map(|server| {
+                let protocol = if server.open_subsonic {
+                    t!(
+                        "OpenSubsonic %{version} · %{count} extensions",
+                        version = server.protocol_version,
+                        count = server.extensions.len()
+                    )
+                    .to_string()
+                } else {
+                    t!(
+                        "Subsonic %{version} · compatibility mode",
+                        version = server.protocol_version
+                    )
+                    .to_string()
+                };
+                let discovery_ready = server.supports_extension("sonicSimilarity", 1)
+                    || server.supports_extension("topSongsByArtistId", 1);
+                let extensions = server.extension_summary(6).map(|extensions| {
+                    if discovery_ready {
+                        t!(
+                            "Smart discovery available · %{extensions}",
+                            extensions = extensions
+                        )
+                        .to_string()
+                    } else {
+                        t!("Capabilities: %{extensions}", extensions = extensions).to_string()
+                    }
+                });
+                (Some(protocol), extensions)
+            })
+            .unwrap_or((None, None));
         // 表单目标：行内铅笔打开的条目；没有显式目标时，尚未配置的
         // 激活条目（首次运行、刚新增）也直接展示表单——那时表单就是
         // 主任务。已配置的服务器默认不铺任何表单，编辑入口在每行里。
@@ -1997,7 +2032,25 @@ impl NavidromeApp {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(credential_note),
-                            ),
+                            )
+                            .when_some(protocol_note, |this, note| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(note),
+                                )
+                            })
+                            .when_some(extension_note, |this, note| {
+                                this.child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(note),
+                                )
+                            }),
                     ),
             );
         // ---- 下：编辑表单（仅在行内铅笔点开或条目未配置时存在） ----

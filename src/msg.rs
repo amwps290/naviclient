@@ -18,6 +18,10 @@ pub struct DecodedCover {
 #[derive(Debug)]
 pub enum Msg {
     Ping(Result<ServerInfo, String>),
+    OpenSubsonicInfo {
+        base_url: String,
+        result: Result<ServerInfo, String>,
+    },
     Artists(Result<Vec<Artist>, String>),
     ArtistAlbums {
         artist_id: String,

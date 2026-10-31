@@ -375,10 +375,86 @@ pub struct LyricLine {
     pub translation: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenSubsonicExtension {
+    pub name: String,
+    pub versions: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ServerInfo {
-    pub version: String,
+    /// 服务端实现名称，例如 Navidrome、gonic 或 Ampache。
     pub app_name: Option<String>,
+    /// 服务端自身版本；旧服务端可能只返回协议版本。
+    pub server_version: Option<String>,
+    /// 服务端声明的 Subsonic/OpenSubsonic 协议版本。
+    pub protocol_version: String,
+    pub open_subsonic: bool,
+    pub extensions: Vec<OpenSubsonicExtension>,
+}
+
+impl ServerInfo {
+    pub fn display_version(&self) -> &str {
+        self.server_version
+            .as_deref()
+            .unwrap_or(self.protocol_version.as_str())
+    }
+
+    pub fn supports_extension(&self, name: &str, minimum_version: u32) -> bool {
+        self.extensions.iter().any(|extension| {
+            extension.name.eq_ignore_ascii_case(name)
+                && extension
+                    .versions
+                    .iter()
+                    .any(|version| *version >= minimum_version)
+        })
+    }
+
+    pub fn merge_open_subsonic_info(&mut self, discovered: ServerInfo) {
+        if discovered.app_name.is_some() {
+            self.app_name = discovered.app_name;
+        }
+        if discovered.server_version.is_some() {
+            self.server_version = discovered.server_version;
+        }
+        if discovered.protocol_version != "unknown" {
+            self.protocol_version = discovered.protocol_version;
+        }
+        self.open_subsonic = discovered.open_subsonic;
+        self.extensions = discovered.extensions;
+    }
+
+    pub fn extension_summary(&self, limit: usize) -> Option<String> {
+        if self.extensions.is_empty() || limit == 0 {
+            return None;
+        }
+        let mut labels = self
+            .extensions
+            .iter()
+            .take(limit)
+            .map(|extension| {
+                if extension.versions.is_empty() {
+                    extension.name.clone()
+                } else {
+                    format!(
+                        "{} v{}",
+                        extension.name,
+                        extension
+                            .versions
+                            .iter()
+                            .map(u32::to_string)
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    )
+                }
+            })
+            .collect::<Vec<_>>();
+        let remaining = self.extensions.len().saturating_sub(labels.len());
+        if remaining > 0 {
+            labels.push(format!("+{remaining}"));
+        }
+        Some(labels.join(", "))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

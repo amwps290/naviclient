@@ -1,4 +1,5 @@
 use rust_i18n::t;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +15,7 @@ mod playlist_tests;
 
 use crate::models::{
     Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics,
-    Playlist, SearchResults, ServerInfo, Song,
+    OpenSubsonicExtension, Playlist, SearchResults, ServerInfo, Song,
 };
 
 #[derive(Clone)]
@@ -142,14 +143,16 @@ impl Api {
 
     pub async fn ping(&self) -> Result<ServerInfo> {
         let body = self.get_json("ping", &[]).await?;
-        Ok(ServerInfo {
-            version: body
-                .get("version")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_string(),
-            app_name: body.get("app").and_then(Value::as_str).map(str::to_string),
-        })
+        Ok(parse_server_info(&body))
+    }
+
+    /// Probe OpenSubsonic extensions separately from `ping`: capability
+    /// discovery must never delay a usable legacy Subsonic connection.
+    pub async fn open_subsonic_info(&self) -> Result<ServerInfo> {
+        let body = self.get_json("getOpenSubsonicExtensions", &[]).await?;
+        let mut info = parse_server_info(&body);
+        merge_open_subsonic_capabilities(&mut info, &body);
+        Ok(info)
     }
 
     pub async fn artists(&self) -> Result<Vec<Artist>> {
@@ -460,6 +463,87 @@ impl Api {
     }
 }
 
+fn parse_server_info(body: &Value) -> ServerInfo {
+    ServerInfo {
+        app_name: body
+            .get("type")
+            .or_else(|| body.get("app"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        server_version: body
+            .get("serverVersion")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        protocol_version: body
+            .get("version")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        open_subsonic: body
+            .get("openSubsonic")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        extensions: Vec::new(),
+    }
+}
+
+fn merge_open_subsonic_capabilities(info: &mut ServerInfo, body: &Value) {
+    if let Some(name) = body
+        .get("type")
+        .or_else(|| body.get("app"))
+        .and_then(Value::as_str)
+    {
+        info.app_name = Some(name.to_string());
+    }
+    if let Some(version) = body.get("serverVersion").and_then(Value::as_str) {
+        info.server_version = Some(version.to_string());
+    }
+    if let Some(version) = body.get("version").and_then(Value::as_str) {
+        info.protocol_version = version.to_string();
+    }
+
+    // A successful response from this OpenSubsonic-only endpoint is itself a
+    // capability signal, including for servers that omit `openSubsonic=true`.
+    info.open_subsonic = true;
+    info.extensions = parse_open_subsonic_extensions(body);
+}
+
+fn parse_open_subsonic_extensions(body: &Value) -> Vec<OpenSubsonicExtension> {
+    let mut extensions: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for extension in body
+        .get("openSubsonicExtensions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(name) = extension.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if name.trim().is_empty() {
+            continue;
+        }
+        let versions = extensions.entry(name.to_string()).or_default();
+        for version in extension
+            .get("versions")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_u64)
+            .filter_map(|version| u32::try_from(version).ok())
+        {
+            versions.insert(version);
+        }
+    }
+
+    extensions
+        .into_iter()
+        .map(|(name, versions)| OpenSubsonicExtension {
+            name,
+            versions: versions.into_iter().collect(),
+        })
+        .collect()
+}
+
 fn favorite_param(kind: FavoriteKind) -> &'static str {
     match kind {
         FavoriteKind::Artist => "artistId",
@@ -741,6 +825,67 @@ mod tests {
         assert_eq!(params["f"], "json");
         assert_eq!(params["t"].len(), 32);
         assert_eq!(params["s"].len(), 16);
+    }
+
+    #[test]
+    fn parses_server_identity_and_open_subsonic_extensions() {
+        let ping = serde_json::json!({
+            "status": "ok",
+            "version": "1.16.1",
+            "type": "ExampleSonic",
+            "serverVersion": "2.4.0",
+            "openSubsonic": true
+        });
+        let mut info = parse_server_info(&ping);
+        let capabilities = serde_json::json!({
+            "status": "ok",
+            "version": "1.16.1",
+            "type": "ExampleSonic",
+            "serverVersion": "2.4.1",
+            "openSubsonicExtensions": [
+                {"name": "sonicSimilarity", "versions": [1]},
+                {"name": "songLyrics", "versions": [2, 1]},
+                {"name": "songLyrics", "versions": [2]},
+                {"name": "", "versions": [1]},
+                {"versions": [1]}
+            ]
+        });
+
+        merge_open_subsonic_capabilities(&mut info, &capabilities);
+
+        assert_eq!(info.app_name.as_deref(), Some("ExampleSonic"));
+        assert_eq!(info.server_version.as_deref(), Some("2.4.1"));
+        assert_eq!(info.protocol_version, "1.16.1");
+        assert!(info.open_subsonic);
+        assert!(info.supports_extension("sonicSimilarity", 1));
+        assert!(info.supports_extension("SONGLYRICS", 2));
+        assert!(!info.supports_extension("songLyrics", 3));
+        assert_eq!(
+            info.extension_summary(6).as_deref(),
+            Some("songLyrics v1/2, sonicSimilarity v1")
+        );
+
+        let mut connected = parse_server_info(&serde_json::json!({
+            "status": "ok",
+            "version": "1.16.1"
+        }));
+        connected.merge_open_subsonic_info(info.clone());
+        assert_eq!(connected, info);
+    }
+
+    #[test]
+    fn legacy_ping_defaults_to_subsonic_compatibility_mode() {
+        let info = parse_server_info(&serde_json::json!({
+            "status": "ok",
+            "version": "1.13.0",
+            "app": "Legacy Server"
+        }));
+
+        assert_eq!(info.app_name.as_deref(), Some("Legacy Server"));
+        assert_eq!(info.display_version(), "1.13.0");
+        assert!(!info.open_subsonic);
+        assert!(info.extensions.is_empty());
+        assert_eq!(info.extension_summary(4), None);
     }
 
     #[test]

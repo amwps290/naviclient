@@ -9,6 +9,10 @@ JavaScript runtime.
 ## Features
 
 - Subsonic authentication with the standard `u/t/s` token flow
+- OpenSubsonic capability discovery after connection: server type, server and
+  protocol versions, and supported extension versions are shown in Settings.
+  Servers without the discovery endpoint remain fully usable in Subsonic
+  compatibility mode, and the probe never blocks the ordinary connection.
 - Multiple saved servers with one-click switching: the sidebar shows which
   library you are browsing and the Settings page lists every server with its
   address and account. Switching stops playback, saves the current queue, and

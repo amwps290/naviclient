@@ -23,6 +23,16 @@ impl NavidromeApp {
         self.load_random_albums();
     }
 
+    fn load_open_subsonic_info(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        let base_url = api.base_url().to_string();
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.open_subsonic_info().await.map_err(error_message);
+            let _ = tx.send(Msg::OpenSubsonicInfo { base_url, result });
+        });
+    }
+
     /// 加载全部流派（`getGenres`）。
     pub(super) fn load_genres(&mut self) {
         let Some(api) = self.api.clone() else { return };
@@ -455,18 +465,41 @@ impl NavidromeApp {
                             let server_name = info.app_name.as_deref().unwrap_or("Navidrome");
                             self.state.status = format!(
                                 "{server_name} {} - {}",
-                                info.version,
+                                info.display_version(),
                                 self.api
                                     .as_ref()
                                     .map(|api| api.base_url().to_string())
                                     .unwrap_or_default()
                             );
                             self.state.server = Some(info);
+                            self.load_open_subsonic_info();
                         }
                         Err(error) => {
                             self.state.status = t!("Connection failed").to_string();
                             self.notify_error(t!("Connection failed: %{error}", error = error));
                         }
+                    }
+                }
+                Msg::OpenSubsonicInfo { base_url, result } => {
+                    if self.api.as_ref().map(Api::base_url) != Some(base_url.as_str()) {
+                        continue;
+                    }
+                    match result {
+                        Ok(info) => {
+                            if let Some(server) = &mut self.state.server {
+                                server.merge_open_subsonic_info(info);
+                                let server_name =
+                                    server.app_name.as_deref().unwrap_or("Navidrome");
+                                self.state.status = format!(
+                                    "{server_name} {} - {}",
+                                    server.display_version(),
+                                    base_url
+                                );
+                            }
+                        }
+                        Err(error) => log::debug!(
+                            "OpenSubsonic capability discovery unavailable; using Subsonic compatibility mode: {error}"
+                        ),
                     }
                 }
                 Msg::Artists(result) => {
