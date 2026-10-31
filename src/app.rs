@@ -1395,25 +1395,25 @@ impl NavidromeApp {
                     self.clear_song_multi();
                 } else if self.state.view == View::NowPlaying {
                     self.leave_now_playing();
-                } else if matches!(
-                    self.state.view,
-                    View::ArtistDetail | View::AlbumDetail | View::PlaylistDetail
-                ) {
-                    self.state.view = View::Home;
+                } else if let Some(parent) = Self::detail_parent(self.state.view) {
+                    self.state.view = parent;
                 }
                 cx.notify();
             }
             ShortcutAction::FocusSearch => {
-                // 先切到搜索页，再聚焦搜索框。
-                self.state.settings_open = false;
-                self.state.view = View::Search;
-                cx.notify();
-                let mut async_cx = window.to_async(cx);
-                let _ = self
-                    .search_input
-                    .update_in(&mut async_cx, |input, window, cx| input.focus(window, cx));
+                self.focus_search(window, cx);
             }
         }
+    }
+
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.settings_open = false;
+        self.state.view = View::Search;
+        cx.notify();
+        let mut async_cx = window.to_async(cx);
+        let _ = self
+            .search_input
+            .update_in(&mut async_cx, |input, window, cx| input.focus(window, cx));
     }
 
     fn execute_playback_shortcut(
@@ -3008,6 +3008,230 @@ impl NavidromeApp {
         }
     }
 
+    fn detail_parent(view: View) -> Option<View> {
+        match view {
+            View::ArtistDetail => Some(View::Artists),
+            View::AlbumDetail => Some(View::Albums),
+            View::GenreDetail => Some(View::Genres),
+            View::PlaylistDetail => Some(View::Playlists),
+            _ => None,
+        }
+    }
+
+    fn titlebar_section_label(&self) -> SharedString {
+        match self.state.view {
+            View::Home => t!("Home"),
+            View::Favorites => t!("Favorites"),
+            View::Artists | View::ArtistDetail => t!("Artists"),
+            View::Albums | View::AlbumDetail => t!("Albums"),
+            View::Genres | View::GenreDetail => t!("Genres"),
+            View::Playlists | View::PlaylistDetail => t!("Playlists"),
+            View::Search => t!("Search"),
+            View::NowPlaying => t!("Now Playing"),
+        }
+        .into()
+    }
+
+    fn titlebar_section_icon(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let color = cx.theme().muted_foreground.opacity(0.86);
+        match self.state.view {
+            View::Home => Icon::new(AppIcon::Home)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Favorites => Icon::new(AppIcon::Heart)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Artists | View::ArtistDetail => Icon::new(AppIcon::Artists)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Albums | View::AlbumDetail => Icon::new(AppIcon::Albums)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Genres | View::GenreDetail => Icon::new(AppIcon::Genres)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Playlists | View::PlaylistDetail => Icon::new(AppIcon::Playlists)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::Search => Icon::new(KitIcon::Search)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+            View::NowPlaying => Icon::new(AppIcon::VinylGrooves)
+                .with_size(px(14.0))
+                .text_color(color)
+                .into_any_element(),
+        }
+    }
+
+    fn render_titlebar_actions(
+        &self,
+        mini_id: &'static str,
+        settings_id: &'static str,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        h_flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .occlude()
+            .child(
+                Button::new(mini_id)
+                    .icon(AppIcon::MiniPlayer)
+                    .tooltip(t!("Switch to mini player"))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_mini_mode(window, cx);
+                    })),
+            )
+            .child(
+                Button::new(settings_id)
+                    .icon(AppIcon::Settings)
+                    .tooltip(t!("Settings"))
+                    .ghost()
+                    .small()
+                    .selected(self.state.settings_open)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.settings_open = !this.state.settings_open;
+                        if this.state.settings_open {
+                            this.refresh_output_devices(cx);
+                        } else {
+                            this.cancel_shortcut_recording();
+                        }
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// 主窗口标题栏：左侧呈现页面上下文，右侧保留窗口级工具；
+    /// 详情页提供返回其所属媒体库分区的明确入口。
+    fn render_main_titlebar(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let detail_parent = Self::detail_parent(self.state.view);
+
+        h_flex()
+            .h_full()
+            .w_full()
+            .items_center()
+            .pr_2()
+            .child(
+                h_flex()
+                    .h_full()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .items_center()
+                            .gap_1()
+                            .when_some(detail_parent, |this, parent| {
+                                this.child(
+                                    div().occlude().child(
+                                        Button::new("titlebar-back")
+                                            .icon(AppIcon::ArrowLeft)
+                                            .tooltip(t!("Back to library"))
+                                            .ghost()
+                                            .small()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.state.settings_open = false;
+                                                this.state.view = parent;
+                                                cx.notify();
+                                            })),
+                                    ),
+                                )
+                            })
+                            .child(self.titlebar_section_icon(cx))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(self.titlebar_section_label()),
+                            ),
+                    )
+                    .child(div().flex_none().flex().justify_end().child(
+                        self.render_titlebar_actions("toggle-mini-player", "title-settings", cx),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_now_playing_titlebar(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let track_label = self
+            .state
+            .now_playing
+            .as_ref()
+            .map(|song| {
+                if song.artist.trim().is_empty() {
+                    song.title.clone()
+                } else {
+                    format!("{} · {}", song.title, song.artist)
+                }
+            })
+            .unwrap_or_else(|| t!("Now Playing").to_string());
+
+        h_flex()
+            .h_full()
+            .w_full()
+            .items_center()
+            .pr_2()
+            .child(
+                h_flex()
+                    .w(px(190.0))
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .occlude()
+                    .child(
+                        Button::new("leave-now-playing")
+                            .icon(AppIcon::ArrowLeft)
+                            .tooltip(t!("Back to library"))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.leave_now_playing();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("Now Playing")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .px_4()
+                    .text_center()
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(cx.theme().muted_foreground)
+                    .truncate()
+                    .child(track_label),
+            )
+            .child(self.render_titlebar_actions(
+                "now-playing-mini-player",
+                "now-playing-settings",
+                cx,
+            ))
+            .into_any_element()
+    }
+
     /// 侧边栏底部的折叠/展开按钮；状态持久化到配置。
     fn sidebar_collapse_toggle(
         &self,
@@ -3522,53 +3746,7 @@ impl Render for NavidromeApp {
                             linear_color_stop(titlebar_end, 1.0),
                         ))
                         .border_color(titlebar_border)
-                        .child(
-                            h_flex()
-                                .h_full()
-                                .w_full()
-                                .items_center()
-                                .justify_between()
-                                .pr_2()
-                                .child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap_2()
-                                        // See `toggle-mini-player`: keep the clickable
-                                        // part out of the title bar's drag area.
-                                        .occlude()
-                                        .child(
-                                            Button::new("leave-now-playing")
-                                                .icon(AppIcon::ArrowLeft)
-                                                .tooltip(t!("Back to library"))
-                                                .ghost()
-                                                .small()
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.leave_now_playing();
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .child(t!("Now Playing")),
-                                        ),
-                                )
-                                .child(
-                                    div().occlude().child(
-                                        Button::new("now-playing-settings")
-                                            .icon(AppIcon::Settings)
-                                            .tooltip(t!("Settings"))
-                                            .ghost()
-                                            .small()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.state.settings_open = true;
-                                                this.refresh_output_devices(cx);
-                                                cx.notify();
-                                            })),
-                                    ),
-                                ),
-                        ),
+                        .child(self.render_now_playing_titlebar(cx)),
                 )
                 .child(
                     div()
@@ -3600,62 +3778,7 @@ impl Render for NavidromeApp {
             .child(
                 TitleBar::new()
                     .on_close_window(Self::close_button_handler(cx))
-                    .child(
-                        h_flex()
-                            .h_full()
-                            .w_full()
-                            .items_center()
-                            .justify_between()
-                            .pr_2()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Navidrome Client"),
-                            )
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .gap_1()
-                                    // On Windows the title bar is a window drag area
-                                    // (`WindowControlArea::Drag`). Without this the drag
-                                    // area swallows the clicks on the buttons below it.
-                                    .occlude()
-                                    .child(
-                                        Button::new("toggle-mini-player")
-                                            .icon(AppIcon::MiniPlayer)
-                                            .tooltip(if self.mini_mode {
-                                                t!("Exit mini player")
-                                            } else {
-                                                t!("Switch to mini player")
-                                            })
-                                            .ghost()
-                                            .small()
-                                            .selected(self.mini_mode)
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.toggle_mini_mode(window, cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("title-settings")
-                                            .icon(AppIcon::Settings)
-                                            .tooltip(t!("Settings"))
-                                            .ghost()
-                                            .small()
-                                            .selected(self.state.settings_open)
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.state.settings_open =
-                                                    !this.state.settings_open;
-                                                if this.state.settings_open {
-                                                    this.refresh_output_devices(cx);
-                                                } else {
-                                                    this.cancel_shortcut_recording();
-                                                }
-                                                cx.notify();
-                                            })),
-                                    ),
-                            ),
-                    ),
+                    .child(self.render_main_titlebar(cx)),
             )
             .child(
                 h_flex()

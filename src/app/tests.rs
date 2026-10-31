@@ -13,7 +13,7 @@ use super::{
     queue_index_after_move, queue_index_after_remove, range_anchor, readable_accent,
     reconnect_decision, replay_gain_factor, restored_volume, seek_target, selection_range,
     shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs, sort_artists,
-    touch_lru, ReconnectDecision, ShuffleHistory, SongRowClickAction,
+    touch_lru, NavidromeApp, ReconnectDecision, ShuffleHistory, SongRowClickAction, View,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
@@ -31,6 +31,27 @@ fn default_shortcut(key: &str, modifiers: Modifiers) -> Option<ShortcutAction> {
             key_char: None,
         },
     )
+}
+
+#[test]
+fn detail_views_return_to_their_own_library_section() {
+    assert_eq!(
+        NavidromeApp::detail_parent(View::ArtistDetail),
+        Some(View::Artists)
+    );
+    assert_eq!(
+        NavidromeApp::detail_parent(View::AlbumDetail),
+        Some(View::Albums)
+    );
+    assert_eq!(
+        NavidromeApp::detail_parent(View::GenreDetail),
+        Some(View::Genres)
+    );
+    assert_eq!(
+        NavidromeApp::detail_parent(View::PlaylistDetail),
+        Some(View::Playlists)
+    );
+    assert_eq!(NavidromeApp::detail_parent(View::Home), None);
 }
 
 #[test]
