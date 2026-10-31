@@ -4684,10 +4684,9 @@ impl NavidromeApp {
                     self.state.playlists_visible.min(self.state.playlists.len());
                 let playlist_list = v_flex()
                     .w_full()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded_lg()
-                    .overflow_hidden()
+                    .border_t_1()
+                    .border_b_1()
+                    .border_color(cx.theme().border.opacity(0.72))
                     .children(
                         self.state.playlists[..visible_playlists]
                             .iter()
@@ -4718,9 +4717,10 @@ impl NavidromeApp {
                                     .items_center()
                                     .cursor_pointer()
                                     .when(index > 0, |this| {
-                                        this.border_t_1().border_color(cx.theme().border)
+                                        this.border_t_1()
+                                            .border_color(cx.theme().border.opacity(0.52))
                                     })
-                                    .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                                    .hover(|style| style.bg(cx.theme().list_hover))
                                     .child(self.render_cover(
                                         playlist.cover_art.as_deref(),
                                         48.0,
@@ -4734,7 +4734,7 @@ impl NavidromeApp {
                                             .child(
                                                 div()
                                                     .text_sm()
-                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .font_weight(FontWeight::MEDIUM)
                                                     .truncate()
                                                     .child(playlist.name.clone()),
                                             )
@@ -4760,47 +4760,55 @@ impl NavidromeApp {
 
                 v_flex()
                     .gap_5()
-                    .child(self.page_header(
-                        t!("Playlists"),
-                        t!("%{count} playlists", count = self.state.playlists.len()),
-                        cx,
-                    ))
                     .child(
                         h_flex()
-                            .gap_2()
+                            .w_full()
+                            .items_end()
+                            .gap_3()
+                            .flex_wrap()
                             .child(
-                                Button::new("new-playlist")
-                                    .label(t!("New playlist"))
-                                    .primary()
-                                    .small()
-                                    .disabled(self.playlist_ui.busy || self.api.is_none())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.name_playlist(None, vec![], window, cx)
-                                    })),
+                                div().flex_1().min_w(px(240.0)).child(self.page_header(
+                                    t!("Playlists"),
+                                    t!(
+                                        "%{count} playlists",
+                                        count = self.state.playlists.len()
+                                    ),
+                                    cx,
+                                )),
                             )
                             .child(
-                                Button::new("import-playlist")
-                                    .label(t!("Import playlist"))
-                                    .outline()
-                                    .small()
-                                    .disabled(self.api.is_none() || self.playlist_ui.busy)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_import_dialog(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("refresh-playlists")
-                                    .icon(AppIcon::Refresh)
-                                    .label(t!("Refresh"))
-                                    .outline()
-                                    .small()
-                                    .disabled(
-                                        self.playlist_ui.busy || self.playlist_ui.list_loading,
+                                h_flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        Button::new("new-playlist")
+                                            .label(t!("New playlist"))
+                                            .primary()
+                                            .small()
+                                            .disabled(
+                                                self.playlist_ui.busy || self.api.is_none(),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.name_playlist(None, vec![], window, cx)
+                                            })),
                                     )
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.load_playlists();
-                                        cx.notify();
-                                    })),
+                                    .child(
+                                        Button::new("import-playlist")
+                                            .label(t!("Import playlist"))
+                                            .outline()
+                                            .small()
+                                            .disabled(self.api.is_none() || self.playlist_ui.busy)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_import_dialog(window, cx);
+                                            })),
+                                    )
+                                    .child(self.header_refresh_button(
+                                        "refresh-playlists",
+                                        t!("Refresh playlists"),
+                                        self.playlist_ui.list_loading,
+                                        cx,
+                                        |this, _cx| this.load_playlists(),
+                                    )),
                             ),
                     )
                     .when(
@@ -4811,10 +4819,36 @@ impl NavidromeApp {
                         self.state.playlists.is_empty() && !self.playlist_ui.list_loading,
                         |this| {
                             this.child(
-                                div()
-                                    .py_8()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("No playlists are available.")),
+                                v_flex()
+                                    .w_full()
+                                    .min_h(px(180.0))
+                                    .items_center()
+                                    .justify_center()
+                                    .gap_2()
+                                    .px_6()
+                                    .text_center()
+                                    .child(
+                                        Icon::new(AppIcon::Playlists)
+                                            .with_size(px(28.0))
+                                            .text_color(
+                                                cx.theme().muted_foreground.opacity(0.72),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(t!("No playlists are available.")),
+                                    )
+                                    .child(
+                                        div()
+                                            .max_w(px(420.0))
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(t!(
+                                                "Create a playlist or import one to organize your music."
+                                            )),
+                                    ),
                             )
                         },
                     )
