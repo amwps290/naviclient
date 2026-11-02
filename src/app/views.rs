@@ -1289,8 +1289,9 @@ impl NavidromeApp {
                                 .child(t!("Time")),
                         )
                         .child(div().w(px(match (editable, compact_columns) {
-                            (true, _) | (false, true) => 68.0,
-                            (false, false) => 104.0,
+                            (true, true) | (false, true) => 60.0,
+                            (true, false) => 124.0,
+                            (false, false) => 100.0,
                         }))),
                 )
             })
@@ -1449,17 +1450,15 @@ impl NavidromeApp {
             )
             .child(div().flex_1())
             .child(
-                self.accent_media_button(
-                    SharedString::from(format!("multi-play-{scope}")),
-                    PlayerIcon::Play,
-                    t!("Play selected (Enter)"),
-                    32.0,
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.play_selected_songs(scope);
-                    cx.notify();
-                })),
+                Button::new(SharedString::from(format!("multi-play-{scope}")))
+                    .icon(PlayerIcon::Play)
+                    .tooltip(t!("Play selected (Enter)"))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.play_selected_songs(scope);
+                        cx.notify();
+                    })),
             )
             .child(
                 Button::new(SharedString::from(format!("multi-next-{scope}")))
@@ -1467,7 +1466,6 @@ impl NavidromeApp {
                     .tooltip(t!("Play selected next"))
                     .ghost()
                     .small()
-                    .rounded(px(8.0))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected_play_next(scope);
                         cx.notify();
@@ -1479,7 +1477,6 @@ impl NavidromeApp {
                     .tooltip(t!("Add selected to queue"))
                     .ghost()
                     .small()
-                    .rounded(px(8.0))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected_to_queue(scope);
                         cx.notify();
@@ -1491,7 +1488,6 @@ impl NavidromeApp {
                     .disabled(add_disabled)
                     .ghost()
                     .small()
-                    .rounded(px(8.0))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         let ids: Vec<String> = this
                             .selected_songs(scope)
@@ -1507,7 +1503,6 @@ impl NavidromeApp {
                     .tooltip(favorite_label)
                     .ghost()
                     .small()
-                    .rounded(px(8.0))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.favorite_selected(scope);
                         cx.notify();
@@ -1519,7 +1514,6 @@ impl NavidromeApp {
                     .tooltip(t!("Clear selection (Esc)"))
                     .ghost()
                     .small()
-                    .rounded(px(8.0))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.clear_song_multi();
                         cx.notify();
@@ -1543,9 +1537,8 @@ impl NavidromeApp {
         let Some(song) = self.song_for_scope(scope, index) else {
             return div().into_any_element();
         };
+        let total = self.songs_for_scope(scope).map_or(0, <[Song]>::len);
         let key = item_instance_key(scope, "song", index, &song.id);
-        let hover_key = key.clone();
-        let row_hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
         let menu_app = cx.entity().downgrade();
         let button_menu_app = menu_app.clone();
         let current = self
@@ -1555,8 +1548,6 @@ impl NavidromeApp {
             .is_some_and(|playing| playing.id == song.id)
             && (!editable || self.state.queue_index == Some(index));
         let animated = current && playback.active && !playback.paused;
-        let row_playing = current && playback.active && !playback.paused;
-        let row_transport_label = if row_playing { t!("Pause") } else { t!("Play") };
         let row_accent = self.now_playing_accent(cx);
         let row_accent_foreground = accent_foreground(row_accent);
         let album = if song.album.trim().is_empty() {
@@ -1602,9 +1593,6 @@ impl NavidromeApp {
                     .border_color(cx.theme().border.opacity(0.52))
             })
             .hover(move |style| style.bg(hover_background))
-            .on_hover(cx.listener(move |this, hovering, _, cx| {
-                this.set_hovered(&hover_key, *hovering, cx);
-            }))
             .cursor_pointer();
         // 高亮优先级：多选 > 列表光标 > 正在播放。列表选择继承当前
         // 封面强调色，让媒体库与正在播放页使用同一种音乐氛围。
@@ -1758,19 +1746,41 @@ impl NavidromeApp {
                 .flex_none()
                 .h_full()
                 .w(px(match (editable, compact_columns) {
-                    (true, _) | (false, true) => 68.0,
-                    (false, false) => 104.0,
+                    (true, true) | (false, true) => 60.0,
+                    (true, false) => 124.0,
+                    (false, false) => 100.0,
                 }))
                 .items_center()
                 .justify_end()
                 .gap_0p5()
-                .opacity(
-                    if row_hovered || current || keyboard_selected || multi_selected {
-                        1.0
-                    } else {
-                        0.42
-                    },
-                )
+                .when(editable && !compact_columns, |slot| {
+                    slot.child(
+                        Button::new(SharedString::from(format!("queue-up-{key}")))
+                            .icon(AppIcon::ChevronUp)
+                            .tooltip(t!("Move up"))
+                            .ghost()
+                            .small()
+                            .disabled(index == 0)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.move_queue_item(index, index - 1);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("queue-down-{key}")))
+                            .icon(AppIcon::ChevronDown)
+                            .tooltip(t!("Move down"))
+                            .ghost()
+                            .small()
+                            .disabled(index + 1 >= total)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.move_queue_item(index, index + 1);
+                                cx.notify();
+                            })),
+                    )
+                })
                 .when(editable, |slot| {
                     slot.child(
                         Button::new(SharedString::from(format!("queue-remove-{key}")))
@@ -1778,7 +1788,6 @@ impl NavidromeApp {
                             .tooltip(t!("Remove from queue"))
                             .ghost()
                             .small()
-                            .rounded(px(8.0))
                             .text_color(cx.theme().muted_foreground)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -1788,34 +1797,22 @@ impl NavidromeApp {
                     )
                 })
                 .when(!editable && !compact_columns, |slot| {
-                    slot.child(
-                        self.favorite_button(FavoriteKind::Song, &song.id, cx)
-                            .rounded(px(8.0)),
-                    )
+                    slot.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
                 })
                 .when(!editable, |slot| {
                     slot.child(
-                        self.accent_media_button(
-                            SharedString::from(format!("play-song-{key}")),
-                            if row_playing {
-                                PlayerIcon::Pause
-                            } else {
-                                PlayerIcon::Play
-                            },
-                            row_transport_label.clone(),
-                            32.0,
-                            cx,
-                        )
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if current {
-                                this.toggle_playback();
-                            } else {
+                        Button::new(SharedString::from(format!("play-song-{key}")))
+                            .icon(PlayerIcon::Play)
+                            .tooltip(t!("Play"))
+                            .ghost()
+                            .small()
+                            .text_color(row_accent)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.select_song_row(scope, index);
                                 this.play_song_at_scope(scope, index);
-                            }
-                            cx.notify();
-                        })),
+                                cx.notify();
+                            })),
                     )
                 })
                 .child(
@@ -1829,7 +1826,6 @@ impl NavidromeApp {
                                 .tooltip(t!("Song actions"))
                                 .ghost()
                                 .small()
-                                .rounded(px(8.0))
                                 .dropdown_menu(move |menu, _, cx| {
                                     button_menu_app
                                         .update(cx, |this, cx| {
@@ -5286,26 +5282,18 @@ impl NavidromeApp {
                                     .gap_2()
                                     .flex_wrap()
                                     .child(
-                                        self.accent_media_button(
-                                            "play-artist-all",
-                                            PlayerIcon::Play,
-                                            t!("Play all"),
-                                            44.0,
-                                            cx,
-                                        )
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
+                                        Button::new("play-artist-all")
+                                            .label(t!("Play all"))
+                                            .primary()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.play_artist(artist_for_play_all.clone());
                                                 cx.notify();
-                                            }),
-                                        ),
+                                            })),
                                     )
                                     .child(
                                         Button::new("play-artist-popular")
                                             .label(t!("Play popular"))
                                             .outline()
-                                            .small()
-                                            .rounded(px(8.0))
                                             .disabled(popular_count == 0)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.play_artist_top_songs();
@@ -5314,25 +5302,23 @@ impl NavidromeApp {
                                     )
                                     .child(
                                         Button::new("start-artist-radio")
-                                            .icon(AppIcon::Shuffle)
                                             .label(if artist_radio_loading {
                                                 t!("Building song radio…")
                                             } else {
                                                 t!("Start artist radio")
                                             })
                                             .outline()
-                                            .small()
-                                            .rounded(px(8.0))
                                             .disabled(popular_count == 0 || artist_radio_loading)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.start_artist_radio();
                                                 cx.notify();
                                             })),
                                     )
-                                    .child(
-                                        self.favorite_button(FavoriteKind::Artist, &artist.id, cx)
-                                            .rounded(px(8.0)),
-                                    ),
+                                    .child(self.favorite_button(
+                                        FavoriteKind::Artist,
+                                        &artist.id,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(
@@ -5450,29 +5436,23 @@ impl NavidromeApp {
                                             .gap_2()
                                             .flex_wrap()
                                             .child(
-                                                self.accent_media_button(
-                                                    "play-album",
-                                                    PlayerIcon::Play,
-                                                    t!("Play album"),
-                                                    44.0,
-                                                    cx,
-                                                )
-                                                .disabled(self.state.current_songs.is_empty())
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    let songs = this.state.current_songs.clone();
-                                                    if !songs.is_empty() {
-                                                        this.play_song_list(&songs, 0);
-                                                    }
-                                                    cx.notify();
-                                                })),
+                                                Button::new("play-album")
+                                                    .label(t!("Play album"))
+                                                    .primary()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let songs =
+                                                            this.state.current_songs.clone();
+                                                        if !songs.is_empty() {
+                                                            this.play_song_list(&songs, 0);
+                                                        }
+                                                        cx.notify();
+                                                    })),
                                             )
                                             .child(
                                                 Button::new("append-album")
                                                     .icon(AppIcon::Queue)
                                                     .label(t!("Append all"))
                                                     .outline()
-                                                    .small()
-                                                    .rounded(px(8.0))
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         let songs =
                                                             this.state.current_songs.clone();
@@ -5484,8 +5464,6 @@ impl NavidromeApp {
                                                 Button::new("album-add-to-playlist")
                                                     .label(t!("Add to playlist…"))
                                                     .outline()
-                                                    .small()
-                                                    .rounded(px(8.0))
                                                     .disabled(
                                                         self.playlist_ui.busy
                                                             || self.state.current_songs.is_empty(),
@@ -5501,14 +5479,6 @@ impl NavidromeApp {
                                                             );
                                                         },
                                                     )),
-                                            )
-                                            .child(
-                                                self.favorite_button(
-                                                    FavoriteKind::Album,
-                                                    &album.id,
-                                                    cx,
-                                                )
-                                                .rounded(px(8.0)),
                                             ),
                                     ),
                             ),
@@ -5539,14 +5509,13 @@ impl NavidromeApp {
                             .gap_2()
                             .flex_wrap()
                             .child(
-                                self.accent_media_button(
-                                    "play-playlist",
-                                    PlayerIcon::Play,
-                                    t!("Play all"),
-                                    44.0,
-                                    cx,
-                                )
-                                .disabled(
+                                Button::new("play-playlist")
+                                    .icon(PlayerIcon::Play)
+                                    .label(t!("Play all"))
+                                    .small()
+                                    .info()
+                                    .outline()
+                                    .disabled(
                                         self.state.playlist_songs.is_empty()
                                             || self.playlist_ui.detail_loading,
                                     )
@@ -5568,7 +5537,6 @@ impl NavidromeApp {
                                     .label(t!("Append all"))
                                     .small()
                                     .outline()
-                                    .rounded(px(8.0))
                                     .disabled(
                                         self.state.playlist_songs.is_empty()
                                             || self.playlist_ui.detail_loading,
@@ -5584,7 +5552,6 @@ impl NavidromeApp {
                                     .label(t!("Rename"))
                                     .small()
                                     .outline()
-                                    .rounded(px(8.0))
                                     .disabled(edit_disabled)
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.name_playlist(Some(rename.clone()), vec![], window, cx)
@@ -5595,8 +5562,6 @@ impl NavidromeApp {
                                     .label(t!("Delete"))
                                     .small()
                                     .ghost()
-                                    .rounded(px(8.0))
-                                    .text_color(cx.theme().danger)
                                     .disabled(edit_disabled)
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.delete_playlist(delete.clone(), window, cx)
@@ -5608,7 +5573,6 @@ impl NavidromeApp {
                                     .tooltip(t!("Refresh playlist"))
                                     .small()
                                     .ghost()
-                                    .rounded(px(8.0))
                                     .disabled(
                                         self.playlist_ui.busy || self.playlist_ui.detail_loading,
                                     )
