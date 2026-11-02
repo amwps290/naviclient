@@ -507,6 +507,20 @@ impl NavidromeApp {
                 cx.notify();
             },
         )));
+        let radio_seed = song.clone();
+        let radio_loading = self.radio_loading_song_id.as_deref() == Some(song.id.as_str());
+        menu = menu.item(
+            PopupMenuItem::new(if radio_loading {
+                t!("Building song radio…")
+            } else {
+                t!("Start song radio")
+            })
+            .disabled(self.api.is_none() || radio_loading)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.start_song_radio(radio_seed.clone());
+                cx.notify();
+            })),
+        );
         let add = song.id.clone();
         menu = menu.separator().item(
             PopupMenuItem::new(t!("Add to playlist…"))

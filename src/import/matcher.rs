@@ -1,6 +1,6 @@
 //! 匹配引擎：把导入的曲目元数据匹配到 Navidrome 曲库。
 //!
-//! 逐首调用 Subsonic `search3`（复用 `Api::search`），对返回候选打分后
+//! 逐首调用 Subsonic `search3`（复用 `OpenSubsonicProvider::search`），对返回候选打分后
 //! 取最优；只有“标题几乎一致”且总分过线才自动接受，其余留给导入审查
 //! 列表（P2 再加人工换选）。
 //!
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::api::Api;
+use crate::api::OpenSubsonicProvider;
 use crate::models::Song;
 
 use super::{ImportedTrack, MatchedSongs};
@@ -258,7 +258,10 @@ pub fn best_match(track: &ImportedTrack, candidates: &[Song]) -> Option<Song> {
 
 /// 用曲库搜索匹配单首：先“标题 + 主艺人”，没结果或全不过线再退化
 /// 到仅标题（艺人 tag 常有繁简/别名差异）。
-pub async fn match_track(api: &Api, track: &ImportedTrack) -> Result<Option<Song>> {
+pub async fn match_track(
+    api: &OpenSubsonicProvider,
+    track: &ImportedTrack,
+) -> Result<Option<Song>> {
     let title = strip_parenthetical(&track.title);
     let primary = track
         .artists
@@ -280,7 +283,10 @@ pub async fn match_track(api: &Api, track: &ImportedTrack) -> Result<Option<Song
     Ok(best)
 }
 
-async fn match_track_with_retry(api: &Api, track: &ImportedTrack) -> Result<Option<Song>> {
+async fn match_track_with_retry(
+    api: &OpenSubsonicProvider,
+    track: &ImportedTrack,
+) -> Result<Option<Song>> {
     let mut last_error = None;
     for attempt in 0..MATCH_ATTEMPTS {
         match match_track(api, track).await {
@@ -297,7 +303,7 @@ async fn match_track_with_retry(api: &Api, track: &ImportedTrack) -> Result<Opti
 /// 匹配整张歌单。按索引取模分给 WORKERS 个任务并发执行，结果写回与
 /// `tracks` 对齐的槽位；每完成一首回调一次当前进度数。
 pub async fn match_playlist<F>(
-    api: &Api,
+    api: &OpenSubsonicProvider,
     tracks: &[ImportedTrack],
     progress: F,
 ) -> Result<MatchedSongs>

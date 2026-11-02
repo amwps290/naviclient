@@ -65,6 +65,11 @@ pub enum Msg {
     },
     Search(Result<SearchResults, String>),
     PlayArtistSongs(Result<Vec<Song>, String>),
+    SongRadio {
+        generation: u64,
+        seed: Song,
+        result: Result<Vec<Song>, String>,
+    },
     Lyrics {
         song_id: String,
         result: Result<Lyrics, String>,

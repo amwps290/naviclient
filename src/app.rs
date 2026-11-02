@@ -37,7 +37,7 @@ use rust_i18n::t;
 use smol::Timer;
 use tokio::runtime::Runtime;
 
-use crate::api::{format_duration, Api};
+use crate::api::{format_duration, OpenSubsonicProvider};
 use crate::assets::{AppIcon, PlayerIcon};
 use crate::audio::{
     format_playback, AudioHandle, PlaybackState, StreamFailure, TrackTransition,
@@ -319,7 +319,7 @@ impl Default for AppState {
 
 pub struct NavidromeApp {
     runtime: Runtime,
-    api: Option<Api>,
+    api: Option<OpenSubsonicProvider>,
     config: Config,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -396,6 +396,9 @@ pub struct NavidromeApp {
     eq_sliders: Vec<Entity<SliderState>>,
     /// 均衡器配置保存的防抖代次。
     eq_save_generation: u64,
+    /// 歌曲电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
+    radio_generation: u64,
+    radio_loading_song_id: Option<String>,
     /// 删除服务器的确认弹窗：（服务器 id， 显示名）。None 表示无弹窗。
     server_remove_prompt: Option<(String, String)>,
 }
@@ -434,7 +437,8 @@ impl NavidromeApp {
             .active_profile()
             .map(|profile| profile.resolved_password())
             .unwrap_or_default();
-        let api = Api::new(&config.server_url, &config.username, &active_password).ok();
+        let api =
+            OpenSubsonicProvider::new(&config.server_url, &config.username, &active_password).ok();
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
@@ -573,6 +577,8 @@ impl NavidromeApp {
             mini_volume_flash_generation: 0,
             eq_sliders,
             eq_save_generation: 0,
+            radio_generation: 0,
+            radio_loading_song_id: None,
             server_remove_prompt: None,
         };
         app.state.playback_modes = app.config.playback_modes;
@@ -839,11 +845,20 @@ impl NavidromeApp {
         };
 
         self.state.lyrics_loading = true;
+        let structured_lyrics = self
+            .state
+            .server
+            .as_ref()
+            .map(|server| server.capabilities.structured_lyrics)
+            .unwrap_or_default();
         let song = song.clone();
         let song_id = song.id.clone();
         let tx = self.tx.clone();
         self.spawn_future(async move {
-            let result = api.lyrics(&song).await.map_err(error_message);
+            let result = api
+                .lyrics(&song, structured_lyrics)
+                .await
+                .map_err(error_message);
             let _ = tx.send(Msg::Lyrics { song_id, result });
         });
     }
@@ -2138,6 +2153,7 @@ impl NavidromeApp {
 
     /// 断开当前服务器并重建连接与视图状态（切服务器、保存设置共用）。
     fn reconnect_active_server(&mut self) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         self.audio.stop();
         self.pending_cover_asset_releases
@@ -2173,7 +2189,7 @@ impl NavidromeApp {
             .active_profile()
             .map(|profile| profile.resolved_password())
             .unwrap_or_default();
-        match Api::new(&self.config.server_url, &self.config.username, &password) {
+        match OpenSubsonicProvider::new(&self.config.server_url, &self.config.username, &password) {
             Ok(api) => {
                 self.api = Some(api);
                 self.load_active_server_cache();

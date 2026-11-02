@@ -261,6 +261,10 @@ pub struct Song {
     pub artist: String,
     #[serde(default)]
     pub artist_id: Option<String>,
+    /// Subsonic song genre; used as an explainable fallback when a server
+    /// cannot return similarity-based radio candidates.
+    #[serde(default)]
+    pub genre: Option<String>,
     #[serde(default)]
     pub track: Option<i32>,
     /// 碟号（Subsonic `discNumber`）；多碟专辑按（碟号， 曲目号）排序。
@@ -381,6 +385,82 @@ pub struct OpenSubsonicExtension {
     pub versions: Vec<u32>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CapabilitySupport {
+    #[default]
+    Unknown,
+    Unsupported,
+    Supported,
+}
+
+impl CapabilitySupport {
+    pub const fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+
+    /// Compatibility mode keeps established fallback requests available when
+    /// the server cannot advertise extensions. Only an explicit unsupported
+    /// result should suppress an existing request path.
+    pub const fn allows_optimistic_request(self) -> bool {
+        !matches!(self, Self::Unsupported)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ServerCapabilities {
+    pub structured_lyrics: CapabilitySupport,
+    pub enhanced_lyrics: CapabilitySupport,
+    pub sonic_similarity: CapabilitySupport,
+    pub top_songs_by_artist_id: CapabilitySupport,
+    pub playback_report: CapabilitySupport,
+    pub index_based_queue: CapabilitySupport,
+    pub advanced_transcoding: CapabilitySupport,
+    pub transcode_offset: CapabilitySupport,
+    pub internet_radio: CapabilitySupport,
+    pub podcasts: CapabilitySupport,
+    pub podcast_episode_lookup: CapabilitySupport,
+}
+
+impl ServerCapabilities {
+    pub fn from_server_info(info: &ServerInfo) -> Self {
+        let extension = |name, minimum_version| {
+            if !info.extensions_discovered {
+                CapabilitySupport::Unknown
+            } else if info.supports_extension(name, minimum_version) {
+                CapabilitySupport::Supported
+            } else {
+                CapabilitySupport::Unsupported
+            }
+        };
+
+        Self {
+            structured_lyrics: extension("songLyrics", 1),
+            enhanced_lyrics: extension("songLyrics", 2),
+            sonic_similarity: extension("sonicSimilarity", 1),
+            top_songs_by_artist_id: extension("topSongsByArtistId", 1),
+            playback_report: extension("playbackReport", 1),
+            index_based_queue: extension("indexBasedQueue", 1),
+            advanced_transcoding: extension("transcoding", 1),
+            transcode_offset: extension("transcodeOffset", 1),
+            internet_radio: protocol_support(&info.protocol_version, [1, 9, 0]),
+            podcasts: protocol_support(&info.protocol_version, [1, 6, 0]),
+            podcast_episode_lookup: extension("getPodcastEpisode", 1),
+        }
+    }
+
+    pub const fn smart_discovery(self) -> CapabilitySupport {
+        if self.sonic_similarity.is_supported() || self.top_songs_by_artist_id.is_supported() {
+            CapabilitySupport::Supported
+        } else if matches!(self.sonic_similarity, CapabilitySupport::Unsupported)
+            && matches!(self.top_songs_by_artist_id, CapabilitySupport::Unsupported)
+        {
+            CapabilitySupport::Unsupported
+        } else {
+            CapabilitySupport::Unknown
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ServerInfo {
     /// 服务端实现名称，例如 Navidrome、gonic 或 Ampache。
@@ -390,7 +470,12 @@ pub struct ServerInfo {
     /// 服务端声明的 Subsonic/OpenSubsonic 协议版本。
     pub protocol_version: String,
     pub open_subsonic: bool,
+    /// `getOpenSubsonicExtensions` completed successfully. This is separate
+    /// from `open_subsonic`: ping may advertise OpenSubsonic before the
+    /// extension probe finishes or when that optional probe later fails.
+    pub extensions_discovered: bool,
     pub extensions: Vec<OpenSubsonicExtension>,
+    pub capabilities: ServerCapabilities,
 }
 
 impl ServerInfo {
@@ -421,7 +506,13 @@ impl ServerInfo {
             self.protocol_version = discovered.protocol_version;
         }
         self.open_subsonic = discovered.open_subsonic;
+        self.extensions_discovered = discovered.extensions_discovered;
         self.extensions = discovered.extensions;
+        self.refresh_capabilities();
+    }
+
+    pub fn refresh_capabilities(&mut self) {
+        self.capabilities = ServerCapabilities::from_server_info(self);
     }
 
     pub fn extension_summary(&self, limit: usize) -> Option<String> {
@@ -454,6 +545,23 @@ impl ServerInfo {
             labels.push(format!("+{remaining}"));
         }
         Some(labels.join(", "))
+    }
+}
+
+fn protocol_support(version: &str, minimum: [u32; 3]) -> CapabilitySupport {
+    let mut parts = version.split('.');
+    let parsed = [
+        parts.next().and_then(|part| part.parse::<u32>().ok()),
+        parts.next().and_then(|part| part.parse::<u32>().ok()),
+        parts.next().and_then(|part| part.parse::<u32>().ok()),
+    ];
+    let [Some(major), Some(minor), Some(patch)] = parsed else {
+        return CapabilitySupport::Unknown;
+    };
+    if [major, minor, patch] >= minimum {
+        CapabilitySupport::Supported
+    } else {
+        CapabilitySupport::Unsupported
     }
 }
 
@@ -966,7 +1074,7 @@ fn normalize_server_url(url: &str) -> String {
 pub struct Config {
     /// 当前激活服务器的地址/账号镜像。
     ///
-    /// 保留为独立字段是为了兼容旧配置与 `Api::new` 等现有调用点；
+    /// 保留为独立字段是为了兼容旧配置与 `OpenSubsonicProvider::new` 等现有调用点；
     /// `sync_active_profile` 会保证它始终与 `servers[active_server]` 一致。
     pub server_url: String,
     pub username: String,
@@ -1271,10 +1379,78 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        locale_from_os_tag, AlbumSort, ArtistSort, Config, LanguagePreference, PlayModes,
-        PlaybackMode, PlaybackSession, RepeatMode, ServerProfile, ShortcutAction, Song,
-        ThemePreference, TranscodingQuality, VolumeNormalization,
+        locale_from_os_tag, AlbumSort, ArtistSort, CapabilitySupport, Config, LanguagePreference,
+        OpenSubsonicExtension, PlayModes, PlaybackMode, PlaybackSession, RepeatMode,
+        ServerCapabilities, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
+        TranscodingQuality, VolumeNormalization,
     };
+
+    #[test]
+    fn capability_matrix_distinguishes_supported_unsupported_and_unknown() {
+        let discovered = ServerInfo {
+            protocol_version: "1.16.1".into(),
+            open_subsonic: true,
+            extensions_discovered: true,
+            extensions: vec![
+                OpenSubsonicExtension {
+                    name: "songLyrics".into(),
+                    versions: vec![1, 2],
+                },
+                OpenSubsonicExtension {
+                    name: "sonicSimilarity".into(),
+                    versions: vec![1],
+                },
+                OpenSubsonicExtension {
+                    name: "playbackReport".into(),
+                    versions: vec![1],
+                },
+            ],
+            ..ServerInfo::default()
+        };
+        let capabilities = ServerCapabilities::from_server_info(&discovered);
+
+        assert_eq!(capabilities.structured_lyrics, CapabilitySupport::Supported);
+        assert_eq!(capabilities.enhanced_lyrics, CapabilitySupport::Supported);
+        assert_eq!(capabilities.sonic_similarity, CapabilitySupport::Supported);
+        assert_eq!(
+            capabilities.top_songs_by_artist_id,
+            CapabilitySupport::Unsupported
+        );
+        assert_eq!(capabilities.playback_report, CapabilitySupport::Supported);
+        assert_eq!(
+            capabilities.index_based_queue,
+            CapabilitySupport::Unsupported
+        );
+        assert_eq!(capabilities.internet_radio, CapabilitySupport::Supported);
+        assert_eq!(capabilities.podcasts, CapabilitySupport::Supported);
+        assert_eq!(
+            capabilities.podcast_episode_lookup,
+            CapabilitySupport::Unsupported
+        );
+        assert_eq!(capabilities.smart_discovery(), CapabilitySupport::Supported);
+
+        let compatibility = ServerInfo {
+            protocol_version: "1.8.0".into(),
+            ..ServerInfo::default()
+        };
+        let capabilities = ServerCapabilities::from_server_info(&compatibility);
+        assert_eq!(capabilities.structured_lyrics, CapabilitySupport::Unknown);
+        assert!(capabilities.structured_lyrics.allows_optimistic_request());
+        assert_eq!(capabilities.internet_radio, CapabilitySupport::Unsupported);
+        assert_eq!(capabilities.podcasts, CapabilitySupport::Supported);
+    }
+
+    #[test]
+    fn invalid_protocol_versions_leave_base_capabilities_unknown() {
+        let info = ServerInfo {
+            protocol_version: "unknown".into(),
+            ..ServerInfo::default()
+        };
+        let capabilities = ServerCapabilities::from_server_info(&info);
+
+        assert_eq!(capabilities.internet_radio, CapabilitySupport::Unknown);
+        assert_eq!(capabilities.podcasts, CapabilitySupport::Unknown);
+    }
 
     #[test]
     fn legacy_config_defaults_to_light_theme() {

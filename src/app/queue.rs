@@ -35,6 +35,7 @@ impl NavidromeApp {
         } else {
             Some(songs.to_vec())
         };
+        self.cancel_song_radio();
         self.cancel_next_preload();
         if let Some(songs) = replacement {
             self.state.queue = songs;
@@ -279,6 +280,7 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
+        self.cancel_song_radio();
         self.cancel_next_preload();
         let insert_at = match self.state.queue_index {
             Some(index) => (index + 1).min(self.state.queue.len()),
@@ -352,6 +354,7 @@ impl NavidromeApp {
     }
 
     pub(super) fn play_song_list(&mut self, songs: &[Song], index: usize) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         self.state.queue = songs.to_vec();
         self.state.shuffle_history.start(index);
@@ -361,6 +364,7 @@ impl NavidromeApp {
 
     /// 将单首歌曲插入到当前播放歌曲之后；未在播放时插入队首（不自动播放）。
     pub(super) fn insert_next(&mut self, song: Song) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         let insert_at = match self.state.queue_index {
             Some(index) => (index + 1).min(self.state.queue.len()),
@@ -375,6 +379,7 @@ impl NavidromeApp {
 
     /// 将单首歌曲追加到队列末尾（不自动播放；空队列时设为队首索引以便播放键可用）。
     pub(super) fn add_to_queue(&mut self, song: Song) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
@@ -388,6 +393,7 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
+        self.cancel_song_radio();
         self.cancel_next_preload();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
@@ -402,6 +408,7 @@ impl NavidromeApp {
         if index >= self.state.queue.len() {
             return;
         }
+        self.cancel_song_radio();
         self.cancel_next_preload();
         let removed_current = self.state.queue_index == Some(index);
         self.state.queue.remove(index);
@@ -427,6 +434,7 @@ impl NavidromeApp {
 
     /// 清空当前播放歌曲之后的所有队列项。
     pub(super) fn clear_queue_after_current(&mut self) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         if let Some(current) = self.state.queue_index {
             let keep = current + 1;
@@ -442,6 +450,7 @@ impl NavidromeApp {
 
     /// 清空整个队列并停止播放。
     pub(super) fn clear_queue(&mut self) {
+        self.cancel_song_radio();
         self.cancel_next_preload();
         self.state.queue.clear();
         self.state.queue_index = None;
@@ -453,6 +462,7 @@ impl NavidromeApp {
     /// 将队列项从 `from` 移动到 `to`，并修正当前索引。
     pub(super) fn move_queue_item(&mut self, from: usize, to: usize) {
         self.clear_song_multi();
+        self.cancel_song_radio();
         self.cancel_next_preload();
         let len = self.state.queue.len();
         if from >= len || to >= len || from == to {
@@ -467,5 +477,101 @@ impl NavidromeApp {
             self.state.queue_index = Some(queue_index_after_move(from, to, current));
         }
         self.save_session();
+    }
+
+    /// Start a radio immediately with the seed song while candidates are
+    /// generated in the background. The result is only appended if the user
+    /// has left the one-song seed queue untouched.
+    pub(super) fn start_song_radio(&mut self, seed: Song) {
+        let Some(api) = self.api.clone() else {
+            self.notify_error(t!("Configure a server before playing"));
+            return;
+        };
+        self.cancel_song_radio();
+        self.radio_generation = self.radio_generation.wrapping_add(1);
+        let generation = self.radio_generation;
+        self.radio_loading_song_id = Some(seed.id.clone());
+
+        self.cancel_next_preload();
+        self.state.queue = vec![seed.clone()];
+        self.state.shuffle_history.start(0);
+        // Explicitly starting a radio means "continue after this track".
+        // Repeat-one would contradict that intent, while repeat-all and
+        // shuffle still produce valid radio playback semantics.
+        if self.state.playback_modes.repeat == RepeatMode::One {
+            self.state.playback_modes.repeat = RepeatMode::Off;
+            self.config.playback_modes = self.state.playback_modes;
+            if let Err(error) = config::save(&self.config) {
+                self.notify_error(t!(
+                    "Playback mode save failed: %{error}",
+                    error = format!("{error:#}")
+                ));
+            }
+        }
+        self.play_queue_index(0);
+        self.save_session();
+
+        let tx = self.tx.clone();
+        let request_seed = seed.clone();
+        self.spawn_future(async move {
+            let result = api
+                .song_radio(&request_seed, 24)
+                .await
+                .map_err(error_message);
+            let _ = tx.send(Msg::SongRadio {
+                generation,
+                seed,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn cancel_song_radio(&mut self) {
+        if self.radio_loading_song_id.take().is_some() {
+            self.radio_generation = self.radio_generation.wrapping_add(1);
+        }
+    }
+
+    pub(super) fn finish_song_radio(
+        &mut self,
+        generation: u64,
+        seed: Song,
+        result: Result<Vec<Song>, String>,
+    ) {
+        if generation != self.radio_generation
+            || self.radio_loading_song_id.as_deref() != Some(seed.id.as_str())
+        {
+            return;
+        }
+        self.radio_loading_song_id = None;
+
+        let seed_queue_untouched = self.state.queue.len() == 1
+            && self
+                .state
+                .queue
+                .first()
+                .is_some_and(|song| song.id == seed.id)
+            && self.state.queue_index == Some(0)
+            && self
+                .state
+                .now_playing
+                .as_ref()
+                .is_some_and(|song| song.id == seed.id);
+        if !seed_queue_untouched {
+            return;
+        }
+
+        match result {
+            Ok(candidates) if !candidates.is_empty() => {
+                let count = candidates.len();
+                self.state.queue.extend(candidates);
+                self.save_session();
+                self.notify_success(t!("Song radio added %{count} tracks", count = count));
+            }
+            Ok(_) => self.notify_warning(t!("No related tracks were found for this song")),
+            Err(error) => {
+                self.notify_error(t!("Could not build song radio: %{error}", error = error))
+            }
+        }
     }
 }

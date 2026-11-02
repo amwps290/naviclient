@@ -21,7 +21,7 @@ struct State {
 }
 
 struct Server {
-    api: Api,
+    api: OpenSubsonicProvider,
     state: Arc<Mutex<State>>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
@@ -30,7 +30,7 @@ struct Server {
 impl Server {
     fn new() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let api = Api::new(
+        let api = OpenSubsonicProvider::new(
             &format!("http://{}", listener.local_addr().unwrap()),
             "alice",
             "secret",

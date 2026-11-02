@@ -14,19 +14,23 @@ use crate::playlist::{can_edit, song_ids, PlaylistDetails, PlaylistEdit, Playlis
 mod playlist_tests;
 
 use crate::models::{
-    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics,
-    OpenSubsonicExtension, Playlist, SearchResults, ServerInfo, Song,
+    Album, AlbumSort, Artist, CapabilitySupport, FavoriteKey, FavoriteKind, Favorites, Genre,
+    LyricLine, Lyrics, OpenSubsonicExtension, Playlist, SearchResults, ServerCapabilities,
+    ServerInfo, Song,
 };
 
+const RADIO_FALLBACK_ALBUMS: usize = 6;
+const RADIO_FALLBACK_TRACKS_PER_ALBUM: usize = 4;
+
 #[derive(Clone)]
-pub struct Api {
+pub struct OpenSubsonicProvider {
     client: reqwest::Client,
     base_url: String,
     username: String,
     password: String,
 }
 
-impl Api {
+impl OpenSubsonicProvider {
     pub fn new(server_url: &str, username: &str, password: &str) -> Result<Self> {
         let base_url = if server_url.contains("://") {
             server_url.trim_end_matches('/').to_string()
@@ -252,6 +256,89 @@ impl Api {
         Ok(songs)
     }
 
+    /// Build a song-radio candidate list. Similarity results are the primary
+    /// source; older compatible servers fall back to a bounded same-artist
+    /// sample and then songs from the same genre.
+    pub async fn song_radio(&self, seed: &Song, count: u32) -> Result<Vec<Song>> {
+        let count = count.max(1) as usize;
+        let mut errors = Vec::new();
+
+        match self.similar_songs(&seed.id, count as u32).await {
+            Ok(songs) if !songs.is_empty() => {
+                let candidates = unique_radio_candidates(seed, songs, count);
+                if !candidates.is_empty() {
+                    return Ok(candidates);
+                }
+            }
+            Ok(_) => {}
+            Err(error) => errors.push(format!("similar songs: {error:#}")),
+        }
+
+        let mut fallback = Vec::new();
+        if let Some(artist_id) = seed.artist_id.as_deref().filter(|id| !id.is_empty()) {
+            match self.artist_albums(artist_id).await {
+                Ok(albums) => {
+                    for album in albums.into_iter().take(RADIO_FALLBACK_ALBUMS) {
+                        match self.album_songs(&album.id).await {
+                            Ok(songs) => fallback
+                                .extend(songs.into_iter().take(RADIO_FALLBACK_TRACKS_PER_ALBUM)),
+                            Err(error) => {
+                                errors.push(format!("artist album {}: {error:#}", album.id))
+                            }
+                        }
+                        if fallback.len() >= count {
+                            break;
+                        }
+                    }
+                }
+                Err(error) => errors.push(format!("artist albums: {error:#}")),
+            }
+        }
+
+        if fallback.len() < count {
+            if let Some(genre) = seed
+                .genre
+                .as_deref()
+                .filter(|genre| !genre.trim().is_empty())
+            {
+                match self.songs_by_genre(genre, count as u32, 0).await {
+                    Ok(songs) => fallback.extend(songs),
+                    Err(error) => errors.push(format!("genre songs: {error:#}")),
+                }
+            }
+        }
+
+        let candidates = unique_radio_candidates(seed, fallback, count);
+        if !candidates.is_empty() {
+            return Ok(candidates);
+        }
+        if errors.is_empty() {
+            Err(anyhow!("the server returned no radio candidates"))
+        } else {
+            Err(anyhow!(errors.join("; ")))
+        }
+    }
+
+    pub async fn similar_songs(&self, song_id: &str, count: u32) -> Result<Vec<Song>> {
+        let count = count.to_string();
+        let body = self
+            .get_json("getSimilarSongs2", &[("id", song_id), ("count", &count)])
+            .await?;
+        parse_array(&body["similarSongs2"], "song")
+    }
+
+    pub async fn songs_by_genre(&self, genre: &str, count: u32, offset: u32) -> Result<Vec<Song>> {
+        let count = count.to_string();
+        let offset = offset.to_string();
+        let body = self
+            .get_json(
+                "getSongsByGenre",
+                &[("genre", genre), ("count", &count), ("offset", &offset)],
+            )
+            .await?;
+        parse_array(&body["songsByGenre"], "song")
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         let body = self.get_json("getPlaylists", &[]).await?;
         let mut playlists = Vec::new();
@@ -275,12 +362,21 @@ impl Api {
         })
     }
 
-    pub async fn lyrics(&self, song: &Song) -> Result<Lyrics> {
-        let structured = self
-            .get_json("getLyricsBySongId", &[("id", &song.id)])
-            .await;
+    pub async fn lyrics(
+        &self,
+        song: &Song,
+        structured_lyrics: CapabilitySupport,
+    ) -> Result<Lyrics> {
+        let structured = if structured_lyrics.allows_optimistic_request() {
+            Some(
+                self.get_json("getLyricsBySongId", &[("id", &song.id)])
+                    .await,
+            )
+        } else {
+            None
+        };
 
-        if let Ok(body) = &structured {
+        if let Some(Ok(body)) = &structured {
             if let Some(lyrics) = parse_structured_lyrics(body) {
                 return Ok(lyrics);
             }
@@ -294,12 +390,14 @@ impl Api {
             .await
         {
             Ok(body) => Ok(parse_plain_lyrics(&body).unwrap_or_default()),
-            Err(_) if structured.is_ok() => Ok(Lyrics::default()),
-            Err(fallback_error) => Err(structured
-                .expect_err("successful structured lyrics handled above")
-                .context(format!(
+            Err(_) if structured.as_ref().is_some_and(Result::is_ok) => Ok(Lyrics::default()),
+            Err(fallback_error) => match structured {
+                Some(Err(structured_error)) => Err(structured_error.context(format!(
                     "legacy lyrics request also failed: {fallback_error:#}"
                 ))),
+                Some(Ok(_)) => unreachable!("successful structured lyrics handled above"),
+                None => Err(fallback_error),
+            },
         }
     }
 
@@ -464,7 +562,7 @@ impl Api {
 }
 
 fn parse_server_info(body: &Value) -> ServerInfo {
-    ServerInfo {
+    let mut info = ServerInfo {
         app_name: body
             .get("type")
             .or_else(|| body.get("app"))
@@ -483,8 +581,12 @@ fn parse_server_info(body: &Value) -> ServerInfo {
             .get("openSubsonic")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        extensions_discovered: false,
         extensions: Vec::new(),
-    }
+        capabilities: ServerCapabilities::default(),
+    };
+    info.refresh_capabilities();
+    info
 }
 
 fn merge_open_subsonic_capabilities(info: &mut ServerInfo, body: &Value) {
@@ -505,7 +607,9 @@ fn merge_open_subsonic_capabilities(info: &mut ServerInfo, body: &Value) {
     // A successful response from this OpenSubsonic-only endpoint is itself a
     // capability signal, including for servers that omit `openSubsonic=true`.
     info.open_subsonic = true;
+    info.extensions_discovered = true;
     info.extensions = parse_open_subsonic_extensions(body);
+    info.refresh_capabilities();
 }
 
 fn parse_open_subsonic_extensions(body: &Value) -> Vec<OpenSubsonicExtension> {
@@ -590,6 +694,15 @@ where
         out.push(serde_json::from_value(item.clone())?);
     }
     Ok(out)
+}
+
+fn unique_radio_candidates(seed: &Song, songs: Vec<Song>, count: usize) -> Vec<Song> {
+    let mut seen = BTreeSet::from([seed.id.clone()]);
+    songs
+        .into_iter()
+        .filter(|song| !song.id.is_empty() && seen.insert(song.id.clone()))
+        .take(count)
+        .collect()
 }
 
 /// 解析单个 structuredLyrics 变体为歌词行（不含翻译）。
@@ -814,7 +927,7 @@ mod tests {
 
     #[test]
     fn builds_subsonic_auth_query() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api.url_for("ping", &[]).unwrap();
         let parsed = Url::parse(&url).unwrap();
         let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
@@ -837,6 +950,10 @@ mod tests {
             "openSubsonic": true
         });
         let mut info = parse_server_info(&ping);
+        assert_eq!(
+            info.capabilities.structured_lyrics,
+            CapabilitySupport::Unknown
+        );
         let capabilities = serde_json::json!({
             "status": "ok",
             "version": "1.16.1",
@@ -857,9 +974,26 @@ mod tests {
         assert_eq!(info.server_version.as_deref(), Some("2.4.1"));
         assert_eq!(info.protocol_version, "1.16.1");
         assert!(info.open_subsonic);
+        assert!(info.extensions_discovered);
         assert!(info.supports_extension("sonicSimilarity", 1));
         assert!(info.supports_extension("SONGLYRICS", 2));
         assert!(!info.supports_extension("songLyrics", 3));
+        assert_eq!(
+            info.capabilities.structured_lyrics,
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            info.capabilities.enhanced_lyrics,
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            info.capabilities.sonic_similarity,
+            CapabilitySupport::Supported
+        );
+        assert_eq!(
+            info.capabilities.top_songs_by_artist_id,
+            CapabilitySupport::Unsupported
+        );
         assert_eq!(
             info.extension_summary(6).as_deref(),
             Some("songLyrics v1/2, sonicSimilarity v1")
@@ -884,13 +1018,22 @@ mod tests {
         assert_eq!(info.app_name.as_deref(), Some("Legacy Server"));
         assert_eq!(info.display_version(), "1.13.0");
         assert!(!info.open_subsonic);
+        assert!(!info.extensions_discovered);
         assert!(info.extensions.is_empty());
+        assert_eq!(
+            info.capabilities.structured_lyrics,
+            CapabilitySupport::Unknown
+        );
+        assert_eq!(
+            info.capabilities.internet_radio,
+            CapabilitySupport::Supported
+        );
         assert_eq!(info.extension_summary(4), None);
     }
 
     #[test]
     fn update_now_playing_uses_subsonic_parameters() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api
             .url_for("updateNowPlaying", &[("id", "song-9"), ("time", "42")])
             .unwrap();
@@ -902,7 +1045,7 @@ mod tests {
 
     #[test]
     fn scrobble_marks_completed_playback() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api
             .url_for("scrobble", &[("id", "song-9"), ("submission", "true")])
             .unwrap();
@@ -914,7 +1057,7 @@ mod tests {
 
     #[test]
     fn recent_album_list_uses_the_recent_type() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api
             .url_for("getAlbumList2", &[("type", "recent"), ("size", "30")])
             .unwrap();
@@ -927,7 +1070,7 @@ mod tests {
     #[test]
     fn home_album_sections_use_supported_list_types() {
         for list_type in ["frequent", "random"] {
-            let api = Api::new("http://example.test", "alice", "secret").unwrap();
+            let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
             let url = api
                 .url_for("getAlbumList2", &[("type", list_type), ("size", "30")])
                 .unwrap();
@@ -963,7 +1106,7 @@ mod tests {
 
     #[test]
     fn albums_by_genre_uses_subsonic_parameters() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api
             .url_for(
                 "getAlbumList2",
@@ -981,6 +1124,73 @@ mod tests {
         assert_eq!(params["genre"], "Jazz");
         assert_eq!(params["size"], "100");
         assert_eq!(params["offset"], "300");
+    }
+
+    #[test]
+    fn song_radio_requests_use_standard_subsonic_parameters() {
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
+        let similar = api
+            .url_for("getSimilarSongs2", &[("id", "seed"), ("count", "24")])
+            .unwrap();
+        let params: HashMap<String, String> = Url::parse(&similar)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(params["id"], "seed");
+        assert_eq!(params["count"], "24");
+
+        let genre = api
+            .url_for(
+                "getSongsByGenre",
+                &[("genre", "Jazz & Soul"), ("count", "24"), ("offset", "0")],
+            )
+            .unwrap();
+        let params: HashMap<String, String> = Url::parse(&genre)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(params["genre"], "Jazz & Soul");
+        assert_eq!(params["count"], "24");
+        assert_eq!(params["offset"], "0");
+    }
+
+    #[test]
+    fn song_radio_candidates_exclude_seed_duplicates_and_blank_ids() {
+        let seed = Song {
+            id: "seed".into(),
+            title: "Seed".into(),
+            ..Song::default()
+        };
+        let song = |id: &str| Song {
+            id: id.into(),
+            title: id.into(),
+            ..Song::default()
+        };
+        let candidates = unique_radio_candidates(
+            &seed,
+            vec![song("seed"), song("a"), song("a"), song(""), song("b")],
+            8,
+        );
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|song| song.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+    }
+
+    #[test]
+    fn song_genre_is_parsed_for_explainable_radio_fallback() {
+        let song: Song = serde_json::from_value(serde_json::json!({
+            "id": "s",
+            "title": "Song",
+            "genre": "Ambient"
+        }))
+        .unwrap();
+        assert_eq!(song.genre.as_deref(), Some("Ambient"));
     }
 
     #[test]
@@ -1003,7 +1213,7 @@ mod tests {
 
     #[test]
     fn sorted_album_request_includes_type_size_and_offset() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let mut params = album_sort_params(AlbumSort::Artist);
         params.push(("size", "100".to_string()));
         params.push(("offset", "300".to_string()));
@@ -1021,7 +1231,7 @@ mod tests {
 
     #[test]
     fn stream_url_includes_optional_max_bit_rate() {
-        let api = Api::new("http://example.test", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let url = api.stream_url("song-1", Some(320)).unwrap();
         let parsed = Url::parse(&url).unwrap();
         let params: HashMap<String, String> = parsed.query_pairs().into_owned().collect();
@@ -1034,7 +1244,7 @@ mod tests {
 
     #[test]
     fn accepts_urls_without_scheme() {
-        let api = Api::new("localhost:4533", "alice", "secret").unwrap();
+        let api = OpenSubsonicProvider::new("localhost:4533", "alice", "secret").unwrap();
         assert_eq!(api.base_url(), "http://localhost:4533");
     }
 

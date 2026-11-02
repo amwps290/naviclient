@@ -12,7 +12,12 @@ JavaScript runtime.
 - OpenSubsonic capability discovery after connection: server type, server and
   protocol versions, and supported extension versions are shown in Settings.
   Servers without the discovery endpoint remain fully usable in Subsonic
-  compatibility mode, and the probe never blocks the ordinary connection.
+  compatibility mode, and the probe never blocks the ordinary connection. The
+  `OpenSubsonicProvider` keeps per-feature supported / unsupported / unknown
+  capabilities for structured lyrics, discovery, playback reporting, indexed
+  queues, advanced transcoding, internet radio, and podcasts. Structured lyrics
+  already use this matrix to avoid known-unsupported requests without regressing
+  servers whose capabilities cannot be probed.
 - Multiple saved servers with one-click switching: the sidebar shows which
   library you are browsing and the Settings page lists every server with its
   address and account. Switching stops playback, saves the current queue, and
@@ -59,6 +64,11 @@ JavaScript runtime.
   waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
+- Song radio from any track action menu: the seed starts immediately while the
+  client builds a 24-track continuation from server similarity results, with
+  bounded same-artist and same-genre fallbacks for compatible older servers.
+  Duplicate/blank IDs are removed, and manual queue edits or server switches
+  invalidate in-flight results instead of overwriting the user's Up Next
 - Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
   position stay intact while the queue is inspected or edited
 - Import playlists from NetEase Cloud Music or QQ Music: paste a direct link,

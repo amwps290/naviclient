@@ -481,7 +481,9 @@ impl NavidromeApp {
                     }
                 }
                 Msg::OpenSubsonicInfo { base_url, result } => {
-                    if self.api.as_ref().map(Api::base_url) != Some(base_url.as_str()) {
+                    if self.api.as_ref().map(OpenSubsonicProvider::base_url)
+                        != Some(base_url.as_str())
+                    {
                         continue;
                     }
                     match result {
@@ -889,6 +891,11 @@ impl NavidromeApp {
                     }
                     Err(error) => self.notify_error(error),
                 },
+                Msg::SongRadio {
+                    generation,
+                    seed,
+                    result,
+                } => self.finish_song_radio(generation, seed, result),
                 Msg::Lyrics { song_id, result } => {
                     if self.state.now_playing.as_ref().map(|song| song.id.as_str())
                         == Some(song_id.as_str())

@@ -1932,7 +1932,7 @@ impl NavidromeApp {
             .server
             .as_ref()
             .map(|server| {
-                let protocol = if server.open_subsonic {
+                let protocol = if server.extensions_discovered {
                     t!(
                         "OpenSubsonic %{version} · %{count} extensions",
                         version = server.protocol_version,
@@ -1946,8 +1946,7 @@ impl NavidromeApp {
                     )
                     .to_string()
                 };
-                let discovery_ready = server.supports_extension("sonicSimilarity", 1)
-                    || server.supports_extension("topSongsByArtistId", 1);
+                let discovery_ready = server.capabilities.smart_discovery().is_supported();
                 let extensions = server.extension_summary(6).map(|extensions| {
                     if discovery_ready {
                         t!(
