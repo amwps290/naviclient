@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use gpui_kit::hsla;
+use gpui_kit::{hsla, px};
 
 use super::{
     accent_foreground, advance_index, album_page_offset, compact_song_columns,
@@ -764,6 +764,7 @@ fn light_theme_hint_contrast_is_darkened_for_readability(cx: &mut gpui_kit::Test
             "修正后应为 neutral-600（约 7.4:1），实际 {after}"
         );
         assert!(after > before);
+        assert_eq!(cx.theme().radius, px(8.0));
 
         // 幂等：重复调用（如后续启动路径复用）不改变结果。
         crate::app::adjust_light_theme_contrast(cx);
@@ -774,6 +775,7 @@ fn light_theme_hint_contrast_is_darkened_for_readability(cx: &mut gpui_kit::Test
 
         // 深色主题不受影响：切换到 Dark 后提示灰是另一套值。
         Theme::change(ThemeMode::Dark, None, cx);
+        assert_eq!(cx.theme().radius, px(8.0));
         assert_ne!(
             contrast_ratio(cx.theme().colors.muted_foreground, white),
             after

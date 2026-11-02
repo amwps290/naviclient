@@ -24,7 +24,7 @@ impl NavidromeApp {
             .aspect_square()
             .object_fit(ObjectFit::Cover)
             .flex_none()
-            .rounded_lg()
+            .rounded(px(12.0))
             .into_any_element()
     }
 
@@ -801,7 +801,7 @@ impl NavidromeApp {
                                             div()
                                                 .absolute()
                                                 .inset_0()
-                                                .rounded_lg()
+                                                .rounded(px(12.0))
                                                 .bg(hsla(0.0, 0.0, 0.0, 0.32))
                                                 .flex()
                                                 .items_center()
@@ -1052,7 +1052,7 @@ impl NavidromeApp {
                                         div()
                                             .absolute()
                                             .inset_0()
-                                            .rounded_lg()
+                                            .rounded(px(12.0))
                                             .bg(hsla(0.0, 0.0, 0.0, 0.32))
                                             .flex()
                                             .items_center()
@@ -3958,6 +3958,13 @@ impl NavidromeApp {
         let (base, raw_accent) = cover_id
             .and_then(|id| self.state.cover_palettes.get(id).copied())
             .unwrap_or((cx.theme().info, cx.theme().chart_2));
+        // Grayscale artwork otherwise produces another gray action button.
+        // Blend in the theme's semantic info color while retaining cover identity.
+        let raw_accent = if raw_accent.s < 0.14 {
+            cx.theme().info.blend(raw_accent.opacity(0.35))
+        } else {
+            raw_accent
+        };
         let light = cx.theme().background.l >= 0.5;
         let start = cx
             .theme()
@@ -3988,6 +3995,7 @@ impl NavidromeApp {
         if let Some(song) = &self.state.now_playing {
             let playback = self.audio.state();
             let is_playing = playback.active && !playback.paused;
+            let playback_label = if is_playing { t!("Pause") } else { t!("Play") };
             let (surface_start, surface_end, accent) =
                 self.home_feature_colors(song.cover_art.as_deref(), cx);
             let play_style = ButtonCustomVariant::new(cx)
@@ -4003,7 +4011,10 @@ impl NavidromeApp {
                     .when(compact, |this| this.p_4().gap_4())
                     .when(!compact, |this| this.p_5().gap_5())
                     .items_center()
-                    .rounded_lg()
+                    .rounded(px(12.0))
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(0.58))
+                    .shadow_sm()
                     .bg(linear_gradient(
                         118.0,
                         linear_color_stop(surface_start, 0.0),
@@ -4028,7 +4039,8 @@ impl NavidromeApp {
                             .when(!compact, |this| this.gap_2())
                             .child(
                                 div()
-                                    .text_sm()
+                                    .when(compact, |this| this.text_sm())
+                                    .when(!compact, |this| this.text_base())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(accent)
                                     .child(t!("Continue listening")),
@@ -4044,7 +4056,8 @@ impl NavidromeApp {
                             .child(
                                 div()
                                     .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(cx.theme().foreground.opacity(0.72))
                                     .truncate()
                                     .child(if song.album.trim().is_empty() {
                                         song.artist.clone()
@@ -4056,19 +4069,20 @@ impl NavidromeApp {
                                 h_flex()
                                     .when(compact, |this| this.pt_1().gap_1())
                                     .when(!compact, |this| this.pt_2().gap_2())
+                                    .items_center()
                                     .child(
                                         Button::new("home-feature-playback")
-                                            .label(if is_playing {
-                                                t!("Pause")
-                                            } else {
-                                                t!("Play")
-                                            })
                                             .icon(if is_playing {
                                                 PlayerIcon::Pause
                                             } else {
                                                 PlayerIcon::Play
                                             })
+                                            .accessibility_label(playback_label.clone())
+                                            .tooltip(playback_label)
                                             .custom(play_style)
+                                            .rounded(px(999.0))
+                                            .w(px(if compact { 40.0 } else { 44.0 }))
+                                            .h(px(if compact { 40.0 } else { 44.0 }))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.toggle_playback();
                                                 cx.notify();
@@ -4076,8 +4090,11 @@ impl NavidromeApp {
                                     )
                                     .child(
                                         Button::new("home-feature-now-playing")
-                                            .label(t!("Now Playing"))
+                                            .label(t!("Open player"))
+                                            .icon(AppIcon::ChevronRight)
                                             .ghost()
+                                            .small()
+                                            .rounded(px(8.0))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.open_now_playing();
                                                 cx.notify();
@@ -4108,7 +4125,10 @@ impl NavidromeApp {
                 .when(compact, |this| this.p_4().gap_4())
                 .when(!compact, |this| this.p_5().gap_5())
                 .items_center()
-                .rounded_lg()
+                .rounded(px(12.0))
+                .border_1()
+                .border_color(cx.theme().border.opacity(0.58))
+                .shadow_sm()
                 .bg(linear_gradient(
                     118.0,
                     linear_color_stop(surface_start, 0.0),
@@ -4133,7 +4153,8 @@ impl NavidromeApp {
                         .when(!compact, |this| this.gap_2())
                         .child(
                             div()
-                                .text_sm()
+                                .when(compact, |this| this.text_sm())
+                                .when(!compact, |this| this.text_base())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(accent)
                                 .child(t!("Recently played")),
@@ -4149,7 +4170,8 @@ impl NavidromeApp {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(cx.theme().foreground.opacity(0.72))
                                 .truncate()
                                 .child(album.artist.clone()),
                         )
@@ -4157,11 +4179,16 @@ impl NavidromeApp {
                             h_flex()
                                 .when(compact, |this| this.pt_1().gap_1())
                                 .when(!compact, |this| this.pt_2().gap_2())
+                                .items_center()
                                 .child(
                                     Button::new("home-feature-play-album")
-                                        .label(t!("Play album"))
                                         .icon(PlayerIcon::Play)
+                                        .accessibility_label(t!("Play album"))
+                                        .tooltip(t!("Play album"))
                                         .custom(play_style)
+                                        .rounded(px(999.0))
+                                        .w(px(if compact { 40.0 } else { 44.0 }))
+                                        .h(px(if compact { 40.0 } else { 44.0 }))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.play_album(album_for_play.clone());
                                             cx.notify();
@@ -4170,7 +4197,10 @@ impl NavidromeApp {
                                 .child(
                                     Button::new("home-feature-open-album")
                                         .label(t!("Go to album"))
+                                        .icon(AppIcon::ChevronRight)
                                         .ghost()
+                                        .small()
+                                        .rounded(px(8.0))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_album(album_for_open.clone());
                                             cx.notify();
@@ -4268,15 +4298,32 @@ impl NavidromeApp {
         } else {
             t!("A balanced mix of favorites, familiar artists, and new discoveries.")
         };
+        let mix_cover = self.state.daily_mix.as_ref().and_then(|snapshot| {
+            snapshot
+                .tracks
+                .iter()
+                .find_map(|track| track.song.cover_art.as_deref())
+        });
+        let (surface_start, surface_end, accent) = self.home_feature_colors(mix_cover, cx);
+        let play_style = ButtonCustomVariant::new(cx)
+            .color(accent)
+            .foreground(accent_foreground(accent))
+            .hover(adjust_lightness(accent, 0.05))
+            .active(adjust_lightness(accent, -0.05));
         v_flex()
             .w_full()
             .h(px(feature_height))
             .justify_between()
             .gap_3()
-            .rounded_lg()
+            .rounded(px(12.0))
             .border_1()
-            .border_color(cx.theme().border.opacity(0.68))
-            .bg(cx.theme().secondary.opacity(0.18))
+            .border_color(cx.theme().border.opacity(0.58))
+            .shadow_sm()
+            .bg(linear_gradient(
+                118.0,
+                linear_color_stop(surface_start, 0.0),
+                linear_color_stop(surface_end, 1.0),
+            ))
             .when(compact, |this| this.p_4())
             .when(!compact, |this| this.p_5())
             .child(
@@ -4287,15 +4334,15 @@ impl NavidromeApp {
                         div()
                             .size(px(if compact { 40.0 } else { 48.0 }))
                             .flex_none()
-                            .rounded_md()
-                            .bg(cx.theme().primary.opacity(0.1))
+                            .rounded(px(8.0))
+                            .bg(accent.opacity(0.12))
                             .flex()
                             .items_center()
                             .justify_center()
                             .child(
                                 Icon::new(AppIcon::Shuffle)
                                     .with_size(px(if compact { 18.0 } else { 22.0 }))
-                                    .text_color(cx.theme().primary),
+                                    .text_color(accent),
                             ),
                     )
                     .child(
@@ -4317,7 +4364,7 @@ impl NavidromeApp {
                                     .text_color(if self.state.daily_mix_error.is_some() {
                                         cx.theme().danger
                                     } else {
-                                        cx.theme().muted_foreground
+                                        cx.theme().foreground.opacity(0.72)
                                     })
                                     .child(subtitle),
                             ),
@@ -4337,7 +4384,8 @@ impl NavidromeApp {
                                 } else {
                                     t!("Create and play")
                                 })
-                                .primary()
+                                .custom(play_style)
+                                .rounded(px(8.0))
                                 .small()
                                 .disabled(self.state.daily_mix_loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -4354,9 +4402,12 @@ impl NavidromeApp {
                         this.child(
                             Button::new("daily-mix-play")
                                 .icon(PlayerIcon::Play)
-                                .label(t!("Play"))
-                                .primary()
-                                .small()
+                                .accessibility_label(t!("Play"))
+                                .tooltip(t!("Play"))
+                                .custom(play_style)
+                                .rounded(px(999.0))
+                                .w(px(if compact { 40.0 } else { 44.0 }))
+                                .h(px(if compact { 40.0 } else { 44.0 }))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.play_daily_mix();
                                     cx.notify();
@@ -4368,6 +4419,7 @@ impl NavidromeApp {
                                 .tooltip(t!("Add to queue"))
                                 .ghost()
                                 .small()
+                                .rounded(px(8.0))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.append_daily_mix();
                                     cx.notify();
@@ -4379,6 +4431,7 @@ impl NavidromeApp {
                                 .tooltip(t!("Refresh mix"))
                                 .ghost()
                                 .small()
+                                .rounded(px(8.0))
                                 .disabled(self.state.daily_mix_loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.refresh_daily_mix();

@@ -225,6 +225,7 @@
 "Offline": "Offline"
 "On": "On"
 "Only the playlist owner can edit this playlist.": "Only the playlist owner can edit this playlist."
+"Open player": "Open player"
 "Open Settings to configure the server": "Open Settings to configure the server"
 "OpenSubsonic %{version} · %{count} extensions": "OpenSubsonic %{version} · %{count} extensions"
 "Optional — defaults to the host name": "Optional — defaults to the host name"

@@ -77,21 +77,24 @@ use self::import::{ImportStage, ImportUi};
 use helpers::*;
 use playlists::{PlaylistUi, SongMenuContext};
 
-/// 亮色主题次要文字对比度修正（UX 反馈：提示灰在亮色界面看不清）。
+/// 全局视觉 token 修正：普通控件统一 8px，卡片/弹窗统一 12px；
+/// 同时提高亮色主题的小号次要文字对比度。
 ///
-/// 默认亮色主题 muted.foreground = neutral-500（#737373），在白底上
-/// 对比度约 4.7:1；应用的次要文字大量使用 text_xs 小字号并叠在半透明
-/// 卡片上，观感发灰发虚。这里把全局 Theme 的默认亮色配置替换为
-/// muted 前景加深到 neutral-600（#525252，约 7.4:1）的副本，再重载
-/// 当前模式让 colors 立即生效。此后所有 `Theme::change`（设置页切换、
-/// System 外观同步）都会从这份配置加载，无需重复调用。深色主题
-/// （neutral-400 on neutral-950）不受影响。
+/// 配置副本会被后续 `Theme::change` 重用，因此运行时切换深浅主题不会
+/// 丢失圆角规范。深色主题颜色保持 Kit 默认，仅同步圆角。
 pub fn adjust_light_theme_contrast(cx: &mut App) {
     let mode = {
         let theme = Theme::global_mut(cx);
-        let mut config = (*theme.light_theme).clone();
-        config.colors.muted_foreground = Some("#525252".into());
-        theme.light_theme = std::rc::Rc::new(config);
+        let mut light = (*theme.light_theme).clone();
+        light.radius = Some(8);
+        light.radius_lg = Some(12);
+        light.colors.muted_foreground = Some("#525252".into());
+        theme.light_theme = std::rc::Rc::new(light);
+
+        let mut dark = (*theme.dark_theme).clone();
+        dark.radius = Some(8);
+        dark.radius_lg = Some(12);
+        theme.dark_theme = std::rc::Rc::new(dark);
         theme.mode
     };
     Theme::change(mode, None, cx);
@@ -2222,6 +2225,12 @@ impl NavidromeApp {
         let day = crate::recommendation::current_day_key();
         self.state.daily_mix = config::load_daily_mix(server_id.as_deref())
             .filter(|snapshot| snapshot.is_current(server_id.as_deref().unwrap_or_default(), &day));
+        let daily_accent_cover = self
+            .state
+            .daily_mix
+            .iter()
+            .flat_map(|snapshot| snapshot.tracks.iter())
+            .find_map(|track| track.song.cover_art.clone());
         let daily_covers = self
             .state
             .daily_mix
@@ -2230,6 +2239,7 @@ impl NavidromeApp {
             .filter_map(|track| track.song.cover_art.clone())
             .take(30)
             .collect();
+        self.ensure_cover(daily_accent_cover.as_deref(), true);
         self.preload_covers(daily_covers);
         // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
         self.state.genres = config::load_genres_cache(server_id.as_deref()).unwrap_or_default();

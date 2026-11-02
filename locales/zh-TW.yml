@@ -225,6 +225,7 @@
 "Offline": "離線"
 "On": "開啟"
 "Only the playlist owner can edit this playlist.": "只有播放清單的擁有者才能編輯它。"
+"Open player": "開啟播放頁"
 "Open Settings to configure the server": "開啟設定以設定伺服器"
 "OpenSubsonic %{version} · %{count} extensions": "OpenSubsonic %{version} · %{count} 項擴充"
 "Optional — defaults to the host name": "選填 — 預設使用主機名稱"

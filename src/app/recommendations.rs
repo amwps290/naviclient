@@ -141,6 +141,10 @@ impl NavidromeApp {
                 if let Err(error) = config::save_daily_mix(Some(&server_id), &snapshot) {
                     log::warn!("daily mix cache save failed: {error:#}");
                 }
+                let accent_cover = snapshot
+                    .tracks
+                    .iter()
+                    .find_map(|track| track.song.cover_art.clone());
                 let covers = snapshot
                     .tracks
                     .iter()
@@ -151,6 +155,7 @@ impl NavidromeApp {
                 self.state.daily_mix_play_when_ready = false;
                 self.state.daily_mix_error = None;
                 self.state.daily_mix = Some(snapshot);
+                self.ensure_cover(accent_cover.as_deref(), true);
                 self.preload_covers(covers);
                 if play_when_ready {
                     self.play_daily_mix();
