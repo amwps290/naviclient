@@ -13,7 +13,7 @@ use super::{
 use crate::api::OpenSubsonicProvider;
 use crate::models::{Album, CapabilitySupport, Song};
 
-pub const DAILY_MIX_VERSION: u32 = 1;
+pub const DAILY_MIX_VERSION: u32 = 2;
 const DAILY_TARGET: usize = 30;
 const MAX_ALBUM_REQUESTS: usize = 10;
 const MAX_ALBUM_TRACKS: usize = 12;
@@ -123,22 +123,14 @@ pub async fn generate_daily_mix(
     let album_candidates = collect_album_candidates(api.clone(), album_plan).await;
     candidates.extend(album_candidates);
 
-    let mut seeds = Vec::new();
-    let mut seed_ids = HashSet::new();
-    for song in favorites
-        .songs
-        .iter()
-        .chain(candidates.iter().filter_map(|candidate| {
-            (candidate.source == CandidateSource::Frequent).then_some(&candidate.song)
-        }))
-    {
-        if !song.id.trim().is_empty() && seed_ids.insert(song.id.clone()) {
-            seeds.push(song.clone());
-            if seeds.len() == MAX_SIMILARITY_SEEDS {
-                break;
-            }
-        }
-    }
+    let seeds = select_style_seeds(&favorites.songs, &candidates, &listening_profile);
+    let style = StyleSignature::from_seeds(&seeds);
+    candidates.retain(|candidate| {
+        !matches!(
+            candidate.source,
+            CandidateSource::Newest | CandidateSource::Random
+        ) || style.matches(&candidate.song, &listening_profile)
+    });
 
     if sonic_similarity.allows_optimistic_request() {
         candidates.extend(collect_similar_candidates(api.clone(), &seeds).await);
@@ -190,6 +182,106 @@ pub async fn generate_daily_mix(
             .as_secs(),
         tracks,
     })
+}
+
+#[derive(Default)]
+struct StyleSignature {
+    genres: HashSet<String>,
+    artists: HashSet<String>,
+}
+
+impl StyleSignature {
+    fn from_seeds(seeds: &[Song]) -> Self {
+        let mut signature = Self::default();
+        for song in seeds {
+            if let Some(genre) = normalized_genre(song) {
+                signature.genres.insert(genre);
+            }
+            if let Some(artist) = normalized_artist(song) {
+                signature.artists.insert(artist);
+            }
+        }
+        signature
+    }
+
+    fn matches(&self, song: &Song, profile: &ListeningProfile) -> bool {
+        if self.genres.is_empty() && self.artists.is_empty() {
+            return true;
+        }
+        let genre_match = normalized_genre(song).is_some_and(|genre| self.genres.contains(&genre));
+        let artist_match =
+            normalized_artist(song).is_some_and(|artist| self.artists.contains(&artist));
+        genre_match || artist_match || profile.score(song) >= 4.0
+    }
+}
+
+fn select_style_seeds(
+    favorites: &[Song],
+    candidates: &[RecommendationCandidate],
+    profile: &ListeningProfile,
+) -> Vec<Song> {
+    let mut pool: HashMap<String, (Song, f32)> = HashMap::new();
+    for (song, base) in favorites.iter().map(|song| (song, 20.0)).chain(
+        candidates
+            .iter()
+            .filter(|candidate| candidate.source == CandidateSource::Frequent)
+            .map(|candidate| (&candidate.song, 10.0)),
+    ) {
+        if song.id.trim().is_empty() {
+            continue;
+        }
+        let score = base + profile.score(song);
+        pool.entry(song.id.clone())
+            .and_modify(|(_, known_score)| *known_score = known_score.max(score))
+            .or_insert_with(|| (song.clone(), score));
+    }
+    let mut ranked = pool.into_values().collect::<Vec<_>>();
+    ranked.sort_by(|(left_song, left_score), (right_song, right_score)| {
+        right_score
+            .total_cmp(left_score)
+            .then_with(|| left_song.id.cmp(&right_song.id))
+    });
+    let Some((primary, _)) = ranked.first().cloned() else {
+        return Vec::new();
+    };
+    let primary_genre = normalized_genre(&primary);
+    let primary_artist = normalized_artist(&primary);
+    let mut seeds = vec![primary];
+    for (song, _) in ranked.into_iter().skip(1) {
+        let same_genre = primary_genre
+            .as_ref()
+            .is_some_and(|genre| normalized_genre(&song).as_ref() == Some(genre));
+        let same_artist = primary_artist
+            .as_ref()
+            .is_some_and(|artist| normalized_artist(&song).as_ref() == Some(artist));
+        if same_genre || same_artist {
+            seeds.push(song);
+            if seeds.len() == MAX_SIMILARITY_SEEDS {
+                break;
+            }
+        }
+    }
+    seeds
+}
+
+fn normalized_genre(song: &Song) -> Option<String> {
+    song.genre
+        .as_deref()
+        .map(str::trim)
+        .filter(|genre| !genre.is_empty())
+        .map(str::to_lowercase)
+}
+
+fn normalized_artist(song: &Song) -> Option<String> {
+    song.artist_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|artist| !artist.is_empty())
+        .map(|artist| format!("id:{artist}"))
+        .or_else(|| {
+            let artist = song.artist.trim();
+            (!artist.is_empty()).then(|| format!("name:{}", artist.to_lowercase()))
+        })
 }
 
 fn merge_album_plan<const N: usize>(
@@ -354,6 +446,44 @@ mod tests {
             name: id.into(),
             ..Album::default()
         }
+    }
+
+    fn styled_song(id: &str, artist: &str, genre: &str) -> Song {
+        Song {
+            id: id.into(),
+            title: id.into(),
+            artist: artist.into(),
+            artist_id: Some(format!("artist-{artist}")),
+            genre: Some(genre.into()),
+            ..Song::default()
+        }
+    }
+
+    #[test]
+    fn style_seeds_stay_inside_the_primary_genre_cluster() {
+        let favorites = vec![
+            styled_song("a-pop", "one", "Pop"),
+            styled_song("b-pop", "two", "pop"),
+            styled_song("c-rock", "three", "Rock"),
+        ];
+        let seeds = select_style_seeds(&favorites, &[], &ListeningProfile::default());
+        assert_eq!(
+            seeds
+                .iter()
+                .map(|song| song.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a-pop", "b-pop"]
+        );
+    }
+
+    #[test]
+    fn exploration_requires_the_seed_style_when_metadata_is_available() {
+        let seeds = vec![styled_song("seed", "one", "Ambient")];
+        let style = StyleSignature::from_seeds(&seeds);
+        let profile = ListeningProfile::default();
+        assert!(style.matches(&styled_song("same", "two", "ambient"), &profile));
+        assert!(style.matches(&styled_song("artist", "one", "Rock"), &profile));
+        assert!(!style.matches(&styled_song("off", "three", "Metal"), &profile));
     }
 
     #[test]

@@ -230,24 +230,25 @@ pub fn recommend(
     let mut album_counts = HashMap::new();
 
     if request.kind == RecommendationKind::DailyMix {
-        let familiar = request.target_count * 2 / 5;
-        let related = request.target_count * 2 / 5;
-        let explore = request.target_count.saturating_sub(familiar + related);
+        let familiar = (request.target_count / 10).max(usize::from(request.target_count > 0));
+        let explore = (request.target_count * 15 + 50) / 100;
+        let related = request
+            .target_count
+            .saturating_sub(familiar.saturating_add(explore));
         let quotas = [
             (MixBucket::Familiar, familiar),
             (MixBucket::Related, related),
             (MixBucket::Explore, explore),
         ];
-        // Give every bucket a strict-diversity opportunity before any bucket
-        // may relax. Recent tracks remain behind all fresh strict candidates.
-        for (allow_recent, relax_diversity) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
+        // Give every bucket a strict-diversity opportunity before relaxing.
+        // Recent tracks are never used to satisfy a quota; the generic fallback
+        // below only admits them when all fresh candidates are exhausted.
+        for relax_diversity in [false, true] {
             for (bucket, quota) in quotas {
                 fill_selection(
                     &ranked,
                     request.target_count,
-                    allow_recent,
+                    false,
                     if relax_diversity { None } else { strict_artist },
                     if relax_diversity { None } else { strict_album },
                     Some(bucket),
@@ -579,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn daily_mix_reserves_familiar_related_and_explore_capacity() {
+    fn daily_mix_reserves_anchor_related_and_in_style_explore_capacity() {
         let mut candidates = Vec::new();
         for index in 0..10 {
             candidates.push(candidate(
@@ -624,7 +625,7 @@ mod tests {
             .iter()
             .filter(|track| track.reason == RecommendationReason::Explore)
             .count();
-        assert_eq!((familiar, related, explore), (4, 4, 2));
+        assert_eq!((familiar, related, explore), (1, 7, 2));
     }
 
     #[test]

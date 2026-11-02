@@ -155,6 +155,8 @@ struct AppState {
     random_albums: Vec<Album>,
     random_albums_loading: bool,
     daily_mix: Option<DailyMixSnapshot>,
+    /// 上一版（含跨日）每日精选的歌曲，用于提高换歌率。
+    daily_mix_previous_ids: HashSet<String>,
     daily_mix_loading: bool,
     daily_mix_error: Option<String>,
     daily_mix_play_when_ready: bool,
@@ -270,6 +272,7 @@ impl Default for AppState {
             random_albums: Vec::new(),
             random_albums_loading: false,
             daily_mix: None,
+            daily_mix_previous_ids: HashSet::new(),
             daily_mix_loading: false,
             daily_mix_error: None,
             daily_mix_play_when_ready: false,
@@ -2223,7 +2226,13 @@ impl NavidromeApp {
         self.state.loudness_cache = config::load_loudness(server_id.as_deref());
         self.state.listening_history = config::load_listening_history(server_id.as_deref());
         let day = crate::recommendation::current_day_key();
-        self.state.daily_mix = config::load_daily_mix(server_id.as_deref())
+        let cached_daily_mix = config::load_daily_mix(server_id.as_deref());
+        self.state.daily_mix_previous_ids = cached_daily_mix
+            .iter()
+            .flat_map(|snapshot| snapshot.tracks.iter())
+            .map(|track| track.song.id.clone())
+            .collect();
+        self.state.daily_mix = cached_daily_mix
             .filter(|snapshot| snapshot.is_current(server_id.as_deref().unwrap_or_default(), &day));
         let daily_accent_cover = self
             .state

@@ -12,13 +12,19 @@ impl NavidromeApp {
     pub(super) fn play_daily_mix(&mut self) {
         let day = current_day_key();
         let server_id = self.config.active_server_id().unwrap_or_default();
-        if self
+        let stale = self
             .state
             .daily_mix
             .as_ref()
-            .is_some_and(|snapshot| !snapshot.is_current(server_id, &day))
-        {
-            self.state.daily_mix = None;
+            .is_some_and(|snapshot| !snapshot.is_current(server_id, &day));
+        if stale {
+            if let Some(snapshot) = self.state.daily_mix.take() {
+                self.state.daily_mix_previous_ids = snapshot
+                    .tracks
+                    .into_iter()
+                    .map(|track| track.song.id)
+                    .collect();
+            }
         }
         if let Some(snapshot) = &self.state.daily_mix {
             let songs = snapshot.songs();
@@ -97,7 +103,11 @@ impl NavidromeApp {
             .as_ref()
             .map(|server| server.capabilities.sonic_similarity)
             .unwrap_or_default();
-        let recent_song_ids = self.state.listening_history.recent_song_ids(50);
+        let mut recent_song_ids = self.state.listening_history.recent_song_ids(50);
+        recent_song_ids.extend(self.state.daily_mix_previous_ids.iter().cloned());
+        if let Some(snapshot) = &self.state.daily_mix {
+            recent_song_ids.extend(snapshot.tracks.iter().map(|track| track.song.id.clone()));
+        }
         let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
         let excluded_song_ids = self
             .state
@@ -158,6 +168,13 @@ impl NavidromeApp {
                     .take(30)
                     .collect();
                 let play_when_ready = self.state.daily_mix_play_when_ready;
+                if let Some(previous) = &self.state.daily_mix {
+                    self.state.daily_mix_previous_ids = previous
+                        .tracks
+                        .iter()
+                        .map(|track| track.song.id.clone())
+                        .collect();
+                }
                 self.state.daily_mix_play_when_ready = false;
                 self.state.daily_mix_error = None;
                 self.state.daily_mix = Some(snapshot);
