@@ -4,7 +4,9 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::recommendation::{current_day_key, generate_daily_mix};
+use crate::recommendation::{
+    current_day_key, generate_daily_mix, DailyMixGenerationContext, ListeningProfile,
+};
 
 impl NavidromeApp {
     pub(super) fn play_daily_mix(&mut self) {
@@ -96,6 +98,7 @@ impl NavidromeApp {
             .map(|server| server.capabilities.sonic_similarity)
             .unwrap_or_default();
         let recent_song_ids = self.state.listening_history.recent_song_ids(50);
+        let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
         let excluded_song_ids = self
             .state
             .queue
@@ -107,12 +110,15 @@ impl NavidromeApp {
         self.spawn_future(async move {
             let result = generate_daily_mix(
                 api,
-                server_id,
-                day,
-                variant,
-                sonic_similarity,
-                recent_song_ids,
-                excluded_song_ids,
+                DailyMixGenerationContext {
+                    server_id,
+                    day,
+                    variant,
+                    sonic_similarity,
+                    recent_song_ids,
+                    listening_profile,
+                    excluded_song_ids,
+                },
             )
             .await
             .map_err(error_message);

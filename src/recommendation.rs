@@ -7,10 +7,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
-use crate::models::Song;
+use crate::models::{ListeningEvent, ListeningHistory, Song};
 
 mod daily;
-pub(crate) use daily::{current_day_key, generate_daily_mix, DailyMixSnapshot};
+pub(crate) use daily::{
+    current_day_key, generate_daily_mix, DailyMixGenerationContext, DailyMixSnapshot,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecommendationKind {
@@ -60,12 +62,63 @@ pub struct RecommendationCandidate {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct ListeningProfile {
+    song_scores: HashMap<String, f32>,
+    artist_scores: HashMap<String, f32>,
+    genre_scores: HashMap<String, f32>,
+}
+
+impl ListeningProfile {
+    pub fn from_history(history: &ListeningHistory) -> Self {
+        let mut profile = Self::default();
+        for (age, event) in history.events.iter().rev().take(500).enumerate() {
+            let decay = 0.985_f32.powi(i32::try_from(age).unwrap_or(i32::MAX));
+            let weight = listening_event_weight(event) * decay;
+            *profile
+                .song_scores
+                .entry(event.song.id.clone())
+                .or_default() += weight;
+            if let Some(artist) = song_artist_key(&event.song) {
+                *profile.artist_scores.entry(artist).or_default() += weight;
+            }
+            if let Some(genre) = song_genre_key(&event.song) {
+                *profile.genre_scores.entry(genre).or_default() += weight;
+            }
+        }
+        profile
+    }
+
+    pub fn score(&self, song: &Song) -> f32 {
+        let song_score = self
+            .song_scores
+            .get(&song.id)
+            .copied()
+            .unwrap_or_default()
+            .clamp(-3.0, 8.0)
+            * 2.0;
+        let artist_score = song_artist_key(song)
+            .and_then(|key| self.artist_scores.get(&key).copied())
+            .unwrap_or_default()
+            .clamp(-2.0, 8.0)
+            * 1.5;
+        let genre_score = song_genre_key(song)
+            .and_then(|key| self.genre_scores.get(&key).copied())
+            .unwrap_or_default()
+            .clamp(-2.0, 8.0)
+            * 0.75;
+        song_score + artist_score + genre_score
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct RecommendationContext {
     /// Current queue entries are always excluded; automatic results may never
     /// duplicate or overwrite the user's explicitly arranged Up Next.
     pub excluded_song_ids: HashSet<String>,
     /// Recent tracks are deferred until non-recent candidates are exhausted.
     pub recent_song_ids: HashSet<String>,
+    /// Affinity derived from actual local listening duration and completion.
+    pub listening_profile: ListeningProfile,
     pub max_tracks_per_artist: usize,
     pub max_tracks_per_album: usize,
 }
@@ -148,8 +201,10 @@ pub fn recommend(
                 .filter(|source| *source != strongest)
                 .map(|source| source_weight(request.kind, source) as f32 * 0.2)
                 .sum();
-            let score =
-                strongest_score + supporting_score + stable_jitter(request.seed, &song.id) * 0.99;
+            let score = strongest_score
+                + supporting_score
+                + context.listening_profile.score(&song)
+                + stable_jitter(request.seed, &song.id) * 0.99;
             let recent = context.recent_song_ids.contains(&song.id);
             RankedCandidate {
                 song,
@@ -305,6 +360,44 @@ fn fill_selection<'a>(
         }
         selected.push(candidate);
     }
+}
+
+fn listening_event_weight(event: &ListeningEvent) -> f32 {
+    if event.completed {
+        return 3.0;
+    }
+    if event.listened_seconds == 0 {
+        return 0.0;
+    }
+    let duration = event.song.duration.unwrap_or_default().max(0) as f32;
+    let listened = event.listened_seconds as f32;
+    if event.listened_seconds >= 4 * 60 || duration > 0.0 && listened >= duration * 0.5 {
+        1.5
+    } else if event.listened_seconds >= 30 {
+        0.5
+    } else {
+        -0.75
+    }
+}
+
+fn song_artist_key(song: &Song) -> Option<String> {
+    song.artist_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("id:{id}"))
+        .or_else(|| {
+            let artist = song.artist.trim();
+            (!artist.is_empty()).then(|| format!("name:{}", artist.to_lowercase()))
+        })
+}
+
+fn song_genre_key(song: &Song) -> Option<String> {
+    song.genre
+        .as_deref()
+        .map(str::trim)
+        .filter(|genre| !genre.is_empty())
+        .map(str::to_lowercase)
 }
 
 fn nonzero_limit(limit: usize) -> Option<usize> {
@@ -532,6 +625,56 @@ mod tests {
             .filter(|track| track.reason == RecommendationReason::Explore)
             .count();
         assert_eq!((familiar, related, explore), (4, 4, 2));
+    }
+
+    #[test]
+    fn listening_profile_distinguishes_completed_engaged_and_skipped_tracks() {
+        let mut history = ListeningHistory::default();
+        let mut completed = song("completed", "favorite", "one");
+        completed.duration = Some(200);
+        completed.genre = Some("Pop".into());
+        history.record_started(completed.clone(), 1);
+        assert!(history.update_latest("completed", 180, true));
+
+        let mut engaged = song("engaged", "engaged", "two");
+        engaged.duration = Some(100);
+        history.record_started(engaged.clone(), 2);
+        assert!(history.update_latest("engaged", 50, false));
+
+        let mut skipped = song("skipped", "skipped", "three");
+        skipped.duration = Some(240);
+        history.record_started(skipped.clone(), 3);
+        assert!(history.update_latest("skipped", 8, false));
+
+        let profile = ListeningProfile::from_history(&history);
+        assert!(profile.score(&completed) > profile.score(&engaged));
+        assert!(profile.score(&engaged) > profile.score(&skipped));
+        assert!(profile.score(&skipped) < 0.0);
+
+        let related_artist = song("new", "favorite", "new-album");
+        let unrelated = song("other", "other", "other-album");
+        assert!(profile.score(&related_artist) > profile.score(&unrelated));
+    }
+
+    #[test]
+    fn listening_profile_changes_order_inside_the_same_candidate_source() {
+        let preferred = song("preferred", "preferred", "a");
+        let neutral = song("neutral", "neutral", "b");
+        let mut history = ListeningHistory::default();
+        history.record_started(preferred.clone(), 1);
+        assert!(history.update_latest("preferred", 200, true));
+        let result = recommend(
+            &request(2, 10),
+            vec![
+                candidate(neutral, CandidateSource::Random),
+                candidate(preferred, CandidateSource::Random),
+            ],
+            &RecommendationContext {
+                listening_profile: ListeningProfile::from_history(&history),
+                ..RecommendationContext::with_daily_mix_defaults()
+            },
+        );
+        assert_eq!(result[0].song.id, "preferred");
     }
 
     #[test]
