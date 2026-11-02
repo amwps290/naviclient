@@ -4247,7 +4247,12 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    fn render_daily_mix_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    fn render_daily_mix_card(
+        &self,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let compact = compact_window_layout(f32::from(window.viewport_size().width));
         let count = self
             .state
             .daily_mix
@@ -4262,66 +4267,58 @@ impl NavidromeApp {
         } else {
             t!("A balanced mix of favorites, familiar artists, and new discoveries.")
         };
-        let previews = self
-            .state
-            .daily_mix
-            .as_ref()
-            .map(|snapshot| {
-                snapshot
-                    .tracks
-                    .iter()
-                    .take(4)
-                    .filter_map(|track| track.song.cover_art.as_deref())
-                    .map(|cover| self.render_cover(Some(cover), 48.0, cx))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let preview_cover = self.state.daily_mix.as_ref().and_then(|snapshot| {
+            snapshot
+                .tracks
+                .iter()
+                .find_map(|track| track.song.cover_art.clone())
+        });
+        let art_size = if compact { 48.0 } else { 64.0 };
 
         h_flex()
             .w_full()
-            .min_h(px(116.0))
-            .gap_4()
+            .h(px(if compact { 76.0 } else { 92.0 }))
+            .gap_3()
             .items_center()
-            .flex_wrap()
-            .rounded_xl()
+            .rounded_lg()
             .border_1()
-            .border_color(cx.theme().border.opacity(0.75))
-            .bg(cx.theme().secondary.opacity(0.28))
-            .p_4()
-            .when(previews.is_empty(), |this| {
-                this.child(
-                    div()
-                        .size(px(72.0))
-                        .flex_none()
-                        .rounded_lg()
-                        .bg(cx.theme().primary.opacity(0.12))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            Icon::new(AppIcon::Shuffle)
-                                .with_size(px(28.0))
-                                .text_color(cx.theme().primary),
-                        ),
-                )
-            })
-            .when(!previews.is_empty(), |this| {
-                this.child(h_flex().gap_1().children(previews))
+            .border_color(cx.theme().border.opacity(0.68))
+            .bg(cx.theme().secondary.opacity(0.18))
+            .when(compact, |this| this.p_3())
+            .when(!compact, |this| this.px_4().py_3())
+            .child(if let Some(cover) = preview_cover.as_deref() {
+                self.render_cover(Some(cover), art_size, cx)
+            } else {
+                div()
+                    .size(px(art_size))
+                    .flex_none()
+                    .rounded_lg()
+                    .bg(cx.theme().primary.opacity(0.1))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Icon::new(AppIcon::Shuffle)
+                            .with_size(px(if compact { 20.0 } else { 24.0 }))
+                            .text_color(cx.theme().primary),
+                    )
+                    .into_any_element()
             })
             .child(
                 v_flex()
                     .flex_1()
-                    .min_w(px(220.0))
-                    .gap_1()
+                    .min_w_0()
+                    .gap_0p5()
                     .child(
                         div()
-                            .text_lg()
+                            .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(t!("Daily Mix")),
                     )
                     .child(
                         div()
-                            .text_sm()
+                            .text_xs()
+                            .truncate()
                             .text_color(if self.state.daily_mix_error.is_some() {
                                 cx.theme().danger
                             } else {
@@ -4332,8 +4329,8 @@ impl NavidromeApp {
             )
             .child(
                 h_flex()
-                    .gap_2()
-                    .flex_wrap()
+                    .flex_none()
+                    .gap_1()
                     .when(count == 0, |this| {
                         this.child(
                             Button::new("daily-mix-create")
@@ -4345,6 +4342,7 @@ impl NavidromeApp {
                                     t!("Create and play")
                                 })
                                 .primary()
+                                .small()
                                 .disabled(self.state.daily_mix_loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if this.state.daily_mix_error.is_some() {
@@ -4359,8 +4357,10 @@ impl NavidromeApp {
                     .when(count > 0, |this| {
                         this.child(
                             Button::new("daily-mix-play")
+                                .icon(PlayerIcon::Play)
                                 .label(t!("Play"))
                                 .primary()
+                                .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.play_daily_mix();
                                     cx.notify();
@@ -4368,8 +4368,10 @@ impl NavidromeApp {
                         )
                         .child(
                             Button::new("daily-mix-append")
-                                .label(t!("Add to queue"))
-                                .outline()
+                                .icon(AppIcon::Queue)
+                                .tooltip(t!("Add to queue"))
+                                .ghost()
+                                .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.append_daily_mix();
                                     cx.notify();
@@ -4380,6 +4382,7 @@ impl NavidromeApp {
                                 .icon(AppIcon::Refresh)
                                 .tooltip(t!("Refresh mix"))
                                 .ghost()
+                                .small()
                                 .disabled(self.state.daily_mix_loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.refresh_daily_mix();
@@ -4410,10 +4413,14 @@ impl NavidromeApp {
         v_flex()
             .gap_6()
             .child(self.page_header(t!("Home"), status, cx))
-            .when_some(self.render_home_feature(window, cx), |this, feature| {
-                this.child(feature)
-            })
-            .child(self.render_daily_mix_card(cx))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .when_some(self.render_home_feature(window, cx), |this, feature| {
+                        this.child(feature)
+                    })
+                    .child(self.render_daily_mix_card(window, cx)),
+            )
             .when(
                 !recent_preview.is_empty() || self.state.recent_albums_loading,
                 |this| {
