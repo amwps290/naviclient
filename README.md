@@ -94,12 +94,12 @@ JavaScript runtime.
   local playback
 - Daily Mix on Home: one click builds and plays up to 30 unique tracks from
   favorites, frequent/recent listening, similarity, genres, new releases and
-  bounded random exploration. The deterministic per-server daily snapshot aims
-  for a 40% familiar / 40% related / 20% discovery balance, limits repeated
-  artists and albums, defers the latest 50 locally played tracks, excludes the
-  current queue, and supports append or “refresh mix”. Results are cached by
-  local date and variant; servers without similarity support still use the
-  other sources.
+  style-filtered exploration. The deterministic per-server daily snapshot uses
+  a small familiar anchor, mostly same-style related tracks, and a bounded
+  in-style discovery slice; it limits repeated artists and albums, defers the
+  latest 50 locally played tracks and the previous mix, excludes the current
+  queue, and supports append or “refresh mix”. Results are cached by local date
+  and variant; servers without similarity support still use the other sources.
 - Home page with collapsible sections: recently played, frequently played,
   random albums and newest albums, fed by Navidrome's album lists
 - Album and artist pages with a sort menu (recently added, name, artist, or
