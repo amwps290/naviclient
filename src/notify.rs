@@ -81,6 +81,7 @@ pub(crate) struct TrackNotifier;
 // `notification_body` 在所有平台都要取词（测试也会走它），因此这个
 // import 不能跟着 Linux 实现一起 cfg 掉。
 use rust_i18n::t;
+#[cfg(not(target_os = "linux"))]
 use std::path::Path;
 
 #[cfg(not(target_os = "linux"))]

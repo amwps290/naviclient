@@ -26,9 +26,9 @@ cpal = "0.17.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 smol = "2"
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 url = "2"
-tray-icon = "0.24.2"
 biquad = "0.6.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -37,9 +37,9 @@ notify-rust = { version = "4", default-features = false }
 # Linux 托盘：纯 Rust StatusNotifierItem over D-Bus，无需 GTK/libappindicator。
 ksni = { version = "0.3", features = ["blocking"] }
 zbus = "5.19"
-tempfile = "3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+tray-icon = "0.24.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows = { version = "0.61", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_WinRT"] }
 

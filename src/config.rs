@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -19,6 +20,34 @@ fn config_dir() -> PathBuf {
 fn project_config_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
         .map(|dirs| dirs.config_dir().to_path_buf())
+}
+
+/// Serialize first, then atomically replace the destination from a temporary
+/// file in the same directory. A crash can therefore leave either the old or
+/// the new complete JSON document, but never a truncated destination file.
+fn write_json_atomic<T>(path: &Path, value: &T, label: &str) -> Result<()>
+where
+    T: serde::Serialize + ?Sized,
+{
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create directory for {label}"))?;
+    let text = serde_json::to_string_pretty(value)
+        .with_context(|| format!("failed to serialize {label}"))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temporary file for {label}"))?;
+    temporary
+        .write_all(text.as_bytes())
+        .with_context(|| format!("failed to write temporary {label}"))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .with_context(|| format!("failed to flush temporary {label}"))?;
+    temporary
+        .persist(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("failed to replace {label}"))?;
+    Ok(())
 }
 
 /// 服务器作用域键：用于给会话/响度/流派缓存分命名空间。
@@ -178,14 +207,26 @@ pub fn log_path() -> PathBuf {
 
 pub fn load() -> Config {
     let path = config_path();
-    let mut config: Config = fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| {
-            let mut value: serde_json::Value = serde_json::from_str(&text).ok()?;
-            migrate_legacy_playback_mode(&mut value);
-            serde_json::from_value(value).ok()
-        })
-        .unwrap_or_default();
+    let mut config: Config = match fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(mut value) => {
+                migrate_legacy_playback_mode(&mut value);
+                serde_json::from_value(value).unwrap_or_else(|error| {
+                    log::warn!("invalid config at {}: {error}", path.display());
+                    Config::default()
+                })
+            }
+            Err(error) => {
+                log::warn!("invalid config JSON at {}: {error}", path.display());
+                Config::default()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Config::default(),
+        Err(error) => {
+            log::warn!("failed to read config at {}: {error}", path.display());
+            Config::default()
+        }
+    };
     config.volume = if config.volume.is_finite() {
         config.volume.clamp(0.0, 1.0)
     } else {
@@ -216,12 +257,7 @@ fn migrate_legacy_playback_mode(value: &mut serde_json::Value) {
 }
 
 pub fn save(config: &Config) -> Result<()> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create config directory")?;
-    }
-    let text = serde_json::to_string_pretty(config)?;
-    fs::write(path, text).context("failed to write config")
+    write_json_atomic(&config_path(), config, "config")
 }
 
 /// 加载本地测量的歌曲响度缓存（song_id → (rms_db, peak)）；文件缺失或损坏时安全回退。
@@ -246,12 +282,7 @@ pub fn load_loudness(server_id: Option<&str>) -> HashMap<String, (f32, f32)> {
 }
 
 pub fn save_loudness(server_id: Option<&str>, cache: &HashMap<String, (f32, f32)>) -> Result<()> {
-    let path = loudness_path(server_id);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create config directory")?;
-    }
-    let text = serde_json::to_string_pretty(cache)?;
-    fs::write(path, text).context("failed to write loudness cache")
+    write_json_atomic(&loudness_path(server_id), cache, "loudness cache")
 }
 
 /// 加载播放会话；文件缺失或损坏时安全回退为 None。
@@ -289,12 +320,7 @@ fn read_json_at<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
 }
 
 pub fn save_session(server_id: Option<&str>, session: &PlaybackSession) -> Result<()> {
-    let path = session_path(server_id);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create config directory")?;
-    }
-    let text = serde_json::to_string_pretty(session)?;
-    fs::write(path, text).context("failed to write session")
+    write_json_atomic(&session_path(server_id), session, "playback session")
 }
 
 /// 读取流派缓存（`getGenres` 在服务端要对全库聚合统计，大曲库下响应慢）。
@@ -343,11 +369,7 @@ fn read_genres_at(path: &Path) -> Option<Vec<Genre>> {
 }
 
 fn write_genres_at(path: &Path, genres: &[Genre]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create config directory")?;
-    }
-    let text = serde_json::to_string_pretty(genres)?;
-    fs::write(path, text).context("failed to write genres cache")
+    write_json_atomic(path, genres, "genres cache")
 }
 
 /// 读取封面磁盘缓存；未命中返回 None。
@@ -387,6 +409,26 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         path
+    }
+
+    #[test]
+    fn atomic_json_write_replaces_complete_documents_without_temp_files() {
+        let dir =
+            std::env::temp_dir().join(format!("navidrome-atomic-json-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        std::fs::write(&path, r#"{"old":true}"#).unwrap();
+
+        let replacement = serde_json::json!({"queue": ["a", "b"], "position": 42});
+        write_json_atomic(&path, &replacement, "test state").expect("atomic write should succeed");
+
+        let restored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(restored, replacement);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

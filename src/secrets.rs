@@ -27,14 +27,14 @@ fn target_name(server_id: &str) -> String {
 /// 同一服务器重复写入会覆盖旧条目（改密码即生效）。凭据库不可用时返回
 /// Err，调用方应回退为在配置文件中保留明文。
 pub fn store_password(server_id: &str, username: &str, password: &str) -> anyhow::Result<()> {
-    let target = target_name(server_id);
     #[cfg(target_os = "windows")]
     {
+        let target = target_name(server_id);
         windows_credentials::store(&target, username, password)
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (username, password);
+        let _ = (server_id, username, password);
         Err(anyhow::anyhow!(
             "no system credential store is available on this platform"
         ))
@@ -193,6 +193,7 @@ mod tests {
     use crate::models::{Config, ServerProfile};
 
     /// 每个测试独享的服务器 id（含进程号），结束后清理凭据库条目。
+    #[cfg(target_os = "windows")]
     fn test_id(name: &str) -> String {
         format!("secrets-test-{}-{name}", std::process::id())
     }

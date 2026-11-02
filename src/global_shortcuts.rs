@@ -1,7 +1,9 @@
 //! 系统全局播放快捷键。Windows 使用 `RegisterHotKey` 在线程消息队列上
 //! 注册；其他平台保留相同接口并由设置页明确提示暂不支持自定义全局键。
 
-use std::sync::mpsc::{self, Receiver, Sender};
+#[cfg(target_os = "windows")]
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver};
 
 use gpui_kit::Keystroke;
 
@@ -14,6 +16,7 @@ pub enum ValidationError {
 }
 
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub enum GlobalShortcutEvent {
     Triggered(ShortcutAction),
     RegistrationReport { failures: Vec<ShortcutAction> },
