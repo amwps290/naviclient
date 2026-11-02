@@ -637,18 +637,35 @@ impl NavidromeApp {
             );
         } else if context.queue {
             let expected = song_ids(&context.songs);
-            menu = menu
-                .separator()
-                .item(
-                    PopupMenuItem::new(t!("Remove from queue")).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            if song_ids(&this.state.queue) == expected {
-                                this.remove_from_queue(context.index);
-                            }
-                            cx.notify();
-                        },
-                    )),
-                );
+            let index = context.index;
+            menu = menu.separator();
+            for (label, to) in [
+                (t!("Move up"), index.checked_sub(1)),
+                (
+                    t!("Move down"),
+                    (index + 1 < expected.len()).then_some(index + 1),
+                ),
+            ] {
+                let expected_order = expected.clone();
+                menu = menu.item(PopupMenuItem::new(label).disabled(to.is_none()).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        if song_ids(&this.state.queue) == expected_order {
+                            this.move_queue_item(index, to.unwrap_or(index));
+                        }
+                        cx.notify();
+                    }),
+                ));
+            }
+            menu = menu.item(
+                PopupMenuItem::new(t!("Remove from queue")).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        if song_ids(&this.state.queue) == expected {
+                            this.remove_from_queue(index);
+                        }
+                        cx.notify();
+                    },
+                )),
+            );
         }
         menu
     }

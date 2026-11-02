@@ -3698,6 +3698,32 @@ impl NavidromeApp {
             .into_any_element()
     }
 
+    fn accent_media_button(
+        &self,
+        id: impl Into<SharedString>,
+        icon: PlayerIcon,
+        label: impl Into<SharedString>,
+        size: f32,
+        cx: &Context<Self>,
+    ) -> Button {
+        let accent = self.now_playing_accent(cx);
+        let label = label.into();
+        Button::new(id.into())
+            .icon(icon)
+            .accessibility_label(label.clone())
+            .tooltip(label)
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(accent)
+                    .foreground(accent_foreground(accent))
+                    .hover(adjust_lightness(accent, 0.05))
+                    .active(adjust_lightness(accent, -0.05)),
+            )
+            .rounded(px(999.0))
+            .w(px(size))
+            .h(px(size))
+    }
+
     fn favorite_button(&self, kind: FavoriteKind, id: &str, cx: &Context<Self>) -> Button {
         let key = FavoriteKey::new(kind, id);
         let starred = self.state.favorite_ids.contains(&key);
