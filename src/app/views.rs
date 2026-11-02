@@ -6,6 +6,11 @@ use super::*;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 
+/// Six 176px album cards with five 20px gaps: Home previews intentionally
+/// stop at six items, so the listening grid should share the same visual edge
+/// instead of stretching indefinitely on ultrawide/fullscreen windows.
+const HOME_PREVIEW_MAX_WIDTH: f32 = 6.0 * 176.0 + 5.0 * 20.0;
+
 impl NavidromeApp {
     pub(super) fn render_cover(
         &self,
@@ -4467,6 +4472,7 @@ impl NavidromeApp {
             .child(
                 h_flex()
                     .w_full()
+                    .max_w(px(HOME_PREVIEW_MAX_WIDTH))
                     .gap_4()
                     .items_stretch()
                     .when_some(listening_feature, |this, feature| {
