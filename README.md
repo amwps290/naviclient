@@ -67,6 +67,11 @@ JavaScript runtime.
 - Song radio from any track action menu: the seed starts immediately while the
   client builds a 24-track continuation from server similarity results, with
   bounded same-artist and same-genre fallbacks for compatible older servers.
+  An explicitly unsupported Sonic Similarity capability skips the doomed
+  request and goes directly to those fallbacks, while unknown legacy servers
+  retain optimistic compatibility. Artist pages also show up to 12 popular
+  songs, use stable artist IDs when the server advertises the OpenSubsonic Top
+  Songs extension, and provide one-click popular playback and artist radio.
   Duplicate/blank IDs are removed, and manual queue edits or server switches
   invalidate in-flight results instead of overwriting the user's Up Next
 - Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
@@ -223,6 +228,10 @@ Config is stored in the platform config directory, e.g.:
 - macOS: `~/Library/Application Support/rs/navidrome/navidrome-client/config.json`
 - Linux: `~/.config/navidrome-client/config.json`
 
+Configuration, playback sessions, measured loudness, and genre caches are
+written through same-directory temporary files and atomically replaced, so an
+interrupted save cannot leave a truncated JSON document.
+
 Played audio is cached separately in the configured audio cache directory.
 The folder can be changed from Settings, completed tracks are reused without
 another download, partial original tracks resume through HTTP range requests
@@ -260,11 +269,14 @@ To add or change a string:
 Do not translate server-provided metadata (titles, artists, album and playlist
 names), log messages, or MPRIS protocol values such as `Playing`/`Paused`.
 
-## Development Roadmap
+## Product and Development Roadmaps
 
-The detailed, checkbox-based implementation roadmap is maintained in
-[`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md). Update it with the completion
-commit whenever a milestone is finished.
+Product positioning, capability boundaries, information architecture, and the
+ordered discovery roadmap are defined in [`PRODUCT_PLAN.md`](PRODUCT_PLAN.md).
+The checkbox-based engineering backlog and completion record remain in
+[`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md). Update the latter with the
+completion commit whenever a milestone is finished; product scope changes must
+be reflected in the former before implementation starts.
 
 ## Architecture
 
