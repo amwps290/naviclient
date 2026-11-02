@@ -9,11 +9,12 @@ use super::{
     accent_foreground, advance_index, album_page_offset, compact_song_columns,
     compact_window_layout, contrast_ratio, cover_request_needed, effective_volume,
     extract_cover_palette, format_file_size, global_shortcut_conflict, history_index_after_insert,
-    loudness_gain_factor, match_shortcut, normalize_volume, playback_technical_info,
-    queue_index_after_move, queue_index_after_remove, range_anchor, readable_accent,
-    reconnect_decision, replay_gain_factor, restored_volume, seek_target, selection_range,
-    shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs, sort_artists,
-    touch_lru, NavidromeApp, ReconnectDecision, ShuffleHistory, SongRowClickAction, View,
+    listening_position_delta, loudness_gain_factor, match_shortcut, normalize_volume,
+    playback_technical_info, queue_index_after_move, queue_index_after_remove, range_anchor,
+    readable_accent, reconnect_decision, replay_gain_factor, restored_volume, seek_target,
+    selection_range, shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs,
+    sort_artists, touch_lru, NavidromeApp, ReconnectDecision, ShuffleHistory, SongRowClickAction,
+    View,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
@@ -372,6 +373,22 @@ fn moving_current_repositions_the_index() {
 fn adjacent_moves_keep_relative_position() {
     assert_eq!(queue_index_after_move(1, 2, 2), 1);
     assert_eq!(queue_index_after_move(1, 2, 1), 2);
+}
+
+#[test]
+fn listening_progress_rejects_seeks_and_counts_ordinary_output() {
+    assert_eq!(
+        listening_position_delta(Duration::from_secs(10), Duration::from_millis(10_250)),
+        Duration::from_millis(250)
+    );
+    assert_eq!(
+        listening_position_delta(Duration::from_secs(10), Duration::from_secs(9)),
+        Duration::ZERO
+    );
+    assert_eq!(
+        listening_position_delta(Duration::from_secs(10), Duration::from_secs(15)),
+        Duration::ZERO
+    );
 }
 
 #[test]

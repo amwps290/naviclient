@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use md5::{Digest, Md5};
 
-use crate::models::{Config, Genre, PlayModes, PlaybackMode, PlaybackSession};
+use crate::models::{Config, Genre, ListeningHistory, PlayModes, PlaybackMode, PlaybackSession};
 
 fn config_path() -> PathBuf {
     config_dir().join("config.json")
@@ -93,6 +93,10 @@ fn loudness_path(server_id: Option<&str>) -> PathBuf {
 
 fn genres_cache_path(server_id: Option<&str>) -> PathBuf {
     scoped_path("genres", server_id)
+}
+
+fn listening_history_path(server_id: Option<&str>) -> PathBuf {
+    scoped_path("listening-history", server_id)
 }
 
 pub fn default_audio_cache_dir() -> PathBuf {
@@ -285,6 +289,20 @@ pub fn save_loudness(server_id: Option<&str>, cache: &HashMap<String, (f32, f32)
     write_json_atomic(&loudness_path(server_id), cache, "loudness cache")
 }
 
+/// Load server-scoped local listening history. Missing or corrupt history is a
+/// cache miss, never a startup failure.
+pub fn load_listening_history(server_id: Option<&str>) -> ListeningHistory {
+    read_json_at(&listening_history_path(server_id)).unwrap_or_default()
+}
+
+pub fn save_listening_history(server_id: Option<&str>, history: &ListeningHistory) -> Result<()> {
+    write_json_atomic(
+        &listening_history_path(server_id),
+        history,
+        "listening history",
+    )
+}
+
 /// 加载播放会话；文件缺失或损坏时安全回退为 None。
 /// 旧会话的 `playback_mode` 字段同样迁移为二维 `playback_modes`。
 pub fn load_session(server_id: Option<&str>, server_url: &str) -> Option<PlaybackSession> {
@@ -345,7 +363,7 @@ pub fn save_genres_cache(server_id: Option<&str>, genres: &[Genre]) -> Result<()
     write_genres_at(&genres_cache_path(server_id), genres)
 }
 
-/// 删除某台服务器的作用域缓存文件（播放会话 / 响度 / 流派），
+/// 删除某台服务器的作用域缓存文件（播放会话 / 响度 / 流派 / 收听历史），
 /// 返回删除的文件数。
 ///
 /// 封面与音频缓存文件名由内容 id 哈希而来，无法按服务器枚举，
@@ -355,7 +373,7 @@ pub fn remove_server_cache(server_id: &str) -> usize {
 }
 
 fn remove_server_cache_at(dir: &Path, server_id: &str) -> usize {
-    ["session", "loudness", "genres"]
+    ["session", "loudness", "genres", "listening-history"]
         .iter()
         .map(|stem| scoped_path_in(dir, stem, Some(server_id)))
         .filter(|path| fs::remove_file(path).is_ok())
@@ -473,6 +491,10 @@ mod tests {
         assert_ne!(session_path(Some("srv-a")), session_path(Some("srv-b")));
         assert_ne!(loudness_path(Some("srv-a")), loudness_path(Some("srv-b")));
         assert_ne!(
+            listening_history_path(Some("srv-a")),
+            listening_history_path(Some("srv-b"))
+        );
+        assert_ne!(
             genres_cache_path(Some("srv-a")),
             genres_cache_path(Some("srv-b"))
         );
@@ -539,13 +561,13 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        for stem in ["session", "loudness", "genres"] {
+        for stem in ["session", "loudness", "genres", "listening-history"] {
             std::fs::write(scoped_path_in(&dir, stem, Some("srv-a")), "a").unwrap();
             std::fs::write(scoped_path_in(&dir, stem, Some("srv-b")), "b").unwrap();
         }
 
-        assert_eq!(remove_server_cache_at(&dir, "srv-a"), 3);
-        for stem in ["session", "loudness", "genres"] {
+        assert_eq!(remove_server_cache_at(&dir, "srv-a"), 4);
+        for stem in ["session", "loudness", "genres", "listening-history"] {
             assert!(!scoped_path_in(&dir, stem, Some("srv-a")).exists());
             assert!(
                 scoped_path_in(&dir, stem, Some("srv-b")).exists(),
@@ -563,6 +585,32 @@ mod tests {
         assert_eq!(remove_server_cache_at(&empty, "srv-a"), 0);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn listening_history_round_trips_and_corruption_falls_back() {
+        let path = temp_path("listening-history.json");
+        let mut history = ListeningHistory::default();
+        history.record_started(
+            crate::models::Song {
+                id: "song-1".into(),
+                title: "One".into(),
+                ..crate::models::Song::default()
+            },
+            123,
+        );
+        assert!(history.update_latest("song-1", 61, true));
+
+        write_json_atomic(&path, &history, "listening history").unwrap();
+        let restored: ListeningHistory = read_json_at(&path).unwrap();
+        assert_eq!(restored.events.len(), 1);
+        assert_eq!(restored.events[0].song.id, "song-1");
+        assert_eq!(restored.events[0].listened_seconds, 61);
+        assert!(restored.events[0].completed);
+
+        std::fs::write(&path, "{broken").unwrap();
+        assert!(read_json_at::<ListeningHistory>(&path).is_none());
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

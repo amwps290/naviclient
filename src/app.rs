@@ -50,8 +50,8 @@ use crate::global_shortcuts::{
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
     Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
-    Genre, LanguagePreference, Lyrics, PlayModes, PlaybackSession, Playlist, RepeatMode,
-    SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
+    Genre, LanguagePreference, ListeningHistory, Lyrics, PlayModes, PlaybackSession, Playlist,
+    RepeatMode, SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
     TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
@@ -229,6 +229,8 @@ struct AppState {
     /// 音频输出设备清单（设置页展示）：(名称, 是否默认)。
     output_devices: Vec<(String, bool)>,
     output_devices_loading: bool,
+    /// 本地收听历史；与播放会话一样按服务器隔离。
+    listening_history: ListeningHistory,
     /// 本地测量的歌曲响度缓存：song_id → (rms_db, peak)。
     loudness_cache: HashMap<String, (f32, f32)>,
 }
@@ -318,6 +320,7 @@ impl Default for AppState {
             scrobbled_song_id: None,
             output_devices: Vec::new(),
             output_devices_loading: false,
+            listening_history: ListeningHistory::default(),
             loudness_cache: HashMap::new(),
         }
     }
@@ -389,6 +392,11 @@ pub struct NavidromeApp {
     /// 当前曲目已用掉的自动重连次数，以及断点位置；播放确实恢复前进后清零。
     reconnect_attempts: Option<(String, u8, Duration)>,
     last_session_save: std::time::Instant,
+    /// 当前本地收听事件及其实际前进时长（seek 跳跃不计入）。
+    listening_song_id: Option<String>,
+    listening_last_position: Duration,
+    listening_accumulated: Duration,
+    last_listening_history_save: std::time::Instant,
     active_lyric_index: Option<usize>,
     _subscriptions: Vec<Subscription>,
     mini_mode: bool,
@@ -413,6 +421,7 @@ pub struct NavidromeApp {
 
 impl Drop for NavidromeApp {
     fn drop(&mut self) {
+        self.finish_listening_event(false);
         // Close the bounded frame channel before Runtime::drop waits for its
         // blocking worker; otherwise a producer could wait on a full queue.
         self.vinyl_cover.cancel_pending();
@@ -575,6 +584,10 @@ impl NavidromeApp {
             reconnect: None,
             reconnect_attempts: None,
             last_session_save: std::time::Instant::now(),
+            listening_song_id: None,
+            listening_last_position: Duration::ZERO,
+            listening_accumulated: Duration::ZERO,
+            last_listening_history_save: std::time::Instant::now(),
             active_lyric_index: None,
             _subscriptions: Vec::new(),
             mini_mode: false,
@@ -744,6 +757,7 @@ impl NavidromeApp {
                         this.poll_playback_reconnect();
                         this.maybe_preload_next();
                         this.maybe_scrobble_current();
+                        this.poll_listening_history();
                         this.maybe_notify_track_started();
                         this.sync_tray_paused();
                         let scrolling = this.lyrics_scroll_target.is_some();
@@ -1019,6 +1033,79 @@ impl NavidromeApp {
         });
     }
 
+    /// Observe actual playback progress for the server-scoped local history.
+    /// Large position jumps are seeks and do not count as listened time.
+    fn poll_listening_history(&mut self) {
+        let Some(song) = self.state.now_playing.clone() else {
+            if self.listening_song_id.is_some() {
+                self.finish_listening_event(false);
+            }
+            return;
+        };
+        let playback = self.audio.state();
+        if self.listening_song_id.as_deref() != Some(song.id.as_str()) {
+            self.finish_listening_event(false);
+            if !playback.active {
+                return;
+            }
+            let started_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            self.state
+                .listening_history
+                .record_started(song.clone(), started_at);
+            self.listening_song_id = Some(song.id);
+            self.listening_last_position = playback.position;
+            self.listening_accumulated = Duration::ZERO;
+            self.last_listening_history_save = std::time::Instant::now();
+            self.persist_listening_history();
+            return;
+        }
+
+        if playback.active && !playback.paused {
+            self.listening_accumulated +=
+                listening_position_delta(self.listening_last_position, playback.position);
+        }
+        self.listening_last_position = playback.position;
+
+        if self.last_listening_history_save.elapsed() >= Duration::from_secs(15) {
+            self.update_listening_progress(false);
+            self.persist_listening_history();
+            self.last_listening_history_save = std::time::Instant::now();
+        }
+    }
+
+    fn update_listening_progress(&mut self, completed: bool) {
+        let Some(song_id) = self.listening_song_id.as_deref() else {
+            return;
+        };
+        let listened_seconds =
+            u32::try_from(self.listening_accumulated.as_secs()).unwrap_or(u32::MAX);
+        self.state
+            .listening_history
+            .update_latest(song_id, listened_seconds, completed);
+    }
+
+    fn finish_listening_event(&mut self, completed: bool) {
+        if self.listening_song_id.is_none() {
+            return;
+        }
+        self.update_listening_progress(completed);
+        self.persist_listening_history();
+        self.listening_song_id = None;
+        self.listening_last_position = Duration::ZERO;
+        self.listening_accumulated = Duration::ZERO;
+    }
+
+    fn persist_listening_history(&self) {
+        let server_id = self.config.active_server_id();
+        if let Err(error) = config::save_listening_history(server_id, &self.state.listening_history)
+        {
+            log::warn!("listening history save failed: {error:#}");
+        }
+    }
+
     /// 计算该歌曲的响度补偿增益：优先用服务器 ReplayGain，缺失时用本地测量缓存，都没有则 1.0。
     fn song_gain(&self, song: &Song) -> f32 {
         match self.config.volume_normalization {
@@ -1124,6 +1211,17 @@ impl NavidromeApp {
     }
 
     fn select_playing(&mut self, index: usize, song: &Song, quality: TranscodingQuality) {
+        if self.listening_song_id.is_some()
+            && (self.state.queue_index != Some(index)
+                || self
+                    .state
+                    .now_playing
+                    .as_ref()
+                    .map(|current| current.id.as_str())
+                    != Some(song.id.as_str()))
+        {
+            self.finish_listening_event(false);
+        }
         self.resume_position = None;
         self.state.queue_index = Some(index);
         self.state.now_playing = Some(song.clone());
@@ -1144,6 +1242,7 @@ impl NavidromeApp {
             return;
         };
         self.ensure_scrobble_on_end();
+        self.finish_listening_event(true);
         self.cache_measured_loudness(event.loudness_db, event.loudness_peak);
         if self.state.playback_modes.shuffle
             && self.state.shuffle_history.restore_forward().is_none()
@@ -2103,6 +2202,7 @@ impl NavidromeApp {
     fn load_active_server_cache(&mut self) {
         let server_id = self.config.active_server_id().map(str::to_string);
         self.state.loudness_cache = config::load_loudness(server_id.as_deref());
+        self.state.listening_history = config::load_listening_history(server_id.as_deref());
         // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
         self.state.genres = config::load_genres_cache(server_id.as_deref()).unwrap_or_default();
 
@@ -2164,6 +2264,7 @@ impl NavidromeApp {
     fn reconnect_active_server(&mut self) {
         self.cancel_song_radio();
         self.cancel_next_preload();
+        self.finish_listening_event(false);
         self.audio.stop();
         self.pending_cover_asset_releases
             .borrow_mut()
@@ -2885,6 +2986,7 @@ impl NavidromeApp {
         } else if playback.ended {
             self.state.ended_handled = true;
             self.ensure_scrobble_on_end();
+            self.finish_listening_event(true);
             self.cache_measured_loudness(playback.loudness_db, playback.loudness_peak);
             self.play_next(true);
         }

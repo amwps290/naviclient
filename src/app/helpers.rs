@@ -341,6 +341,16 @@ pub(super) fn should_scrobble(position: Duration, duration: Option<Duration>) ->
     }
 }
 
+/// Count ordinary playback progress while rejecting backward seeks and large
+/// forward jumps. The UI observes playback every 50 ms even in the background;
+/// two seconds leaves scheduler headroom without treating a seek as listening.
+pub(super) fn listening_position_delta(previous: Duration, current: Duration) -> Duration {
+    current
+        .checked_sub(previous)
+        .filter(|delta| *delta <= Duration::from_secs(2))
+        .unwrap_or_default()
+}
+
 /// 根据 ReplayGain 元数据与标准化模式计算增益系数（1.0 = 不变）。
 /// 正增益（dB）表示歌曲偏轻需放大，负增益表示偏响需降低；结合峰值做防削波。
 pub(super) fn replay_gain_factor(

@@ -303,6 +303,61 @@ pub struct Song {
     pub replay_gain_album_peak: Option<f32>,
 }
 
+pub const LISTENING_HISTORY_LIMIT: usize = 1_000;
+
+/// One local listening attempt. History is scoped by server in `config.rs` and
+/// stays independent from Subsonic scrobble state: short previews are useful
+/// for suppression, while `completed` attempts contribute stronger affinity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ListeningEvent {
+    pub song: Song,
+    pub started_at: u64,
+    #[serde(default)]
+    pub listened_seconds: u32,
+    #[serde(default)]
+    pub completed: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ListeningHistory {
+    #[serde(default)]
+    pub events: Vec<ListeningEvent>,
+}
+
+impl ListeningHistory {
+    pub fn record_started(&mut self, song: Song, started_at: u64) {
+        if song.id.trim().is_empty() {
+            return;
+        }
+        self.events.push(ListeningEvent {
+            song,
+            started_at,
+            listened_seconds: 0,
+            completed: false,
+        });
+        let excess = self.events.len().saturating_sub(LISTENING_HISTORY_LIMIT);
+        if excess > 0 {
+            self.events.drain(..excess);
+        }
+    }
+
+    /// Update the newest attempt for a song. Returning false means no start
+    /// event exists, which lets the caller recover without inventing history.
+    pub fn update_latest(&mut self, song_id: &str, listened_seconds: u32, completed: bool) -> bool {
+        let Some(event) = self
+            .events
+            .iter_mut()
+            .rev()
+            .find(|event| event.song.id == song_id)
+        else {
+            return false;
+        };
+        event.listened_seconds = event.listened_seconds.max(listened_seconds);
+        event.completed |= completed;
+        true
+    }
+}
+
 /// 容错解析可选的 f32 字段：接受数字或字符串，其他情况返回 None，
 /// 避免个别字段类型不符导致整首歌解析失败。
 fn deserialize_optional_f32<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
@@ -1380,10 +1435,52 @@ mod tests {
 
     use super::{
         locale_from_os_tag, AlbumSort, ArtistSort, CapabilitySupport, Config, LanguagePreference,
-        OpenSubsonicExtension, PlayModes, PlaybackMode, PlaybackSession, RepeatMode,
-        ServerCapabilities, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
-        TranscodingQuality, VolumeNormalization,
+        ListeningHistory, OpenSubsonicExtension, PlayModes, PlaybackMode, PlaybackSession,
+        RepeatMode, ServerCapabilities, ServerInfo, ServerProfile, ShortcutAction, Song,
+        ThemePreference, TranscodingQuality, VolumeNormalization, LISTENING_HISTORY_LIMIT,
     };
+
+    #[test]
+    fn listening_history_tracks_attempts_updates_and_recent_unique_ids() {
+        let song = |id: &str| Song {
+            id: id.into(),
+            title: id.into(),
+            ..Song::default()
+        };
+        let mut history = ListeningHistory::default();
+        history.record_started(song(""), 1);
+        history.record_started(song("a"), 10);
+        history.record_started(song("b"), 20);
+        history.record_started(song("a"), 30);
+
+        assert_eq!(history.events.len(), 3);
+        assert!(history.update_latest("a", 42, false));
+        assert!(history.update_latest("a", 12, true));
+        assert!(!history.update_latest("missing", 9, true));
+        assert_eq!(history.events[0].listened_seconds, 0);
+        assert_eq!(history.events[2].listened_seconds, 42);
+        assert!(history.events[2].completed);
+    }
+
+    #[test]
+    fn listening_history_discards_the_oldest_entries_at_its_limit() {
+        let mut history = ListeningHistory::default();
+        for index in 0..=LISTENING_HISTORY_LIMIT {
+            history.record_started(
+                Song {
+                    id: format!("song-{index}"),
+                    ..Song::default()
+                },
+                index as u64,
+            );
+        }
+        assert_eq!(history.events.len(), LISTENING_HISTORY_LIMIT);
+        assert_eq!(history.events[0].song.id, "song-1");
+        assert_eq!(
+            history.events.last().map(|event| event.song.id.as_str()),
+            Some("song-1000")
+        );
+    }
 
     #[test]
     fn capability_matrix_distinguishes_supported_unsupported_and_unknown() {
