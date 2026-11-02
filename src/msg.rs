@@ -27,6 +27,11 @@ pub enum Msg {
         artist_id: String,
         result: Result<Vec<Album>, String>,
     },
+    ArtistTopSongs {
+        generation: u64,
+        artist_id: String,
+        result: Result<Vec<Song>, String>,
+    },
     Albums(Result<Vec<Album>, String>),
     NewestAlbums(Result<Vec<Album>, String>),
     Genres(Result<Vec<Genre>, String>),

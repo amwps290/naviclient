@@ -9,6 +9,7 @@ impl NavidromeApp {
     pub(super) fn songs_for_scope(&self, scope: &str) -> Option<&[Song]> {
         match scope {
             "album-detail" => Some(&self.state.current_songs),
+            "artist-top" => Some(&self.state.artist_top_songs),
             "playlist-detail" => Some(&self.state.playlist_songs),
             "favorites" => Some(&self.state.favorites.songs),
             "search" => Some(&self.state.search_results.as_ref()?.songs),
@@ -70,6 +71,7 @@ impl NavidromeApp {
             return Some("queue");
         }
         match self.state.view {
+            View::ArtistDetail => Some("artist-top"),
             View::AlbumDetail => Some("album-detail"),
             View::PlaylistDetail => Some("playlist-detail"),
             View::Favorites => Some("favorites"),
@@ -511,11 +513,17 @@ impl NavidromeApp {
         self.play_queue_index(0);
         self.save_session();
 
+        let sonic_similarity = self
+            .state
+            .server
+            .as_ref()
+            .map(|server| server.capabilities.sonic_similarity)
+            .unwrap_or_default();
         let tx = self.tx.clone();
         let request_seed = seed.clone();
         self.spawn_future(async move {
             let result = api
-                .song_radio(&request_seed, 24)
+                .song_radio(&request_seed, 24, sonic_similarity)
                 .await
                 .map_err(error_message);
             let _ = tx.send(Msg::SongRadio {

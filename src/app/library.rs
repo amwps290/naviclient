@@ -274,8 +274,11 @@ impl NavidromeApp {
         self.clear_song_multi();
         self.state.current_artist = Some(artist.clone());
         self.state.artist_albums.clear();
+        self.state.artist_top_songs.clear();
+        self.state.artist_top_songs_error = None;
         self.state.view = View::ArtistDetail;
         self.ensure_cover(artist.cover_art.as_deref(), true);
+        self.load_artist_top_songs();
         let Some(api) = self.api.clone() else { return };
         let artist_id = artist.id.clone();
         let tx = self.tx.clone();
@@ -284,6 +287,52 @@ impl NavidromeApp {
             let result = api.artist_albums(&artist_id).await.map_err(error_message);
             let _ = tx.send(Msg::ArtistAlbums { artist_id, result });
         });
+    }
+
+    /// Load a compact popular-song section for the active artist. Servers that
+    /// advertise `topSongsByArtistId` use the stable id; compatibility-mode
+    /// servers retain the standard display-name request.
+    pub(super) fn load_artist_top_songs(&mut self) {
+        let Some(artist) = self.state.current_artist.clone() else {
+            return;
+        };
+        let Some(api) = self.api.clone() else { return };
+        let artist_id_support = self
+            .state
+            .server
+            .as_ref()
+            .map(|server| server.capabilities.top_songs_by_artist_id)
+            .unwrap_or_default();
+        self.state.artist_top_songs_loading = true;
+        self.state.artist_top_songs_error = None;
+        self.artist_top_songs_generation = self.artist_top_songs_generation.wrapping_add(1);
+        let generation = self.artist_top_songs_generation;
+        let artist_id = artist.id.clone();
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api
+                .artist_top_songs(&artist, 12, artist_id_support)
+                .await
+                .map_err(error_message);
+            let _ = tx.send(Msg::ArtistTopSongs {
+                generation,
+                artist_id,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn play_artist_top_songs(&mut self) {
+        let songs = self.state.artist_top_songs.clone();
+        if !songs.is_empty() {
+            self.play_song_list(&songs, 0);
+        }
+    }
+
+    pub(super) fn start_artist_radio(&mut self) {
+        if let Some(seed) = self.state.artist_top_songs.first().cloned() {
+            self.start_song_radio(seed);
+        }
     }
 
     /// 从歌曲元数据打开艺术家页；缺少 artist_id 时无操作。
@@ -536,6 +585,35 @@ impl NavidromeApp {
                                 self.preload_covers(covers);
                             }
                             Err(error) => self.notify_error(error),
+                        }
+                    }
+                }
+                Msg::ArtistTopSongs {
+                    generation,
+                    artist_id,
+                    result,
+                } => {
+                    if generation != self.artist_top_songs_generation
+                        || self.state.current_artist.as_ref().map(|a| a.id.as_str())
+                            != Some(artist_id.as_str())
+                    {
+                        continue;
+                    }
+                    self.state.artist_top_songs_loading = false;
+                    match result {
+                        Ok(songs) => {
+                            let covers = songs
+                                .iter()
+                                .filter_map(|song| song.cover_art.clone())
+                                .take(12)
+                                .collect();
+                            self.state.artist_top_songs = songs;
+                            self.state.artist_top_songs_error = None;
+                            self.preload_covers(covers);
+                        }
+                        Err(error) => {
+                            self.state.artist_top_songs.clear();
+                            self.state.artist_top_songs_error = Some(error);
                         }
                     }
                 }

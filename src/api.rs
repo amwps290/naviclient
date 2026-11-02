@@ -179,6 +179,24 @@ impl OpenSubsonicProvider {
         Ok(albums)
     }
 
+    /// Return an artist's popular songs. OpenSubsonic's
+    /// `topSongsByArtistId` extension avoids ambiguous display-name matching;
+    /// compatible legacy servers keep using the standard `artist` parameter.
+    pub async fn artist_top_songs(
+        &self,
+        artist: &Artist,
+        count: u32,
+        artist_id_support: CapabilitySupport,
+    ) -> Result<Vec<Song>> {
+        let params = artist_top_songs_params(artist, count, artist_id_support);
+        let params: Vec<(&str, &str)> = params
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+        let body = self.get_json("getTopSongs", &params).await?;
+        parse_array(&body["topSongs"], "song")
+    }
+
     pub async fn albums(&self, size: u32, offset: u32, sort: AlbumSort) -> Result<Vec<Album>> {
         let mut params = album_sort_params(sort);
         params.push(("size", size.to_string()));
@@ -259,19 +277,26 @@ impl OpenSubsonicProvider {
     /// Build a song-radio candidate list. Similarity results are the primary
     /// source; older compatible servers fall back to a bounded same-artist
     /// sample and then songs from the same genre.
-    pub async fn song_radio(&self, seed: &Song, count: u32) -> Result<Vec<Song>> {
+    pub async fn song_radio(
+        &self,
+        seed: &Song,
+        count: u32,
+        sonic_similarity: CapabilitySupport,
+    ) -> Result<Vec<Song>> {
         let count = count.max(1) as usize;
         let mut errors = Vec::new();
 
-        match self.similar_songs(&seed.id, count as u32).await {
-            Ok(songs) if !songs.is_empty() => {
-                let candidates = unique_radio_candidates(seed, songs, count);
-                if !candidates.is_empty() {
-                    return Ok(candidates);
+        if radio_uses_similarity(sonic_similarity) {
+            match self.similar_songs(&seed.id, count as u32).await {
+                Ok(songs) if !songs.is_empty() => {
+                    let candidates = unique_radio_candidates(seed, songs, count);
+                    if !candidates.is_empty() {
+                        return Ok(candidates);
+                    }
                 }
+                Ok(_) => {}
+                Err(error) => errors.push(format!("similar songs: {error:#}")),
             }
-            Ok(_) => {}
-            Err(error) => errors.push(format!("similar songs: {error:#}")),
         }
 
         let mut fallback = Vec::new();
@@ -678,6 +703,27 @@ fn album_sort_params(sort: AlbumSort) -> Vec<(&'static str, String)> {
             ("toYear", "0".to_string()),
         ],
     }
+}
+
+fn artist_top_songs_params(
+    artist: &Artist,
+    count: u32,
+    artist_id_support: CapabilitySupport,
+) -> Vec<(&'static str, String)> {
+    let identity = if artist_id_support.is_supported() && !artist.id.trim().is_empty() {
+        ("artistId", artist.id.clone())
+    } else {
+        ("artist", artist.name.clone())
+    };
+    vec![identity, ("count", count.max(1).to_string())]
+}
+
+/// Unknown capability keeps the established optimistic request behavior for
+/// legacy servers whose extension endpoint cannot be queried. Only an
+/// explicit unsupported result skips the similarity request and goes straight
+/// to the explainable artist/genre fallback.
+fn radio_uses_similarity(support: CapabilitySupport) -> bool {
+    support.allows_optimistic_request()
 }
 
 fn parse_array<T>(value: &Value, key: &str) -> Result<Vec<T>>
@@ -1124,6 +1170,50 @@ mod tests {
         assert_eq!(params["genre"], "Jazz");
         assert_eq!(params["size"], "100");
         assert_eq!(params["offset"], "300");
+    }
+
+    #[test]
+    fn artist_top_songs_prefers_stable_ids_only_when_advertised() {
+        let artist = Artist {
+            id: "artist-7".into(),
+            name: "Same Name".into(),
+            ..Artist::default()
+        };
+        assert_eq!(
+            artist_top_songs_params(&artist, 12, CapabilitySupport::Supported),
+            vec![
+                ("artistId", "artist-7".to_string()),
+                ("count", "12".to_string())
+            ]
+        );
+        for support in [CapabilitySupport::Unknown, CapabilitySupport::Unsupported] {
+            assert_eq!(
+                artist_top_songs_params(&artist, 12, support),
+                vec![
+                    ("artist", "Same Name".to_string()),
+                    ("count", "12".to_string())
+                ]
+            );
+        }
+
+        let blank_id = Artist {
+            id: "  ".into(),
+            ..artist
+        };
+        assert_eq!(
+            artist_top_songs_params(&blank_id, 0, CapabilitySupport::Supported),
+            vec![
+                ("artist", "Same Name".to_string()),
+                ("count", "1".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_similarity_unsupported_skips_the_optimistic_request() {
+        assert!(radio_uses_similarity(CapabilitySupport::Supported));
+        assert!(radio_uses_similarity(CapabilitySupport::Unknown));
+        assert!(!radio_uses_similarity(CapabilitySupport::Unsupported));
     }
 
     #[test]

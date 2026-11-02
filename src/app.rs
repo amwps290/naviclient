@@ -162,6 +162,9 @@ struct AppState {
     collapsed_sections: HashSet<String>,
     current_artist: Option<Artist>,
     artist_albums: Vec<Album>,
+    artist_top_songs: Vec<Song>,
+    artist_top_songs_loading: bool,
+    artist_top_songs_error: Option<String>,
     current_album: Option<Album>,
     current_songs: Vec<Song>,
     playlists: Vec<Playlist>,
@@ -265,6 +268,9 @@ impl Default for AppState {
             collapsed_sections: HashSet::from(["random".to_string()]),
             current_artist: None,
             artist_albums: Vec::new(),
+            artist_top_songs: Vec::new(),
+            artist_top_songs_loading: false,
+            artist_top_songs_error: None,
             current_album: None,
             current_songs: Vec::new(),
             playlists: Vec::new(),
@@ -396,6 +402,8 @@ pub struct NavidromeApp {
     eq_sliders: Vec<Entity<SliderState>>,
     /// 均衡器配置保存的防抖代次。
     eq_save_generation: u64,
+    /// 艺术家热门歌曲请求代次；重复进入页面或重试时忽略迟到响应。
+    artist_top_songs_generation: u64,
     /// 歌曲电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
     radio_generation: u64,
     radio_loading_song_id: Option<String>,
@@ -577,6 +585,7 @@ impl NavidromeApp {
             mini_volume_flash_generation: 0,
             eq_sliders,
             eq_save_generation: 0,
+            artist_top_songs_generation: 0,
             radio_generation: 0,
             radio_loading_song_id: None,
             server_remove_prompt: None,

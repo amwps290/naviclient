@@ -1057,9 +1057,6 @@ impl NavidromeApp {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                                cx.stop_propagation()
-                                            })
                                             .child(
                                                 div()
                                                     .id(SharedString::from(format!(
@@ -1073,7 +1070,11 @@ impl NavidromeApp {
                                                     .items_center()
                                                     .justify_center()
                                                     .shadow_md()
+                                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                        cx.stop_propagation()
+                                                    })
                                                     .on_click(cx.listener(move |this, _, _, cx| {
+                                                        cx.stop_propagation();
                                                         this.play_artist(artist_for_play.clone());
                                                         cx.notify();
                                                     }))
@@ -5048,13 +5049,137 @@ impl NavidromeApp {
                 let Some(artist) = &self.state.current_artist else {
                     return div().child(t!("Artist not found")).into_any_element();
                 };
+                let popular_count = self.state.artist_top_songs.len();
+                let artist_for_play_all = artist.clone();
+                let artist_radio_loading =
+                    self.state.artist_top_songs.first().is_some_and(|song| {
+                        self.radio_loading_song_id.as_deref() == Some(song.id.as_str())
+                    });
                 v_flex()
                     .gap_5()
-                    .child(self.page_header(
-                        artist.name.clone(),
-                        t!("%{count} albums", count = self.state.artist_albums.len()),
-                        cx,
-                    ))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap_4()
+                            .items_end()
+                            .flex_wrap()
+                            .child(self.render_cover(artist.cover_art.as_deref(), 112.0, cx))
+                            .child(div().flex_1().min_w(px(220.0)).child(self.page_header(
+                                artist.name.clone(),
+                                t!(
+                                    "%{albums} albums · %{songs} songs",
+                                    albums = self.state.artist_albums.len(),
+                                    songs = popular_count
+                                ),
+                                cx,
+                            )))
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .child(
+                                        Button::new("play-artist-all")
+                                            .label(t!("Play all"))
+                                            .primary()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.play_artist(artist_for_play_all.clone());
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("play-artist-popular")
+                                            .label(t!("Play popular"))
+                                            .outline()
+                                            .disabled(popular_count == 0)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.play_artist_top_songs();
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("start-artist-radio")
+                                            .label(if artist_radio_loading {
+                                                t!("Building song radio…")
+                                            } else {
+                                                t!("Start artist radio")
+                                            })
+                                            .outline()
+                                            .disabled(popular_count == 0 || artist_radio_loading)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.start_artist_radio();
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(self.favorite_button(
+                                        FavoriteKind::Artist,
+                                        &artist.id,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("Popular songs")),
+                    )
+                    .child(if self.state.artist_top_songs_loading {
+                        h_flex()
+                            .h(px(96.0))
+                            .w_full()
+                            .items_center()
+                            .justify_center()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(t!("Loading popular songs…"))
+                            .into_any_element()
+                    } else if let Some(error) = &self.state.artist_top_songs_error {
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .p_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!(
+                                        "Popular songs are unavailable: %{error}",
+                                        error = error
+                                    )),
+                            )
+                            .child(
+                                Button::new("retry-artist-popular")
+                                    .icon(AppIcon::Refresh)
+                                    .label(t!("Retry"))
+                                    .small()
+                                    .outline()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.load_artist_top_songs();
+                                        cx.notify();
+                                    })),
+                            )
+                            .into_any_element()
+                    } else if self.state.artist_top_songs.is_empty() {
+                        div()
+                            .py_4()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(t!("No popular songs were returned for this artist."))
+                            .into_any_element()
+                    } else {
+                        self.render_song_list("artist-top", false, cx)
+                    })
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("Albums")),
+                    )
                     .child(self.render_album_grid(
                         "artist-detail",
                         &self.state.artist_albums,
