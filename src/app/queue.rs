@@ -39,6 +39,8 @@ impl NavidromeApp {
         self.cancel_song_radio();
         self.cancel_next_preload();
         if let Some(songs) = replacement {
+            let origin = Self::origin_for_scope(scope);
+            self.state.queue_origins = vec![origin; songs.len()];
             self.state.queue = songs;
         }
         self.state.shuffle_history.start(index);
@@ -126,7 +128,7 @@ impl NavidromeApp {
         if let Some(scope) = self.active_song_list_scope() {
             let songs = self.selected_songs(scope);
             if !songs.is_empty() {
-                self.play_song_list(&songs, 0);
+                self.play_song_list_with_origin(&songs, 0, Self::origin_for_scope(scope));
                 cx.notify();
                 return;
             }
@@ -247,7 +249,7 @@ impl NavidromeApp {
         }
         let songs = self.selected_songs(scope);
         if !songs.is_empty() {
-            self.play_song_list(&songs, 0);
+            self.play_song_list_with_origin(&songs, 0, Self::origin_for_scope(scope));
         }
     }
 
@@ -290,9 +292,13 @@ impl NavidromeApp {
         };
         let count = songs.len();
         let mut tail = self.state.queue.split_off(insert_at);
+        let mut origin_tail = self.state.queue_origins.split_off(insert_at);
         let mut block = songs.to_vec();
         block.append(&mut tail);
+        let mut origin_block = vec![QueueOrigin::Manual; count];
+        origin_block.append(&mut origin_tail);
         self.state.queue.append(&mut block);
+        self.state.queue_origins.append(&mut origin_block);
         self.state
             .shuffle_history
             .remap(|i| Some(history_index_after_insert(i, insert_at, count)));
@@ -356,12 +362,30 @@ impl NavidromeApp {
     }
 
     pub(super) fn play_song_list(&mut self, songs: &[Song], index: usize) {
+        self.play_song_list_with_origin(songs, index, QueueOrigin::Manual);
+    }
+
+    pub(super) fn play_song_list_with_origin(
+        &mut self,
+        songs: &[Song],
+        index: usize,
+        origin: QueueOrigin,
+    ) {
         self.cancel_song_radio();
         self.cancel_next_preload();
         self.state.queue = songs.to_vec();
+        self.state.queue_origins = vec![origin; songs.len()];
         self.state.shuffle_history.start(index);
         self.play_queue_index(index);
         self.save_session();
+    }
+
+    fn origin_for_scope(scope: &str) -> QueueOrigin {
+        if scope == "playlist-detail" {
+            QueueOrigin::Playlist
+        } else {
+            QueueOrigin::Manual
+        }
     }
 
     /// 将单首歌曲插入到当前播放歌曲之后；未在播放时插入队首（不自动播放）。
@@ -373,6 +397,9 @@ impl NavidromeApp {
             None => 0,
         };
         self.state.queue.insert(insert_at, song);
+        self.state
+            .queue_origins
+            .insert(insert_at, QueueOrigin::Manual);
         self.state
             .shuffle_history
             .remap(|i| Some(if i >= insert_at { i + 1 } else { i }));
@@ -387,11 +414,16 @@ impl NavidromeApp {
             self.state.queue_index = Some(0);
         }
         self.state.queue.push(song);
+        self.state.queue_origins.push(QueueOrigin::Manual);
         self.save_session();
     }
 
     /// 追加整个列表到队列末尾（不自动播放）。
     pub(super) fn append_all(&mut self, songs: &[Song]) {
+        self.append_all_with_origin(songs, QueueOrigin::Manual);
+    }
+
+    pub(super) fn append_all_with_origin(&mut self, songs: &[Song], origin: QueueOrigin) {
         if songs.is_empty() {
             return;
         }
@@ -401,6 +433,9 @@ impl NavidromeApp {
             self.state.queue_index = Some(0);
         }
         self.state.queue.extend(songs.iter().cloned());
+        self.state
+            .queue_origins
+            .extend(std::iter::repeat_n(origin, songs.len()));
         self.save_session();
     }
 
@@ -414,6 +449,7 @@ impl NavidromeApp {
         self.cancel_next_preload();
         let removed_current = self.state.queue_index == Some(index);
         self.state.queue.remove(index);
+        self.state.queue_origins.remove(index);
         self.state.shuffle_history.remap(|i| {
             if i == index {
                 None
@@ -442,6 +478,7 @@ impl NavidromeApp {
             let keep = current + 1;
             if self.state.queue.len() > keep {
                 self.state.queue.truncate(keep);
+                self.state.queue_origins.truncate(keep);
                 self.state
                     .shuffle_history
                     .remap(|i| (i < keep).then_some(i));
@@ -455,6 +492,7 @@ impl NavidromeApp {
         self.cancel_song_radio();
         self.cancel_next_preload();
         self.state.queue.clear();
+        self.state.queue_origins.clear();
         self.state.queue_index = None;
         self.state.shuffle_history = ShuffleHistory::default();
         self.stop_playback();
@@ -471,7 +509,9 @@ impl NavidromeApp {
             return;
         }
         let song = self.state.queue.remove(from);
+        let origin = self.state.queue_origins.remove(from);
         self.state.queue.insert(to, song);
+        self.state.queue_origins.insert(to, origin);
         self.state
             .shuffle_history
             .remap(|i| Some(queue_index_after_move(from, to, i)));
@@ -496,6 +536,7 @@ impl NavidromeApp {
 
         self.cancel_next_preload();
         self.state.queue = vec![seed.clone()];
+        self.state.queue_origins = vec![QueueOrigin::SongRadio];
         self.state.shuffle_history.start(0);
         // Explicitly starting a radio means "continue after this track".
         // Repeat-one would contradict that intent, while repeat-all and
@@ -573,6 +614,9 @@ impl NavidromeApp {
             Ok(candidates) if !candidates.is_empty() => {
                 let count = candidates.len();
                 self.state.queue.extend(candidates);
+                self.state
+                    .queue_origins
+                    .extend(std::iter::repeat_n(QueueOrigin::SongRadio, count));
                 self.save_session();
                 self.notify_success(t!("Song radio added %{count} tracks", count = count));
             }

@@ -4437,9 +4437,8 @@ impl NavidromeApp {
                                 .custom(play_all_style)
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    let songs = this.state.queue.clone();
-                                    if !songs.is_empty() {
-                                        this.play_song_list(&songs, 0);
+                                    if !this.state.queue.is_empty() {
+                                        this.play_song_at_scope("queue", 0);
                                     }
                                     cx.notify();
                                 })),
@@ -5318,7 +5317,11 @@ impl NavidromeApp {
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let songs = this.state.playlist_songs.clone();
                                         if !songs.is_empty() {
-                                            this.play_song_list(&songs, 0);
+                                            this.play_song_list_with_origin(
+                                                &songs,
+                                                0,
+                                                QueueOrigin::Playlist,
+                                            );
                                         }
                                         cx.notify();
                                     })),
@@ -5335,7 +5338,7 @@ impl NavidromeApp {
                                     )
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let songs = this.state.playlist_songs.clone();
-                                        this.append_all(&songs);
+                                        this.append_all_with_origin(&songs, QueueOrigin::Playlist);
                                         cx.notify();
                                     })),
                             )

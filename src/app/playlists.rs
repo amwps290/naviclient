@@ -489,7 +489,16 @@ impl NavidromeApp {
         let play = context.clone();
         menu = menu.item(PopupMenuItem::new(t!("Play now")).on_click(cx.listener(
             move |this, _, _, cx| {
-                this.play_song_list(&play.songs, play.index);
+                if play.queue {
+                    this.play_song_at_scope("queue", play.index);
+                } else {
+                    let origin = if play.playlist.is_some() {
+                        QueueOrigin::Playlist
+                    } else {
+                        QueueOrigin::Manual
+                    };
+                    this.play_song_list_with_origin(&play.songs, play.index, origin);
+                }
                 cx.notify();
             },
         )));

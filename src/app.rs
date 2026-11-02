@@ -49,10 +49,10 @@ use crate::global_shortcuts::{
 };
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
-    Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
-    Genre, LanguagePreference, ListeningHistory, Lyrics, PlayModes, PlaybackSession, Playlist,
-    RepeatMode, SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song, ThemePreference,
-    TranscodingQuality, VolumeNormalization,
+    normalize_queue_origins, Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey,
+    FavoriteKind, Favorites, Genre, LanguagePreference, ListeningHistory, Lyrics, PlayModes,
+    PlaybackSession, Playlist, QueueOrigin, RepeatMode, SearchResults, ServerInfo, ServerProfile,
+    ShortcutAction, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
@@ -178,6 +178,8 @@ struct AppState {
     hovered_item: Option<String>,
     pending_play_album: bool,
     queue: Vec<Song>,
+    /// 与 queue 按索引对齐；所有队列变更必须同步更新。
+    queue_origins: Vec<QueueOrigin>,
     queue_index: Option<usize>,
     /// 右侧 Up Next 抽屉；不再用独立页面替换当前浏览上下文。
     queue_drawer_open: bool,
@@ -286,6 +288,7 @@ impl Default for AppState {
             hovered_item: None,
             pending_play_album: false,
             queue: Vec::new(),
+            queue_origins: Vec::new(),
             queue_index: None,
             queue_drawer_open: false,
             now_playing: None,
@@ -2228,7 +2231,9 @@ impl NavidromeApp {
             .queue_index
             .filter(|index| *index < session.queue.len());
         let restored_index = index;
+        let queue_len = session.queue.len();
         self.state.queue = session.queue;
+        self.state.queue_origins = normalize_queue_origins(session.queue_origins, queue_len);
         self.state.queue_index = index;
         self.state.playback_modes = session.playback_modes;
         self.config.playback_modes = session.playback_modes;
@@ -2914,9 +2919,7 @@ impl NavidromeApp {
     /// 持久化当前播放会话（队列、索引、位置、模式、随机历史）。
     fn save_session(&mut self) {
         let Some(api) = self.api.as_ref() else { return };
-        if self.state.queue.is_empty() {
-            return;
-        }
+        debug_assert_eq!(self.state.queue.len(), self.state.queue_origins.len());
         let position = self.audio.state().position;
         let (shuffle_played, shuffle_forward) = self.state.shuffle_history.snapshot();
         let api_server_id = self
@@ -2927,6 +2930,7 @@ impl NavidromeApp {
         let session = PlaybackSession {
             server_url: api.base_url().to_string(),
             queue: self.state.queue.clone(),
+            queue_origins: self.state.queue_origins.clone(),
             queue_index: self.state.queue_index,
             position_secs: position.as_secs_f64(),
             playback_modes: self.state.playback_modes,

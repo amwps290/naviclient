@@ -822,12 +822,36 @@ impl ArtistSort {
     pub const ALL: [Self; 3] = [Self::Name, Self::NameDesc, Self::AlbumCount];
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueOrigin {
+    #[default]
+    Manual,
+    Playlist,
+    DailyMix,
+    SongRadio,
+    ArtistRadio,
+    AutoContinue,
+}
+
+pub fn normalize_queue_origins(
+    mut origins: Vec<QueueOrigin>,
+    queue_len: usize,
+) -> Vec<QueueOrigin> {
+    origins.resize(queue_len, QueueOrigin::Manual);
+    origins.truncate(queue_len);
+    origins
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlaybackSession {
     /// 归属服务器（切换服务器时不恢复其他服务器的会话）。
     pub server_url: String,
     /// 播放队列快照。
     pub queue: Vec<Song>,
+    /// 与队列按索引对齐的来源；旧会话缺失时迁移为 Manual。
+    #[serde(default)]
+    pub queue_origins: Vec<QueueOrigin>,
     /// 当前播放的队列索引。
     pub queue_index: Option<usize>,
     /// 播放位置（秒）。
@@ -1434,10 +1458,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        locale_from_os_tag, AlbumSort, ArtistSort, CapabilitySupport, Config, LanguagePreference,
-        ListeningHistory, OpenSubsonicExtension, PlayModes, PlaybackMode, PlaybackSession,
-        RepeatMode, ServerCapabilities, ServerInfo, ServerProfile, ShortcutAction, Song,
-        ThemePreference, TranscodingQuality, VolumeNormalization, LISTENING_HISTORY_LIMIT,
+        locale_from_os_tag, normalize_queue_origins, AlbumSort, ArtistSort, CapabilitySupport,
+        Config, LanguagePreference, ListeningHistory, OpenSubsonicExtension, PlayModes,
+        PlaybackMode, PlaybackSession, QueueOrigin, RepeatMode, ServerCapabilities, ServerInfo,
+        ServerProfile, ShortcutAction, Song, ThemePreference, TranscodingQuality,
+        VolumeNormalization, LISTENING_HISTORY_LIMIT,
     };
 
     #[test]
@@ -1870,6 +1895,7 @@ mod tests {
         let session = PlaybackSession {
             server_url: "http://localhost:4533".to_string(),
             queue: vec![Song::default()],
+            queue_origins: vec![QueueOrigin::DailyMix],
             queue_index: Some(2),
             position_secs: 61.5,
             playback_modes: PlayModes {
@@ -1885,6 +1911,7 @@ mod tests {
             serde_json::from_str(&json).expect("session should deserialize");
 
         assert_eq!(restored.server_url, session.server_url);
+        assert_eq!(restored.queue_origins, vec![QueueOrigin::DailyMix]);
         assert_eq!(restored.queue.len(), 1);
         assert_eq!(restored.queue_index, Some(2));
         assert!((restored.position_secs - 61.5).abs() < 1e-9);
@@ -1892,6 +1919,29 @@ mod tests {
         assert_eq!(restored.playback_modes.repeat, RepeatMode::All);
         assert_eq!(restored.shuffle_played, vec![0, 3, 1]);
         assert_eq!(restored.shuffle_forward, vec![2]);
+    }
+
+    #[test]
+    fn legacy_queue_origins_default_to_manual_and_length_is_normalized() {
+        let legacy = r#"{
+            "server_url":"http://localhost:4533",
+            "queue":[{"id":"a","title":"A"},{"id":"b","title":"B"}],
+            "queue_index":0,
+            "position_secs":0,
+            "playback_modes":{"shuffle":false,"repeat":"off"},
+            "shuffle_played":[],
+            "shuffle_forward":[]
+        }"#;
+        let session: PlaybackSession = serde_json::from_str(legacy).unwrap();
+        assert!(session.queue_origins.is_empty());
+        assert_eq!(
+            normalize_queue_origins(session.queue_origins, session.queue.len()),
+            vec![QueueOrigin::Manual, QueueOrigin::Manual]
+        );
+        assert_eq!(
+            normalize_queue_origins(vec![QueueOrigin::SongRadio, QueueOrigin::DailyMix], 1),
+            vec![QueueOrigin::SongRadio]
+        );
     }
 
     #[test]
