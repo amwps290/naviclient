@@ -18,6 +18,7 @@ mod models;
 mod msg;
 mod notify;
 mod playlist;
+pub mod recommendation;
 mod secrets;
 mod single_instance;
 #[cfg(test)]
