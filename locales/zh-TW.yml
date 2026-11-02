@@ -2,6 +2,15 @@
 # %{name} 是插值佔位符，翻譯時必須原樣保留（含數量）。
 # 新增文案：先在原始碼寫 t!("...")，再在三個語言檔各補一條。
 
+"%{count} tracks selected for today": "今日已精選 %{count} 首"
+"A balanced mix of favorites, familiar artists, and new discoveries.": "融合收藏、熟悉藝人與新發現的均衡歌單。"
+"Create and play": "產生並播放"
+"Creating your daily mix…": "正在產生每日精選…"
+"Creating…": "正在產生…"
+"Daily Mix": "每日精選"
+"Daily mix unavailable: %{error}": "無法產生每日精選：%{error}"
+"Refresh mix": "換一批"
+
 "%{albums} albums": "%{albums} 張專輯"
 "%{albums} albums · %{songs} songs": "%{albums} 張專輯 · %{songs} 首歌曲"
 "%{artist} — %{album}": "%{artist} — %{album}"

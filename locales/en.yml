@@ -2,6 +2,15 @@
 # what the user sees. Keep %{name} placeholders intact when editing.
 # `src/i18n_tests.rs` fails the build if a t!() key is missing here.
 
+"%{count} tracks selected for today": "%{count} tracks selected for today"
+"A balanced mix of favorites, familiar artists, and new discoveries.": "A balanced mix of favorites, familiar artists, and new discoveries."
+"Create and play": "Create and play"
+"Creating your daily mix…": "Creating your daily mix…"
+"Creating…": "Creating…"
+"Daily Mix": "Daily Mix"
+"Daily mix unavailable: %{error}": "Daily mix unavailable: %{error}"
+"Refresh mix": "Refresh mix"
+
 "%{albums} albums": "%{albums} albums"
 "%{albums} albums · %{songs} songs": "%{albums} albums · %{songs} songs"
 "%{artist} — %{album}": "%{artist} — %{album}"

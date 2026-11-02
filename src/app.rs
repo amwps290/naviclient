@@ -56,6 +56,7 @@ use crate::models::{
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
+use crate::recommendation::DailyMixSnapshot;
 use crate::secrets;
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
@@ -70,6 +71,7 @@ mod import;
 mod library;
 mod playlists;
 mod queue;
+mod recommendations;
 mod views;
 use self::import::{ImportStage, ImportUi};
 use helpers::*;
@@ -149,6 +151,10 @@ struct AppState {
     frequent_albums_loading: bool,
     random_albums: Vec<Album>,
     random_albums_loading: bool,
+    daily_mix: Option<DailyMixSnapshot>,
+    daily_mix_loading: bool,
+    daily_mix_error: Option<String>,
+    daily_mix_play_when_ready: bool,
     genres: Vec<Genre>,
     genres_loading: bool,
     current_genre: Option<String>,
@@ -260,6 +266,10 @@ impl Default for AppState {
             frequent_albums_loading: false,
             random_albums: Vec::new(),
             random_albums_loading: false,
+            daily_mix: None,
+            daily_mix_loading: false,
+            daily_mix_error: None,
+            daily_mix_play_when_ready: false,
             genres: Vec::new(),
             genres_loading: false,
             current_genre: None,
@@ -413,6 +423,8 @@ pub struct NavidromeApp {
     eq_sliders: Vec<Entity<SliderState>>,
     /// 均衡器配置保存的防抖代次。
     eq_save_generation: u64,
+    /// 每日精选生成代次；换一批、重试和切服务器都会作废旧结果。
+    daily_mix_generation: u64,
     /// 艺术家热门歌曲请求代次；重复进入页面或重试时忽略迟到响应。
     artist_top_songs_generation: u64,
     /// 歌曲电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
@@ -601,6 +613,7 @@ impl NavidromeApp {
             mini_volume_flash_generation: 0,
             eq_sliders,
             eq_save_generation: 0,
+            daily_mix_generation: 0,
             artist_top_songs_generation: 0,
             radio_generation: 0,
             radio_loading_song_id: None,
@@ -2206,6 +2219,18 @@ impl NavidromeApp {
         let server_id = self.config.active_server_id().map(str::to_string);
         self.state.loudness_cache = config::load_loudness(server_id.as_deref());
         self.state.listening_history = config::load_listening_history(server_id.as_deref());
+        let day = crate::recommendation::current_day_key();
+        self.state.daily_mix = config::load_daily_mix(server_id.as_deref())
+            .filter(|snapshot| snapshot.is_current(server_id.as_deref().unwrap_or_default(), &day));
+        let daily_covers = self
+            .state
+            .daily_mix
+            .iter()
+            .flat_map(|snapshot| snapshot.tracks.iter())
+            .filter_map(|track| track.song.cover_art.clone())
+            .take(30)
+            .collect();
+        self.preload_covers(daily_covers);
         // 流派是服务端重查询（全库聚合）：先用磁盘缓存即时展示，后台刷新后覆盖。
         self.state.genres = config::load_genres_cache(server_id.as_deref()).unwrap_or_default();
 
@@ -2268,6 +2293,7 @@ impl NavidromeApp {
     /// 断开当前服务器并重建连接与视图状态（切服务器、保存设置共用）。
     fn reconnect_active_server(&mut self) {
         self.cancel_song_radio();
+        self.daily_mix_generation = self.daily_mix_generation.wrapping_add(1);
         self.cancel_next_preload();
         self.finish_listening_event(false);
         self.audio.stop();

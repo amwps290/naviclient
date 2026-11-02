@@ -4738,6 +4738,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "biquad",
+ "chrono",
  "cpal",
  "directories",
  "embed-resource",

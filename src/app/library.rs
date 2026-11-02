@@ -776,6 +776,11 @@ impl NavidromeApp {
                         Err(error) => log::warn!("random albums load failed: {error}"),
                     }
                 }
+                Msg::DailyMix {
+                    generation,
+                    server_id,
+                    result,
+                } => self.finish_daily_mix(generation, server_id, result),
                 Msg::AlbumSongs { album_id, result } => {
                     self.state.loading = false;
                     if self.state.current_album.as_ref().map(|a| a.id.as_str())

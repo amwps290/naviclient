@@ -7,6 +7,7 @@ use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
+use crate::recommendation::DailyMixSnapshot;
 
 /// 后台线程解码完成的封面结果，UI 线程只负责插入缓存。
 #[derive(Debug)]
@@ -43,6 +44,11 @@ pub enum Msg {
     RecentAlbums(Result<Vec<Album>, String>),
     FrequentAlbums(Result<Vec<Album>, String>),
     RandomAlbums(Result<Vec<Album>, String>),
+    DailyMix {
+        generation: u64,
+        server_id: String,
+        result: Result<DailyMixSnapshot, String>,
+    },
     AlbumSongs {
         album_id: String,
         result: Result<Vec<Song>, String>,

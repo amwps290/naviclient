@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use md5::{Digest, Md5};
 
 use crate::models::{Config, Genre, ListeningHistory, PlayModes, PlaybackMode, PlaybackSession};
+use crate::recommendation::DailyMixSnapshot;
 
 fn config_path() -> PathBuf {
     config_dir().join("config.json")
@@ -97,6 +98,10 @@ fn genres_cache_path(server_id: Option<&str>) -> PathBuf {
 
 fn listening_history_path(server_id: Option<&str>) -> PathBuf {
     scoped_path("listening-history", server_id)
+}
+
+fn daily_mix_path(server_id: Option<&str>) -> PathBuf {
+    scoped_path("daily-mix", server_id)
 }
 
 pub fn default_audio_cache_dir() -> PathBuf {
@@ -303,6 +308,14 @@ pub fn save_listening_history(server_id: Option<&str>, history: &ListeningHistor
     )
 }
 
+pub fn load_daily_mix(server_id: Option<&str>) -> Option<DailyMixSnapshot> {
+    read_json_at(&daily_mix_path(server_id))
+}
+
+pub fn save_daily_mix(server_id: Option<&str>, snapshot: &DailyMixSnapshot) -> Result<()> {
+    write_json_atomic(&daily_mix_path(server_id), snapshot, "daily mix")
+}
+
 /// 加载播放会话；文件缺失或损坏时安全回退为 None。
 /// 旧会话的 `playback_mode` 字段同样迁移为二维 `playback_modes`。
 pub fn load_session(server_id: Option<&str>, server_url: &str) -> Option<PlaybackSession> {
@@ -363,21 +376,27 @@ pub fn save_genres_cache(server_id: Option<&str>, genres: &[Genre]) -> Result<()
     write_genres_at(&genres_cache_path(server_id), genres)
 }
 
-/// 删除某台服务器的作用域缓存文件（播放会话 / 响度 / 流派 / 收听历史），
+/// 删除某台服务器的作用域缓存文件（播放会话 / 响度 / 流派 / 收听历史 / 每日精选），
 /// 返回删除的文件数。
 ///
 /// 封面与音频缓存文件名由内容 id 哈希而来，无法按服务器枚举，
-/// 继续交给总量上限的旧文件清理；这里只删可以确定性定位的三个文件。
+/// 继续交给总量上限的旧文件清理；这里只删可以确定性定位的作用域 JSON。
 pub fn remove_server_cache(server_id: &str) -> usize {
     remove_server_cache_at(&config_dir(), server_id)
 }
 
 fn remove_server_cache_at(dir: &Path, server_id: &str) -> usize {
-    ["session", "loudness", "genres", "listening-history"]
-        .iter()
-        .map(|stem| scoped_path_in(dir, stem, Some(server_id)))
-        .filter(|path| fs::remove_file(path).is_ok())
-        .count()
+    [
+        "session",
+        "loudness",
+        "genres",
+        "listening-history",
+        "daily-mix",
+    ]
+    .iter()
+    .map(|stem| scoped_path_in(dir, stem, Some(server_id)))
+    .filter(|path| fs::remove_file(path).is_ok())
+    .count()
 }
 
 fn read_genres_at(path: &Path) -> Option<Vec<Genre>> {
@@ -494,6 +513,7 @@ mod tests {
             listening_history_path(Some("srv-a")),
             listening_history_path(Some("srv-b"))
         );
+        assert_ne!(daily_mix_path(Some("srv-a")), daily_mix_path(Some("srv-b")));
         assert_ne!(
             genres_cache_path(Some("srv-a")),
             genres_cache_path(Some("srv-b"))
@@ -561,13 +581,25 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        for stem in ["session", "loudness", "genres", "listening-history"] {
+        for stem in [
+            "session",
+            "loudness",
+            "genres",
+            "listening-history",
+            "daily-mix",
+        ] {
             std::fs::write(scoped_path_in(&dir, stem, Some("srv-a")), "a").unwrap();
             std::fs::write(scoped_path_in(&dir, stem, Some("srv-b")), "b").unwrap();
         }
 
-        assert_eq!(remove_server_cache_at(&dir, "srv-a"), 4);
-        for stem in ["session", "loudness", "genres", "listening-history"] {
+        assert_eq!(remove_server_cache_at(&dir, "srv-a"), 5);
+        for stem in [
+            "session",
+            "loudness",
+            "genres",
+            "listening-history",
+            "daily-mix",
+        ] {
             assert!(!scoped_path_in(&dir, stem, Some("srv-a")).exists());
             assert!(
                 scoped_path_in(&dir, stem, Some("srv-b")).exists(),

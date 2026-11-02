@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use md5::{Digest, Md5};
@@ -355,6 +355,22 @@ impl ListeningHistory {
         event.listened_seconds = event.listened_seconds.max(listened_seconds);
         event.completed |= completed;
         true
+    }
+
+    pub fn recent_song_ids(&self, limit: usize) -> HashSet<String> {
+        let mut ids = HashSet::with_capacity(limit.min(self.events.len()));
+        if limit == 0 {
+            return ids;
+        }
+        for event in self.events.iter().rev() {
+            if !event.song.id.trim().is_empty() {
+                ids.insert(event.song.id.clone());
+            }
+            if ids.len() == limit {
+                break;
+            }
+        }
+        ids
     }
 }
 
@@ -1485,6 +1501,11 @@ mod tests {
         assert_eq!(history.events[0].listened_seconds, 0);
         assert_eq!(history.events[2].listened_seconds, 42);
         assert!(history.events[2].completed);
+        assert_eq!(
+            history.recent_song_ids(10),
+            std::collections::HashSet::from(["a".to_string(), "b".to_string()])
+        );
+        assert!(history.recent_song_ids(0).is_empty());
     }
 
     #[test]

@@ -5,8 +5,12 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use md5::{Digest, Md5};
+use serde::{Deserialize, Serialize};
 
 use crate::models::Song;
+
+mod daily;
+pub(crate) use daily::{current_day_key, generate_daily_mix, DailyMixSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecommendationKind {
@@ -28,7 +32,8 @@ pub enum CandidateSource {
     Random,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecommendationReason {
     Favorite,
     FrequentlyPlayed,
@@ -75,17 +80,25 @@ impl RecommendationContext {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecommendedTrack {
     pub song: Song,
     pub reason: RecommendationReason,
     pub score: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MixBucket {
+    Familiar,
+    Related,
+    Explore,
+}
+
 #[derive(Clone)]
 struct RankedCandidate {
     song: Song,
     reason: RecommendationReason,
+    bucket: MixBucket,
     score: f32,
     recent: bool,
 }
@@ -141,6 +154,7 @@ pub fn recommend(
             RankedCandidate {
                 song,
                 reason: source_reason(strongest),
+                bucket: source_bucket(strongest),
                 score,
                 recent,
             }
@@ -160,6 +174,38 @@ pub fn recommend(
     let mut artist_counts = HashMap::new();
     let mut album_counts = HashMap::new();
 
+    if request.kind == RecommendationKind::DailyMix {
+        let familiar = request.target_count * 2 / 5;
+        let related = request.target_count * 2 / 5;
+        let explore = request.target_count.saturating_sub(familiar + related);
+        let quotas = [
+            (MixBucket::Familiar, familiar),
+            (MixBucket::Related, related),
+            (MixBucket::Explore, explore),
+        ];
+        // Give every bucket a strict-diversity opportunity before any bucket
+        // may relax. Recent tracks remain behind all fresh strict candidates.
+        for (allow_recent, relax_diversity) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            for (bucket, quota) in quotas {
+                fill_selection(
+                    &ranked,
+                    request.target_count,
+                    allow_recent,
+                    if relax_diversity { None } else { strict_artist },
+                    if relax_diversity { None } else { strict_album },
+                    Some(bucket),
+                    Some(quota),
+                    &mut selected,
+                    &mut selected_ids,
+                    &mut artist_counts,
+                    &mut album_counts,
+                );
+            }
+        }
+    }
+
     for (allow_recent, artist_limit, album_limit) in [
         (false, strict_artist, strict_album),
         (false, None, None),
@@ -172,6 +218,8 @@ pub fn recommend(
             allow_recent,
             artist_limit,
             album_limit,
+            None,
+            None,
             &mut selected,
             &mut selected_ids,
             &mut artist_counts,
@@ -199,14 +247,27 @@ fn fill_selection<'a>(
     allow_recent: bool,
     artist_limit: Option<usize>,
     album_limit: Option<usize>,
+    bucket_filter: Option<MixBucket>,
+    bucket_target: Option<usize>,
     selected: &mut Vec<&'a RankedCandidate>,
     selected_ids: &mut HashSet<String>,
     artist_counts: &mut HashMap<String, usize>,
     album_counts: &mut HashMap<String, usize>,
 ) {
     for candidate in ranked {
-        if selected.len() == target_count {
+        if selected.len() == target_count
+            || bucket_target.is_some_and(|target| {
+                selected
+                    .iter()
+                    .filter(|selected| Some(selected.bucket) == bucket_filter)
+                    .count()
+                    >= target
+            })
+        {
             return;
+        }
+        if bucket_filter.is_some_and(|bucket| candidate.bucket != bucket) {
+            continue;
         }
         if selected_ids.contains(&candidate.song.id) || candidate.recent && !allow_recent {
             continue;
@@ -263,6 +324,17 @@ fn source_weight(kind: RecommendationKind, source: CandidateSource) -> u16 {
         (_, CandidateSource::SameGenre) => 40,
         (_, CandidateSource::Newest) => 25,
         (_, CandidateSource::Random) => 15,
+    }
+}
+
+fn source_bucket(source: CandidateSource) -> MixBucket {
+    match source {
+        CandidateSource::Favorite | CandidateSource::Frequent => MixBucket::Familiar,
+        CandidateSource::Similar
+        | CandidateSource::ArtistTop
+        | CandidateSource::SameArtist
+        | CandidateSource::SameGenre => MixBucket::Related,
+        CandidateSource::Newest | CandidateSource::Random => MixBucket::Explore,
     }
 }
 
@@ -411,6 +483,55 @@ mod tests {
         let two = recommend(&request(2, 9), candidates, &context);
         assert_eq!(two.len(), 2);
         assert_eq!(two[0].song.id, "fresh");
+    }
+
+    #[test]
+    fn daily_mix_reserves_familiar_related_and_explore_capacity() {
+        let mut candidates = Vec::new();
+        for index in 0..10 {
+            candidates.push(candidate(
+                song(
+                    &format!("f{index}"),
+                    &format!("fa{index}"),
+                    &format!("fx{index}"),
+                ),
+                CandidateSource::Favorite,
+            ));
+            candidates.push(candidate(
+                song(
+                    &format!("s{index}"),
+                    &format!("sa{index}"),
+                    &format!("sx{index}"),
+                ),
+                CandidateSource::Similar,
+            ));
+            candidates.push(candidate(
+                song(
+                    &format!("e{index}"),
+                    &format!("ea{index}"),
+                    &format!("ex{index}"),
+                ),
+                CandidateSource::Random,
+            ));
+        }
+        let result = recommend(
+            &request(10, 5),
+            candidates,
+            &RecommendationContext::with_daily_mix_defaults(),
+        );
+        let familiar = result
+            .iter()
+            .filter(|track| track.reason == RecommendationReason::Favorite)
+            .count();
+        let related = result
+            .iter()
+            .filter(|track| track.reason == RecommendationReason::SimilarTrack)
+            .count();
+        let explore = result
+            .iter()
+            .filter(|track| track.reason == RecommendationReason::Explore)
+            .count();
+        assert_eq!((familiar, related, explore), (4, 4, 2));
     }
 
     #[test]

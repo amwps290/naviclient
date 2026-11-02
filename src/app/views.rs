@@ -4247,6 +4247,150 @@ impl NavidromeApp {
         cx.notify();
     }
 
+    fn render_daily_mix_card(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let count = self
+            .state
+            .daily_mix
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.tracks.len());
+        let subtitle = if self.state.daily_mix_loading {
+            t!("Creating your daily mix…")
+        } else if let Some(error) = &self.state.daily_mix_error {
+            t!("Daily mix unavailable: %{error}", error = error)
+        } else if count > 0 {
+            t!("%{count} tracks selected for today", count = count)
+        } else {
+            t!("A balanced mix of favorites, familiar artists, and new discoveries.")
+        };
+        let previews = self
+            .state
+            .daily_mix
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .tracks
+                    .iter()
+                    .take(4)
+                    .filter_map(|track| track.song.cover_art.as_deref())
+                    .map(|cover| self.render_cover(Some(cover), 48.0, cx))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        h_flex()
+            .w_full()
+            .min_h(px(116.0))
+            .gap_4()
+            .items_center()
+            .flex_wrap()
+            .rounded_xl()
+            .border_1()
+            .border_color(cx.theme().border.opacity(0.75))
+            .bg(cx.theme().secondary.opacity(0.28))
+            .p_4()
+            .when(previews.is_empty(), |this| {
+                this.child(
+                    div()
+                        .size(px(72.0))
+                        .flex_none()
+                        .rounded_lg()
+                        .bg(cx.theme().primary.opacity(0.12))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Icon::new(AppIcon::Shuffle)
+                                .with_size(px(28.0))
+                                .text_color(cx.theme().primary),
+                        ),
+                )
+            })
+            .when(!previews.is_empty(), |this| {
+                this.child(h_flex().gap_1().children(previews))
+            })
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(px(220.0))
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("Daily Mix")),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(if self.state.daily_mix_error.is_some() {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(subtitle),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .flex_wrap()
+                    .when(count == 0, |this| {
+                        this.child(
+                            Button::new("daily-mix-create")
+                                .label(if self.state.daily_mix_loading {
+                                    t!("Creating…")
+                                } else if self.state.daily_mix_error.is_some() {
+                                    t!("Retry")
+                                } else {
+                                    t!("Create and play")
+                                })
+                                .primary()
+                                .disabled(self.state.daily_mix_loading)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if this.state.daily_mix_error.is_some() {
+                                        this.retry_daily_mix();
+                                    } else {
+                                        this.play_daily_mix();
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .when(count > 0, |this| {
+                        this.child(
+                            Button::new("daily-mix-play")
+                                .label(t!("Play"))
+                                .primary()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.play_daily_mix();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("daily-mix-append")
+                                .label(t!("Add to queue"))
+                                .outline()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.append_daily_mix();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("daily-mix-refresh")
+                                .icon(AppIcon::Refresh)
+                                .tooltip(t!("Refresh mix"))
+                                .ghost()
+                                .disabled(self.state.daily_mix_loading)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.refresh_daily_mix();
+                                    cx.notify();
+                                })),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn render_home(&self, window: &mut Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let feature_uses_recent =
             self.state.now_playing.is_none() && !self.state.recent_albums.is_empty();
@@ -4269,6 +4413,7 @@ impl NavidromeApp {
             .when_some(self.render_home_feature(window, cx), |this, feature| {
                 this.child(feature)
             })
+            .child(self.render_daily_mix_card(cx))
             .when(
                 !recent_preview.is_empty() || self.state.recent_albums_loading,
                 |this| {

@@ -2,6 +2,15 @@
 # %{name} 是插值占位符，翻译时必须原样保留（含数量）。
 # 新增文案：先在源码写 t!("...")，再在三个语言文件里各补一条。
 
+"%{count} tracks selected for today": "今日已精选 %{count} 首"
+"A balanced mix of favorites, familiar artists, and new discoveries.": "融合收藏、熟悉艺人与新发现的均衡歌单。"
+"Create and play": "生成并播放"
+"Creating your daily mix…": "正在生成每日精选…"
+"Creating…": "正在生成…"
+"Daily Mix": "每日精选"
+"Daily mix unavailable: %{error}": "无法生成每日精选：%{error}"
+"Refresh mix": "换一批"
+
 "%{albums} albums": "%{albums} 张专辑"
 "%{albums} albums · %{songs} songs": "%{albums} 张专辑 · %{songs} 首歌曲"
 "%{artist} — %{album}": "%{artist} — %{album}"
