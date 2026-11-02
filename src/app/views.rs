@@ -4085,7 +4085,6 @@ impl NavidromeApp {
                                     ),
                             ),
                     )
-                    .child(self.render_daily_mix_panel(compact, true, cx))
                     .into_any_element(),
             );
         }
@@ -4179,7 +4178,6 @@ impl NavidromeApp {
                                 ),
                         ),
                 )
-                .child(self.render_daily_mix_panel(compact, true, cx))
                 .into_any_element(),
         )
     }
@@ -4249,12 +4247,13 @@ impl NavidromeApp {
         cx.notify();
     }
 
-    fn render_daily_mix_panel(
+    fn render_daily_mix_card(
         &self,
-        compact: bool,
-        embedded: bool,
+        window: &mut Window,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let compact = compact_window_layout(f32::from(window.viewport_size().width));
+        let feature_height = if compact { 144.0 } else { 176.0 };
         let count = self
             .state
             .daily_mix
@@ -4270,34 +4269,23 @@ impl NavidromeApp {
             t!("A balanced mix of favorites, familiar artists, and new discoveries.")
         };
         v_flex()
-            .justify_center()
-            .gap_2()
-            .when(embedded, |this| {
-                this.h_full()
-                    .w(px(if compact { 220.0 } else { 280.0 }))
-                    .flex_none()
-                    .border_l_1()
-                    .border_color(cx.theme().border.opacity(0.52))
-                    .bg(cx.theme().background.opacity(0.06))
-                    .when(compact, |this| this.px_3())
-                    .when(!compact, |this| this.px_4())
-            })
-            .when(!embedded, |this| {
-                this.w_full()
-                    .min_h(px(104.0))
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border.opacity(0.68))
-                    .bg(cx.theme().secondary.opacity(0.18))
-                    .p_4()
-            })
+            .w_full()
+            .h(px(feature_height))
+            .justify_between()
+            .gap_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border.opacity(0.68))
+            .bg(cx.theme().secondary.opacity(0.18))
+            .when(compact, |this| this.p_4())
+            .when(!compact, |this| this.p_5())
             .child(
                 h_flex()
                     .gap_2()
                     .items_center()
                     .child(
                         div()
-                            .size(px(if compact { 32.0 } else { 36.0 }))
+                            .size(px(if compact { 40.0 } else { 48.0 }))
                             .flex_none()
                             .rounded_md()
                             .bg(cx.theme().primary.opacity(0.1))
@@ -4306,7 +4294,7 @@ impl NavidromeApp {
                             .justify_center()
                             .child(
                                 Icon::new(AppIcon::Shuffle)
-                                    .with_size(px(if compact { 16.0 } else { 18.0 }))
+                                    .with_size(px(if compact { 18.0 } else { 22.0 }))
                                     .text_color(cx.theme().primary),
                             ),
                     )
@@ -4317,7 +4305,8 @@ impl NavidromeApp {
                             .gap_0p5()
                             .child(
                                 div()
-                                    .text_sm()
+                                    .when(compact, |this| this.text_base())
+                                    .when(!compact, |this| this.text_lg())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(t!("Daily Mix")),
                             )
@@ -4417,15 +4406,21 @@ impl NavidromeApp {
             self.state.status.clone()
         };
         let listening_feature = self.render_home_feature(window, cx);
-        let has_listening_feature = listening_feature.is_some();
+        let daily_mix_card = self.render_daily_mix_card(window, cx);
 
         v_flex()
             .gap_6()
             .child(self.page_header(t!("Home"), status, cx))
-            .when_some(listening_feature, |this, feature| this.child(feature))
-            .when(!has_listening_feature, |this| {
-                this.child(self.render_daily_mix_panel(false, false, cx))
-            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_4()
+                    .items_stretch()
+                    .when_some(listening_feature, |this, feature| {
+                        this.child(div().flex_1().min_w_0().child(feature))
+                    })
+                    .child(div().flex_1().min_w_0().child(daily_mix_card)),
+            )
             .when(
                 !recent_preview.is_empty() || self.state.recent_albums_loading,
                 |this| {
