@@ -228,9 +228,11 @@ Config is stored in the platform config directory, e.g.:
 - macOS: `~/Library/Application Support/rs/navidrome/navidrome-client/config.json`
 - Linux: `~/.config/navidrome-client/config.json`
 
-Configuration, playback sessions, measured loudness, and genre caches are
-written through same-directory temporary files and atomically replaced, so an
-interrupted save cannot leave a truncated JSON document.
+Configuration, playback sessions, measured loudness, genre caches, and local
+listening history are written through same-directory temporary files and
+atomically replaced, so an interrupted save cannot leave a truncated JSON
+document. Listening history is isolated per server, bounded to the latest 1000
+attempts, and measures actual playback progress without counting seek jumps.
 
 Played audio is cached separately in the configured audio cache directory.
 The folder can be changed from Settings, completed tracks are reused without
@@ -293,6 +295,7 @@ application asset source combines custom player icons with Kit's built-in icons.
 - `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
 - `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
 - `src/playlist.rs` and `src/app/playlists.rs` - playlist edit validation, dialogs, and song menus
+- `src/recommendation.rs` - deterministic candidate scoring, de-duplication, recent-play deferral, and diversity constraints
 - `src/api/playlist_tests.rs` - HTTP contract tests for playlist editing
 - `src/models.rs` - shared API data structures
 - `src/config.rs` - persisted server settings
