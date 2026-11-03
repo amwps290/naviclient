@@ -1,9 +1,16 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use md5::{Digest, Md5};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
+
+mod listening;
+mod queue;
+#[cfg(test)]
+use listening::LISTENING_HISTORY_LIMIT;
+pub use listening::{ListeningEvent, ListeningHistory};
+pub use queue::{normalize_queue_origins, PlaybackSession, QueueOrigin};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FavoriteKind {
@@ -301,86 +308,6 @@ pub struct Song {
     pub replay_gain_album_gain: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_optional_f32")]
     pub replay_gain_album_peak: Option<f32>,
-}
-
-pub const LISTENING_HISTORY_LIMIT: usize = 1_000;
-
-/// One local listening attempt. History is scoped by server in `config.rs` and
-/// stays independent from Subsonic scrobble state: short previews are useful
-/// for suppression, while `completed` attempts contribute stronger affinity.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ListeningEvent {
-    pub song: Song,
-    pub started_at: u64,
-    #[serde(default)]
-    pub listened_seconds: u32,
-    #[serde(default)]
-    pub completed: bool,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ListeningHistory {
-    #[serde(default)]
-    pub events: Vec<ListeningEvent>,
-}
-
-impl ListeningHistory {
-    pub fn record_started(&mut self, song: Song, started_at: u64) {
-        if song.id.trim().is_empty() {
-            return;
-        }
-        self.events.push(ListeningEvent {
-            song,
-            started_at,
-            listened_seconds: 0,
-            completed: false,
-        });
-        let excess = self.events.len().saturating_sub(LISTENING_HISTORY_LIMIT);
-        if excess > 0 {
-            self.events.drain(..excess);
-        }
-    }
-
-    /// Update the newest attempt for a song. Returning false means no start
-    /// event exists, which lets the caller recover without inventing history.
-    pub fn update_latest(&mut self, song_id: &str, listened_seconds: u32, completed: bool) -> bool {
-        let Some(event) = self
-            .events
-            .iter_mut()
-            .rev()
-            .find(|event| event.song.id == song_id)
-        else {
-            return false;
-        };
-        event.listened_seconds = event.listened_seconds.max(listened_seconds);
-        event.completed |= completed;
-        true
-    }
-
-    pub fn recent_songs(&self, limit: usize) -> Vec<Song> {
-        self.events
-            .iter()
-            .rev()
-            .take(limit)
-            .map(|event| event.song.clone())
-            .collect()
-    }
-
-    pub fn recent_song_ids(&self, limit: usize) -> HashSet<String> {
-        let mut ids = HashSet::with_capacity(limit.min(self.events.len()));
-        if limit == 0 {
-            return ids;
-        }
-        for event in self.events.iter().rev() {
-            if !event.song.id.trim().is_empty() {
-                ids.insert(event.song.id.clone());
-            }
-            if ids.len() == limit {
-                break;
-            }
-        }
-        ids
-    }
 }
 
 /// 容错解析可选的 f32 字段：接受数字或字符串，其他情况返回 None，
@@ -845,48 +772,6 @@ impl ArtistSort {
     }
 
     pub const ALL: [Self; 3] = [Self::Name, Self::NameDesc, Self::AlbumCount];
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueueOrigin {
-    #[default]
-    Manual,
-    Playlist,
-    DailyMix,
-    SongRadio,
-    ArtistRadio,
-    AutoContinue,
-}
-
-pub fn normalize_queue_origins(
-    mut origins: Vec<QueueOrigin>,
-    queue_len: usize,
-) -> Vec<QueueOrigin> {
-    origins.resize(queue_len, QueueOrigin::Manual);
-    origins.truncate(queue_len);
-    origins
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct PlaybackSession {
-    /// 归属服务器（切换服务器时不恢复其他服务器的会话）。
-    pub server_url: String,
-    /// 播放队列快照。
-    pub queue: Vec<Song>,
-    /// 与队列按索引对齐的来源；旧会话缺失时迁移为 Manual。
-    #[serde(default)]
-    pub queue_origins: Vec<QueueOrigin>,
-    /// 当前播放的队列索引。
-    pub queue_index: Option<usize>,
-    /// 播放位置（秒）。
-    pub position_secs: f64,
-    /// 播放模式（随机开关 + 循环模式）。
-    pub playback_modes: PlayModes,
-    /// 随机播放历史（播放过的索引）。
-    pub shuffle_played: Vec<usize>,
-    /// 随机播放回退暂存。
-    pub shuffle_forward: Vec<usize>,
 }
 
 /// 可由用户重新绑定的应用内快捷键动作。枚举名作为配置文件中的稳定键，
