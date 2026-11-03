@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 mod listening;
 mod media;
+mod playback;
 mod queue;
 mod server;
 mod shortcuts;
@@ -14,6 +15,9 @@ use listening::LISTENING_HISTORY_LIMIT;
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
     Album, Artist, Favorites, Genre, LyricLine, Lyrics, Playlist, SearchResults, Song,
+};
+pub use playback::{
+    EqSettings, PlayModes, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,
 };
 pub use queue::{normalize_queue_origins, PlaybackSession, QueueOrigin};
 pub use server::{CapabilitySupport, OpenSubsonicExtension, ServerCapabilities, ServerInfo};
@@ -127,240 +131,6 @@ pub fn locale_from_os_tag(tag: &str) -> &'static str {
         "zh-TW"
     } else {
         "zh-CN"
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TranscodingQuality {
-    #[default]
-    Original,
-    Kbps128,
-    Kbps192,
-    Kbps256,
-    Kbps320,
-}
-
-impl TranscodingQuality {
-    pub const ALL: [Self; 5] = [
-        Self::Original,
-        Self::Kbps128,
-        Self::Kbps192,
-        Self::Kbps256,
-        Self::Kbps320,
-    ];
-
-    /// 展示名（kbps 档位是技术记号，无对应翻译时回退原文）。
-    pub fn label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Original => t!("Original"),
-            Self::Kbps128 => t!("128 kbps"),
-            Self::Kbps192 => t!("192 kbps"),
-            Self::Kbps256 => t!("256 kbps"),
-            Self::Kbps320 => t!("320 kbps"),
-        }
-    }
-
-    pub fn max_bit_rate(self) -> Option<u32> {
-        match self {
-            Self::Original => None,
-            Self::Kbps128 => Some(128),
-            Self::Kbps192 => Some(192),
-            Self::Kbps256 => Some(256),
-            Self::Kbps320 => Some(320),
-        }
-    }
-
-    pub fn cache_profile(self) -> &'static str {
-        match self {
-            Self::Original => "original",
-            Self::Kbps128 => "mp3-128",
-            Self::Kbps192 => "mp3-192",
-            Self::Kbps256 => "mp3-256",
-            Self::Kbps320 => "mp3-320",
-        }
-    }
-
-    /// 判断音源是否为本地解码链不支持的编码（Ogg Opus）。
-    ///
-    /// symphonia 0.5 尚未发布 Opus 解码器，rodio 也没有对应 feature；
-    /// Original 档位拿到原始 Opus 流会在解码器初始化时失败（报错文案
-    /// 是误导性的“格式未识别”）。判定依据歌曲元数据的 suffix 与
-    /// content type，均做 trim 并忽略大小写；两者都缺失时按可解码处理
-    /// （保持现状，不盲目降级）。
-    pub fn is_undecodable_source(suffix: Option<&str>, content_type: Option<&str>) -> bool {
-        let is = |text: Option<&str>, expected: &str| {
-            text.is_some_and(|text| text.trim().eq_ignore_ascii_case(expected))
-        };
-        is(suffix, "opus") || is(content_type, "audio/opus")
-    }
-
-    /// 取流实际使用的音质：Original 遇到本地无法解码的 Opus 源时，
-    /// 自动降级为服务端转码，取既有档位里最高的 320 kbps，尽量贴近
-    /// “原始音质”的意图；其余情况（含已选转码档位）保持配置不变——
-    /// 用户手动选的转码档位本身就会触发服务端转码，无需干预。
-    pub fn effective_for(
-        configured: Self,
-        suffix: Option<&str>,
-        content_type: Option<&str>,
-    ) -> Self {
-        if configured == Self::Original && Self::is_undecodable_source(suffix, content_type) {
-            Self::transcode_fallback()
-        } else {
-            configured
-        }
-    }
-
-    /// Opus 自动降级的目标档位。
-    pub const fn transcode_fallback() -> Self {
-        Self::Kbps320
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlaybackMode {
-    #[default]
-    Sequential,
-    RepeatAll,
-    RepeatOne,
-    Shuffle,
-}
-
-/// 循环模式：不循环 / 列表循环 / 单曲循环。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RepeatMode {
-    #[default]
-    Off,
-    All,
-    One,
-}
-
-impl RepeatMode {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::All,
-            Self::All => Self::One,
-            Self::One => Self::Off,
-        }
-    }
-
-    pub fn tooltip(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Off => t!("Repeat off"),
-            Self::All => t!("Repeat all"),
-            Self::One => t!("Repeat current track"),
-        }
-    }
-}
-
-/// 均衡器设置：10 段图形均衡（31.25 Hz…16 kHz），每段 -12..+12 dB；
-/// 关闭时音频直通。设置由音频工作线程在链路中应用（ReplayGain 增益
-/// 之后、输出归一化之前），不影响响度测量。
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EqSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub gains_db: [f32; 10],
-}
-
-impl Default for EqSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            gains_db: [0.0; 10],
-        }
-    }
-}
-
-impl EqSettings {
-    /// 10 段中心频率（Hz，1/3 十倍频程排列）。
-    pub const BANDS: [f32; 10] = [
-        31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
-    ];
-
-    /// 内置预设：(名称, 10 段增益 dB)。
-    pub const PRESETS: [(&'static str, [f32; 10]); 8] = [
-        ("Flat", [0.0; 10]),
-        (
-            "Bass boost",
-            [7.0, 6.0, 4.5, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ),
-        (
-            "Treble boost",
-            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.5, 5.0, 6.5],
-        ),
-        (
-            "Vocal",
-            [-2.0, -1.5, 0.0, 2.0, 4.0, 4.0, 3.0, 1.5, 0.0, -1.0],
-        ),
-        ("Rock", [5.0, 4.0, 3.0, 1.0, -0.5, -1.0, 0.5, 2.5, 3.5, 4.0]),
-        ("Pop", [-1.0, 0.5, 3.0, 4.0, 3.0, 0.5, -1.0, -1.0, 0.0, 1.0]),
-        ("Jazz", [4.0, 3.0, 1.0, 2.0, -1.0, -1.0, 0.0, 1.0, 2.5, 3.5]),
-        (
-            "Classical",
-            [4.0, 3.0, 2.0, 0.0, -1.0, -1.0, 0.0, 2.5, 3.5, 4.5],
-        ),
-    ];
-
-    /// 预设的显示名。`PRESETS` 里的名称同时充当元素 ID 与配置无关的
-    /// 稳定标识，因此只在显示时翻译（与侧边栏入口同一套做法）。
-    pub fn preset_label(name: &'static str) -> std::borrow::Cow<'static, str> {
-        match name {
-            "Flat" => t!("Flat"),
-            "Bass boost" => t!("Bass boost"),
-            "Treble boost" => t!("Treble boost"),
-            "Vocal" => t!("Vocal"),
-            "Rock" => t!("Rock"),
-            "Pop" => t!("Pop"),
-            "Jazz" => t!("Jazz"),
-            "Classical" => t!("Classical"),
-            other => std::borrow::Cow::Borrowed(other),
-        }
-    }
-
-    /// 把可能越界的滑杆值夹回 [-12, 12] dB。
-    pub fn clamp_gains(&mut self) {
-        for gain in &mut self.gains_db {
-            *gain = gain.clamp(-12.0, 12.0);
-        }
-    }
-}
-
-/// 播放模式：随机开关与循环模式相互独立（与 MPRIS 及常见播放器的
-/// 二维模型一致）。旧版单枚举 [`PlaybackMode`] 仅用于配置/会话迁移。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct PlayModes {
-    #[serde(default)]
-    pub shuffle: bool,
-    #[serde(default)]
-    pub repeat: RepeatMode,
-}
-
-impl PlayModes {
-    /// 旧版四态枚举到二维模式的迁移映射：随机枚举只保留随机开关，
-    /// 循环枚举只保留循环模式。
-    pub fn from_legacy(mode: PlaybackMode) -> Self {
-        match mode {
-            PlaybackMode::Sequential => Self {
-                shuffle: false,
-                repeat: RepeatMode::Off,
-            },
-            PlaybackMode::RepeatAll => Self {
-                shuffle: false,
-                repeat: RepeatMode::All,
-            },
-            PlaybackMode::RepeatOne => Self {
-                shuffle: false,
-                repeat: RepeatMode::One,
-            },
-            PlaybackMode::Shuffle => Self {
-                shuffle: true,
-                repeat: RepeatMode::Off,
-            },
-        }
     }
 }
 
@@ -789,37 +559,6 @@ fn default_volume() -> f32 {
 
 fn default_true() -> bool {
     true
-}
-
-/// 音量标准化模式：关闭 / 按曲目 / 按专辑（ReplayGain）。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum VolumeNormalization {
-    Off,
-    #[default]
-    Track,
-    Album,
-}
-
-impl VolumeNormalization {
-    pub const ALL: [Self; 3] = [Self::Off, Self::Track, Self::Album];
-
-    pub fn label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Off => t!("Off"),
-            Self::Track => t!("Track"),
-            Self::Album => t!("Album"),
-        }
-    }
-
-    /// 说明文案（翻译键）；取词时点跟随当前界面语言。
-    pub fn tooltip(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Off => t!("Play every song at its recorded loudness"),
-            Self::Track => t!("Normalize each track to a consistent loudness (ReplayGain)"),
-            Self::Album => t!("Normalize by album so a record's relative dynamics are preserved"),
-        }
-    }
 }
 
 #[cfg(test)]
