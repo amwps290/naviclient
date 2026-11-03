@@ -76,7 +76,15 @@ JavaScript runtime.
   results are scoped by generation and server, so a manual queue edit or server
   switch cannot overwrite the user's Up Next. Artist pages continue to show up
   to 12 popular songs and prefer stable artist IDs when the server advertises
-  the OpenSubsonic Top Songs extension
+  the OpenSubsonic Top Songs extension.
+- Opt-in automatic continuation in the Up Next drawer: when ordinary sequential
+  playback naturally reaches the queue boundary, the shared recommendation
+  engine appends up to 20 queue-related tracks and resumes playback. Repeat-one,
+  repeat-all, shuffle and manual Next never trigger generation. Any manual
+  insert, append, removal, reorder or clear operation cancels an in-flight task;
+  generation and server checks reject late results. Generated queue rows carry
+  compact Daily Mix, Song radio, Artist radio or Auto source badges, and the
+  preference plus queue origins survive restart.
 - Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
   position stay intact while the queue is inspected or edited
 - Import playlists from NetEase Cloud Music or QQ Music: paste a direct link,
