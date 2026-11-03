@@ -1220,11 +1220,14 @@ impl NavidromeApp {
         }
         let handle = self.song_list_scroll(scope);
         let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
-        let queue_drawer = scope == "queue" && self.state.queue_drawer_open;
+        let queue_drawer = matches!(scope, "queue" | "history") && self.state.queue_drawer_open;
         let compact_columns = queue_drawer || compact_song_columns(list_width);
         // 专辑 / 播放列表详情和队列页中表格占满剩余高度（表头固定，列表内部滚动）；
         // 收藏与搜索页的歌曲表格与其他分区共存，限制高度独立滚动。
-        let fill = matches!(scope, "album-detail" | "playlist-detail" | "queue");
+        let fill = matches!(
+            scope,
+            "album-detail" | "playlist-detail" | "queue" | "history"
+        );
         let rows = cx.processor(move |this, range: Range<usize>, _window, cx| {
             let playback = this.audio.state();
             range
@@ -1538,8 +1541,8 @@ impl NavidromeApp {
         playback: &PlaybackState,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let queue_drawer = scope == "queue" && self.state.queue_drawer_open;
-        let recommendation_label = queue_drawer
+        let queue_drawer = matches!(scope, "queue" | "history") && self.state.queue_drawer_open;
+        let recommendation_label = (scope == "queue")
             .then(|| self.state.queue_origins.get(index).copied())
             .flatten()
             .and_then(|origin| match origin {
@@ -1556,12 +1559,16 @@ impl NavidromeApp {
         let key = item_instance_key(scope, "song", index, &song.id);
         let menu_app = cx.entity().downgrade();
         let button_menu_app = menu_app.clone();
-        let current = self
+        let current_song = self
             .state
             .now_playing
             .as_ref()
-            .is_some_and(|playing| playing.id == song.id)
-            && (!editable || self.state.queue_index == Some(index));
+            .is_some_and(|playing| playing.id == song.id);
+        let current = if scope == "history" {
+            index == 0 && current_song
+        } else {
+            current_song && (!editable || self.state.queue_index == Some(index))
+        };
         let animated = current && playback.active && !playback.paused;
         let row_accent = self.now_playing_accent(cx);
         let row_accent_foreground = accent_foreground(row_accent);
@@ -4593,6 +4600,11 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let accent = self.now_playing_accent(cx);
         let compact = width <= 340.0;
+        let tab = self.state.queue_drawer_tab;
+        let visible_count = match tab {
+            QueueDrawerTab::UpNext => self.state.queue.len(),
+            QueueDrawerTab::History => self.state.playback_history.len(),
+        };
         let play_all_style = ButtonCustomVariant::new(cx)
             .color(accent)
             .foreground(accent_foreground(accent))
@@ -4626,13 +4638,13 @@ impl NavidromeApp {
                                 div()
                                     .text_base()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(t!("Up next")),
+                                    .child(tab.label()),
                             )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(t!("%{count} tracks", count = self.state.queue.len())),
+                                    .child(t!("%{count} tracks", count = visible_count)),
                             ),
                     )
                     .child(
@@ -4650,151 +4662,228 @@ impl NavidromeApp {
             )
             .child(
                 h_flex()
-                    .min_h(px(52.0))
+                    .h(px(44.0))
                     .flex_none()
-                    .px_4()
-                    .py_2()
-                    .gap_3()
+                    .px_3()
+                    .gap_1()
                     .items_center()
-                    .justify_between()
                     .border_b_1()
                     .border_color(cx.theme().border.opacity(0.7))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Automatic continuation")),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(if self.auto_continue_loading {
-                                        t!("Finding more music…")
-                                    } else {
-                                        t!("Keep playing recommendations when the queue ends")
-                                    }),
-                            ),
-                    )
-                    .child(
-                        Switch::new("queue-auto-continue-switch")
-                            .checked(self.config.auto_continue)
-                            .accessibility_label(t!("Automatic continuation"))
-                            .on_change(cx.listener(|this, checked, _, cx| {
-                                this.set_auto_continue(*checked, cx);
-                            })),
-                    ),
+                    .children(QueueDrawerTab::ALL.map(|drawer_tab| {
+                        Button::new(match drawer_tab {
+                            QueueDrawerTab::UpNext => "queue-tab-up-next",
+                            QueueDrawerTab::History => "queue-tab-history",
+                        })
+                        .label(drawer_tab.label())
+                        .ghost()
+                        .small()
+                        .selected(tab == drawer_tab)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.state.queue_drawer_tab = drawer_tab;
+                            this.clear_song_multi();
+                            cx.notify();
+                        }))
+                    })),
             )
-            .when(self.state.queue.is_empty(), |this| {
-                this.child(
-                    v_flex()
-                        .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .px_6()
-                        .gap_2()
-                        .text_center()
-                        .child(
-                            Icon::new(AppIcon::Queue)
-                                .with_size(px(28.0))
-                                .text_color(cx.theme().muted_foreground),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(t!("Queue is empty")),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("Start playing an album or playlist to build a queue.")),
-                        ),
-                )
-            })
-            .when(!self.state.queue.is_empty(), |this| {
+            .when(tab == QueueDrawerTab::UpNext, |this| {
                 this.child(
                     h_flex()
+                        .min_h(px(52.0))
                         .flex_none()
-                        .when(compact, |this| this.px_2())
-                        .when(!compact, |this| this.px_3())
+                        .px_4()
                         .py_2()
-                        .gap_0p5()
-                        .bg(cx.theme().secondary.opacity(0.18))
+                        .gap_3()
+                        .items_center()
+                        .justify_between()
                         .border_b_1()
                         .border_color(cx.theme().border.opacity(0.7))
                         .child(
-                            Button::new("drawer-queue-play-all")
-                                .icon(PlayerIcon::Play)
-                                .label(t!("Play all"))
-                                .tooltip(t!("Play all"))
-                                .custom(play_all_style)
-                                .small()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if !this.state.queue.is_empty() {
-                                        this.play_song_at_scope("queue", 0);
-                                    }
-                                    cx.notify();
-                                })),
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(t!("Automatic continuation")),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(if self.auto_continue_loading {
+                                            t!("Finding more music…")
+                                        } else {
+                                            t!("Keep playing recommendations when the queue ends")
+                                        }),
+                                ),
                         )
                         .child(
-                            Button::new("drawer-queue-clear-after")
-                                .label(if compact {
-                                    t!("Clear after")
-                                } else {
-                                    t!("Clear after current")
-                                })
-                                .tooltip(t!("Clear after current"))
-                                .ghost()
-                                .small()
-                                .disabled(self.state.queue_index.is_none())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.clear_queue_after_current();
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("drawer-save-queue-playlist")
-                                .icon(AppIcon::Playlists)
-                                .tooltip(t!("Save as playlist"))
-                                .ghost()
-                                .small()
-                                .disabled(self.playlist_ui.busy || self.api.is_none())
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.name_playlist(
-                                        None,
-                                        crate::playlist::song_ids(&this.state.queue),
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("drawer-queue-clear-all")
-                                .icon(AppIcon::Trash)
-                                .tooltip(t!("Clear queue"))
-                                .ghost()
-                                .small()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.clear_queue();
-                                    cx.notify();
+                            Switch::new("queue-auto-continue-switch")
+                                .checked(self.config.auto_continue)
+                                .accessibility_label(t!("Automatic continuation"))
+                                .on_change(cx.listener(|this, checked, _, cx| {
+                                    this.set_auto_continue(*checked, cx);
                                 })),
                         ),
                 )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_h_0()
-                        .child(self.render_song_list("queue", true, cx)),
-                )
             })
+            .when(
+                tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
+                |this| {
+                    this.child(
+                        v_flex()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .px_6()
+                            .gap_2()
+                            .text_center()
+                            .child(
+                                Icon::new(AppIcon::Queue)
+                                    .with_size(px(28.0))
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(t!("Queue is empty")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!(
+                                        "Start playing an album or playlist to build a queue."
+                                    )),
+                            ),
+                    )
+                },
+            )
+            .when(
+                tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
+                |this| {
+                    this.child(
+                        h_flex()
+                            .flex_none()
+                            .when(compact, |this| this.px_2())
+                            .when(!compact, |this| this.px_3())
+                            .py_2()
+                            .gap_0p5()
+                            .bg(cx.theme().secondary.opacity(0.18))
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(0.7))
+                            .child(
+                                Button::new("drawer-queue-play-all")
+                                    .icon(PlayerIcon::Play)
+                                    .label(t!("Play all"))
+                                    .tooltip(t!("Play all"))
+                                    .custom(play_all_style)
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if !this.state.queue.is_empty() {
+                                            this.play_song_at_scope("queue", 0);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("drawer-queue-clear-after")
+                                    .label(if compact {
+                                        t!("Clear after")
+                                    } else {
+                                        t!("Clear after current")
+                                    })
+                                    .tooltip(t!("Clear after current"))
+                                    .ghost()
+                                    .small()
+                                    .disabled(self.state.queue_index.is_none())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_queue_after_current();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("drawer-save-queue-playlist")
+                                    .icon(AppIcon::Playlists)
+                                    .tooltip(t!("Save as playlist"))
+                                    .ghost()
+                                    .small()
+                                    .disabled(self.playlist_ui.busy || self.api.is_none())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.name_playlist(
+                                            None,
+                                            crate::playlist::song_ids(&this.state.queue),
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("drawer-queue-clear-all")
+                                    .icon(AppIcon::Trash)
+                                    .tooltip(t!("Clear queue"))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_queue();
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.render_song_list("queue", true, cx)),
+                    )
+                },
+            )
+            .when(
+                tab == QueueDrawerTab::History && self.state.playback_history.is_empty(),
+                |this| {
+                    this.child(
+                        v_flex()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .px_6()
+                            .gap_2()
+                            .text_center()
+                            .child(
+                                Icon::new(AppIcon::Queue)
+                                    .with_size(px(28.0))
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(t!("No listening history yet")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("Tracks appear here when playback starts.")),
+                            ),
+                    )
+                },
+            )
+            .when(
+                tab == QueueDrawerTab::History && !self.state.playback_history.is_empty(),
+                |this| {
+                    this.child(
+                        v_flex()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.render_song_list("history", false, cx)),
+                    )
+                },
+            )
             .into_any_element()
     }
 

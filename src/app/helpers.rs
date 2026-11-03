@@ -75,6 +75,25 @@ impl View {
     }
 }
 
+/// 队列抽屉的两个稳定视图；历史按实际播放事件排序，不由队列索引推导。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum QueueDrawerTab {
+    #[default]
+    UpNext,
+    History,
+}
+
+impl QueueDrawerTab {
+    pub(super) fn label(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            Self::UpNext => t!("Up next"),
+            Self::History => t!("History"),
+        }
+    }
+
+    pub(super) const ALL: [Self; 2] = [Self::UpNext, Self::History];
+}
+
 /// 搜索结果的显示过滤；会话内状态，不持久化。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SearchFilter {

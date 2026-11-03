@@ -15,6 +15,7 @@ impl NavidromeApp {
             "favorites" => Some(&self.state.favorites.songs),
             "search" => Some(&self.state.search_results.as_ref()?.songs),
             "queue" => Some(&self.state.queue),
+            "history" => Some(&self.state.playback_history),
             _ => None,
         }
     }
@@ -32,10 +33,10 @@ impl NavidromeApp {
         if index >= songs.len() {
             return;
         }
-        let replacement = if scope == "queue" {
-            None
-        } else {
-            Some(songs.to_vec())
+        let (replacement, play_index) = match scope {
+            "queue" => (None, index),
+            "history" => (Some(vec![songs[index].clone()]), 0),
+            _ => (Some(songs.to_vec()), index),
         };
         self.cancel_song_radio();
         self.cancel_next_preload();
@@ -44,8 +45,8 @@ impl NavidromeApp {
             self.state.queue_origins = vec![origin; songs.len()];
             self.state.queue = songs;
         }
-        self.state.shuffle_history.start(index);
-        self.play_queue_index(index);
+        self.state.shuffle_history.start(play_index);
+        self.play_queue_index(play_index);
         self.save_session();
     }
 
@@ -71,7 +72,10 @@ impl NavidromeApp {
     /// 当前页面主歌曲列表对应的作用域；无列表页面返回 None。
     pub(super) fn active_song_list_scope(&self) -> Option<&'static str> {
         if self.state.queue_drawer_open {
-            return Some("queue");
+            return Some(match self.state.queue_drawer_tab {
+                QueueDrawerTab::UpNext => "queue",
+                QueueDrawerTab::History => "history",
+            });
         }
         match self.state.view {
             View::ArtistDetail => Some("artist-top"),

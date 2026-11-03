@@ -112,6 +112,8 @@ pub(crate) struct SongListMulti {
 
 /// 重连后需要前进这么多才认为真的恢复，避免刚发出 Play 就清零计数。
 const RECOVERY_CONFIRMATION: Duration = Duration::from_secs(5);
+/// 抽屉只展示最近的实际播放事件；长期画像仍由 ListeningHistory 保留 1000 条。
+const PLAYBACK_HISTORY_DISPLAY_LIMIT: usize = 200;
 
 /// 一次自动重连计划：到点后从 `position` 重新拉流。
 struct Reconnect {
@@ -192,8 +194,11 @@ struct AppState {
     /// 与 queue 按索引对齐；所有队列变更必须同步更新。
     queue_origins: Vec<QueueOrigin>,
     queue_index: Option<usize>,
-    /// 右侧 Up Next 抽屉；不再用独立页面替换当前浏览上下文。
+    /// 右侧 Up Next / History 抽屉；不再用独立页面替换当前浏览上下文。
     queue_drawer_open: bool,
+    queue_drawer_tab: QueueDrawerTab,
+    /// 最近实际开始播放的歌曲，新到旧排列；保留重复项，不等同于队列前缀。
+    playback_history: Vec<Song>,
     now_playing: Option<Song>,
     now_playing_quality: Option<TranscodingQuality>,
     lyrics: Option<Lyrics>,
@@ -307,6 +312,8 @@ impl Default for AppState {
             queue_origins: Vec::new(),
             queue_index: None,
             queue_drawer_open: false,
+            queue_drawer_tab: QueueDrawerTab::default(),
+            playback_history: Vec::new(),
             now_playing: None,
             now_playing_quality: None,
             lyrics: None,
@@ -915,6 +922,10 @@ impl NavidromeApp {
     }
 
     fn play_queue_index(&mut self, index: usize) {
+        // Explicit queue selection starts a new playback occurrence even when
+        // it chooses the same song/index again. Reconnect and session resume
+        // call `play_queue_index_at` directly so they do not duplicate History.
+        self.finish_listening_event(false);
         self.play_queue_index_at(index, Duration::ZERO);
     }
 
@@ -1083,6 +1094,11 @@ impl NavidromeApp {
             self.state
                 .listening_history
                 .record_started(song.clone(), started_at);
+            self.state.playback_history.insert(0, song.clone());
+            self.state
+                .playback_history
+                .truncate(PLAYBACK_HISTORY_DISPLAY_LIMIT);
+            self.ensure_cover(song.cover_art.as_deref(), false);
             self.listening_song_id = Some(song.id);
             self.listening_last_position = playback.position;
             self.listening_accumulated = Duration::ZERO;
@@ -2239,6 +2255,18 @@ impl NavidromeApp {
         let server_id = self.config.active_server_id().map(str::to_string);
         self.state.loudness_cache = config::load_loudness(server_id.as_deref());
         self.state.listening_history = config::load_listening_history(server_id.as_deref());
+        self.state.playback_history = self
+            .state
+            .listening_history
+            .recent_songs(PLAYBACK_HISTORY_DISPLAY_LIMIT);
+        let history_covers = self
+            .state
+            .playback_history
+            .iter()
+            .filter_map(|song| song.cover_art.clone())
+            .take(40)
+            .collect();
+        self.preload_covers(history_covers);
         let day = crate::recommendation::current_day_key();
         let cached_daily_mix = config::load_daily_mix(server_id.as_deref());
         self.state.daily_mix_previous_ids = cached_daily_mix
