@@ -2312,9 +2312,8 @@ impl NavidromeApp {
             .queue_index
             .filter(|index| *index < session.queue.len());
         let restored_index = index;
-        let queue_len = session.queue.len();
-        self.state.queue = session.queue;
-        self.state.queue_origins = normalize_queue_origins(session.queue_origins, queue_len);
+        self.state
+            .replace_queue_with_origins(session.queue, session.queue_origins);
         self.state.queue_index = index;
         self.state.playback_modes = session.playback_modes;
         self.config.playback_modes = session.playback_modes;

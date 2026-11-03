@@ -135,12 +135,10 @@ impl NavidromeApp {
         match result {
             Ok(tracks) if !tracks.is_empty() => {
                 let first_new = self.state.queue.len();
-                self.state
-                    .queue
-                    .extend(tracks.iter().map(|track| track.song.clone()));
-                self.state
-                    .queue_origins
-                    .extend(tracks.iter().map(|track| track.origin));
+                self.state.append_queue_with_origins(
+                    tracks.iter().map(|track| track.song.clone()).collect(),
+                    tracks.iter().map(|track| track.origin).collect(),
+                );
                 self.play_queue_index(first_new);
                 self.save_session();
             }

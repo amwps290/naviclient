@@ -4,6 +4,93 @@
 use super::*;
 use crate::recommendation::{generate_radio, ListeningProfile, RadioGenerationContext, RadioSeed};
 
+/// Keep the legacy song/origin vectors aligned behind a small mutation API.
+/// Read paths can stay unchanged while queue edits stop duplicating fragile
+/// two-vector bookkeeping. This is also the migration seam for a future
+/// `QueueEntry` representation.
+impl AppState {
+    fn replace_queue(&mut self, songs: Vec<Song>, origin: QueueOrigin) {
+        self.queue_origins = vec![origin; songs.len()];
+        self.queue = songs;
+        self.assert_queue_alignment();
+    }
+
+    pub(super) fn replace_queue_with_origins(
+        &mut self,
+        songs: Vec<Song>,
+        origins: Vec<QueueOrigin>,
+    ) {
+        self.queue_origins = normalize_queue_origins(origins, songs.len());
+        self.queue = songs;
+        self.assert_queue_alignment();
+    }
+
+    fn insert_queue_tracks(&mut self, index: usize, songs: &[Song], origin: QueueOrigin) {
+        let index = index.min(self.queue.len());
+        self.queue.splice(index..index, songs.iter().cloned());
+        self.queue_origins
+            .splice(index..index, std::iter::repeat_n(origin, songs.len()));
+        self.assert_queue_alignment();
+    }
+
+    fn append_queue_tracks(&mut self, songs: &[Song], origin: QueueOrigin) {
+        self.queue.extend(songs.iter().cloned());
+        self.queue_origins
+            .extend(std::iter::repeat_n(origin, songs.len()));
+        self.assert_queue_alignment();
+    }
+
+    pub(super) fn append_queue_with_origins(
+        &mut self,
+        songs: Vec<Song>,
+        origins: Vec<QueueOrigin>,
+    ) {
+        let origins = normalize_queue_origins(origins, songs.len());
+        self.queue.extend(songs);
+        self.queue_origins.extend(origins);
+        self.assert_queue_alignment();
+    }
+
+    fn remove_queue_track(&mut self, index: usize) -> Option<(Song, QueueOrigin)> {
+        if index >= self.queue.len() {
+            return None;
+        }
+        let song = self.queue.remove(index);
+        let origin = self.queue_origins.remove(index);
+        self.assert_queue_alignment();
+        Some((song, origin))
+    }
+
+    fn truncate_queue(&mut self, len: usize) {
+        self.queue.truncate(len);
+        self.queue_origins.truncate(len);
+        self.assert_queue_alignment();
+    }
+
+    fn clear_queue_entries(&mut self) {
+        self.queue.clear();
+        self.queue_origins.clear();
+        self.assert_queue_alignment();
+    }
+
+    fn move_queue_entry(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.queue.len() || to >= self.queue.len() || from == to {
+            return false;
+        }
+        let Some((song, origin)) = self.remove_queue_track(from) else {
+            return false;
+        };
+        self.queue.insert(to, song);
+        self.queue_origins.insert(to, origin);
+        self.assert_queue_alignment();
+        true
+    }
+
+    fn assert_queue_alignment(&self) {
+        debug_assert_eq!(self.queue.len(), self.queue_origins.len());
+    }
+}
+
 impl NavidromeApp {
     /// 歌曲列表作用域对应的歌曲切片；列表滚动 / 事件处理时重新解析，
     /// 避免在每次渲染时克隆整个列表。
@@ -41,8 +128,7 @@ impl NavidromeApp {
         self.prepare_manual_queue_change();
         if let Some(songs) = replacement {
             let origin = Self::origin_for_scope(scope);
-            self.state.queue_origins = vec![origin; songs.len()];
-            self.state.queue = songs;
+            self.state.replace_queue(songs, origin);
         }
         self.state.shuffle_history.start(play_index);
         self.play_queue_index(play_index);
@@ -294,14 +380,8 @@ impl NavidromeApp {
             None => 0,
         };
         let count = songs.len();
-        let mut tail = self.state.queue.split_off(insert_at);
-        let mut origin_tail = self.state.queue_origins.split_off(insert_at);
-        let mut block = songs.to_vec();
-        block.append(&mut tail);
-        let mut origin_block = vec![QueueOrigin::Manual; count];
-        origin_block.append(&mut origin_tail);
-        self.state.queue.append(&mut block);
-        self.state.queue_origins.append(&mut origin_block);
+        self.state
+            .insert_queue_tracks(insert_at, songs, QueueOrigin::Manual);
         self.state
             .shuffle_history
             .remap(|i| Some(history_index_after_insert(i, insert_at, count)));
@@ -375,8 +455,7 @@ impl NavidromeApp {
         origin: QueueOrigin,
     ) {
         self.prepare_manual_queue_change();
-        self.state.queue = songs.to_vec();
-        self.state.queue_origins = vec![origin; songs.len()];
+        self.state.replace_queue(songs.to_vec(), origin);
         self.state.shuffle_history.start(index);
         self.play_queue_index(index);
         self.save_session();
@@ -397,10 +476,8 @@ impl NavidromeApp {
             Some(index) => (index + 1).min(self.state.queue.len()),
             None => 0,
         };
-        self.state.queue.insert(insert_at, song);
         self.state
-            .queue_origins
-            .insert(insert_at, QueueOrigin::Manual);
+            .insert_queue_tracks(insert_at, &[song], QueueOrigin::Manual);
         self.state
             .shuffle_history
             .remap(|i| Some(if i >= insert_at { i + 1 } else { i }));
@@ -413,8 +490,7 @@ impl NavidromeApp {
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
-        self.state.queue.push(song);
-        self.state.queue_origins.push(QueueOrigin::Manual);
+        self.state.append_queue_tracks(&[song], QueueOrigin::Manual);
         self.save_session();
     }
 
@@ -431,10 +507,7 @@ impl NavidromeApp {
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
-        self.state.queue.extend(songs.iter().cloned());
-        self.state
-            .queue_origins
-            .extend(std::iter::repeat_n(origin, songs.len()));
+        self.state.append_queue_tracks(songs, origin);
         self.save_session();
     }
 
@@ -446,8 +519,9 @@ impl NavidromeApp {
         }
         self.prepare_manual_queue_change();
         let removed_current = self.state.queue_index == Some(index);
-        self.state.queue.remove(index);
-        self.state.queue_origins.remove(index);
+        let Some((_song, _origin)) = self.state.remove_queue_track(index) else {
+            return;
+        };
         self.state.shuffle_history.remap(|i| {
             if i == index {
                 None
@@ -474,8 +548,7 @@ impl NavidromeApp {
         if let Some(current) = self.state.queue_index {
             let keep = current + 1;
             if self.state.queue.len() > keep {
-                self.state.queue.truncate(keep);
-                self.state.queue_origins.truncate(keep);
+                self.state.truncate_queue(keep);
                 self.state
                     .shuffle_history
                     .remap(|i| (i < keep).then_some(i));
@@ -487,8 +560,7 @@ impl NavidromeApp {
     /// 清空整个队列并停止播放。
     pub(super) fn clear_queue(&mut self) {
         self.prepare_manual_queue_change();
-        self.state.queue.clear();
-        self.state.queue_origins.clear();
+        self.state.clear_queue_entries();
         self.state.queue_index = None;
         self.state.shuffle_history = ShuffleHistory::default();
         self.stop_playback();
@@ -499,14 +571,9 @@ impl NavidromeApp {
     pub(super) fn move_queue_item(&mut self, from: usize, to: usize) {
         self.clear_song_multi();
         self.prepare_manual_queue_change();
-        let len = self.state.queue.len();
-        if from >= len || to >= len || from == to {
+        if !self.state.move_queue_entry(from, to) {
             return;
         }
-        let song = self.state.queue.remove(from);
-        let origin = self.state.queue_origins.remove(from);
-        self.state.queue.insert(to, song);
-        self.state.queue_origins.insert(to, origin);
         self.state
             .shuffle_history
             .remap(|i| Some(queue_index_after_move(from, to, i)));
@@ -553,8 +620,7 @@ impl NavidromeApp {
         self.radio_loading_key = Some(key.clone());
 
         self.cancel_next_preload();
-        self.state.queue = vec![initial_song.clone()];
-        self.state.queue_origins = vec![origin];
+        self.state.replace_queue(vec![initial_song.clone()], origin);
         self.state.shuffle_history.start(0);
         // Explicitly starting a radio means "continue after this track".
         if self.state.playback_modes.repeat == RepeatMode::One {
@@ -676,12 +742,10 @@ impl NavidromeApp {
         match result {
             Ok(tracks) if !tracks.is_empty() => {
                 let count = tracks.len();
-                self.state
-                    .queue
-                    .extend(tracks.iter().map(|track| track.song.clone()));
-                self.state
-                    .queue_origins
-                    .extend(tracks.iter().map(|track| track.origin));
+                self.state.append_queue_with_origins(
+                    tracks.iter().map(|track| track.song.clone()).collect(),
+                    tracks.iter().map(|track| track.origin).collect(),
+                );
                 self.save_session();
                 if key.starts_with("artist:") {
                     self.notify_success(t!("Artist radio added %{count} tracks", count = count));
@@ -700,5 +764,54 @@ impl NavidromeApp {
                 self.notify_error(t!("Could not build song radio: %{error}", error = error))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod queue_state_tests {
+    use super::*;
+
+    fn song(id: &str) -> Song {
+        Song {
+            id: id.into(),
+            title: id.into(),
+            ..Song::default()
+        }
+    }
+
+    #[test]
+    fn queue_mutations_keep_songs_and_origins_aligned() {
+        let mut state = AppState::default();
+        state.replace_queue(vec![song("a"), song("b")], QueueOrigin::Playlist);
+        state.insert_queue_tracks(1, &[song("x"), song("y")], QueueOrigin::Manual);
+        state.append_queue_with_origins(
+            vec![song("radio")],
+            vec![QueueOrigin::SongRadio, QueueOrigin::DailyMix],
+        );
+        assert_eq!(state.queue.len(), state.queue_origins.len());
+        assert_eq!(
+            state
+                .queue
+                .iter()
+                .map(|song| song.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "x", "y", "b", "radio"]
+        );
+        assert_eq!(state.queue_origins[4], QueueOrigin::SongRadio);
+
+        assert!(state.move_queue_entry(4, 1));
+        assert_eq!(state.queue[1].id, "radio");
+        assert_eq!(state.queue_origins[1], QueueOrigin::SongRadio);
+        assert_eq!(
+            state
+                .remove_queue_track(2)
+                .map(|(song, origin)| (song.id, origin)),
+            Some(("x".into(), QueueOrigin::Manual))
+        );
+        state.truncate_queue(2);
+        assert_eq!(state.queue.len(), state.queue_origins.len());
+        state.clear_queue_entries();
+        assert!(state.queue.is_empty());
+        assert!(state.queue_origins.is_empty());
     }
 }
