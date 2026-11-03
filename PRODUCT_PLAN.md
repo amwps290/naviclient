@@ -390,6 +390,9 @@ server_id + local_date + algorithm_version + variant
 
 ### 阶段 5：历史与撤销
 
+历史视图已由 `fd9eb44` 完成：Up Next 抽屉按服务器展示实际播放事件，保留随机、
+循环和重复歌曲的顺序，并可从历史重新播放。队列撤销和保存范围细化仍待后续批次。
+
 - Up Next / History 双视图；
 - 实际播放顺序；
 - 删除、清空和重排的短时撤销；

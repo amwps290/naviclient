@@ -85,8 +85,12 @@ JavaScript runtime.
   generation and server checks reject late results. Generated queue rows carry
   compact Daily Mix, Song radio, Artist radio or Auto source badges, and the
   preference plus queue origins survive restart.
-- Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
-  position stay intact while the queue is inspected or edited
+- Contextual queue drawer toggled from the player or `Q`, with `Up Next` and
+  `History` views. History reuses the server-scoped listening events rather than
+  guessing from queue indexes, so shuffle order, loops and duplicate tracks are
+  preserved; reconnects do not create duplicate events. Up to 200 recent plays
+  are shown newest-first and can be replayed by double-click, Enter or the row
+  menu. Browsing and scroll position stay intact while the drawer is inspected
 - Import playlists from NetEase Cloud Music or QQ Music: paste a direct link,
   mobile share link, official short link, or full share message. Public playlist
   metadata is fetched without a third-party login or audio streams, with source
