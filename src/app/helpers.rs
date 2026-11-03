@@ -13,8 +13,8 @@ use gpui_kit::{
 
 use crate::audio::{PlaybackState, StreamFailure};
 use crate::models::{
-    Artist, ArtistSort, PlayModes, RepeatMode, ShortcutAction, Song, TranscodingQuality,
-    VolumeNormalization,
+    Artist, ArtistSort, ListeningHistory, PlayModes, RepeatMode, ShortcutAction, Song,
+    TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::DecodedCover;
 
@@ -72,6 +72,39 @@ impl View {
             Self::Search => "search",
             Self::NowPlaying => "now-playing",
         }
+    }
+}
+
+/// History drawer projection. Long-term events remain in `ListeningHistory`;
+/// this type owns display order and the UI-specific bound so AppState cannot
+/// accidentally let the two representations drift in different code paths.
+#[derive(Debug, Default)]
+pub(super) struct PlaybackHistory {
+    songs: Vec<Song>,
+}
+
+impl PlaybackHistory {
+    const DISPLAY_LIMIT: usize = 200;
+
+    pub(super) fn restore(&mut self, history: &ListeningHistory) {
+        self.songs = history.recent_songs(Self::DISPLAY_LIMIT);
+    }
+
+    pub(super) fn record(&mut self, song: Song) {
+        self.songs.insert(0, song);
+        self.songs.truncate(Self::DISPLAY_LIMIT);
+    }
+
+    pub(super) fn songs(&self) -> &[Song] {
+        &self.songs
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.songs.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.songs.is_empty()
     }
 }
 

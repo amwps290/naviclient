@@ -13,13 +13,13 @@ use super::{
     playback_technical_info, queue_index_after_move, queue_index_after_remove, range_anchor,
     readable_accent, reconnect_decision, replay_gain_factor, restored_volume, seek_target,
     selection_range, shortcut_conflict, should_scrobble, song_row_click_action, sort_album_songs,
-    sort_artists, touch_lru, NavidromeApp, ReconnectDecision, ShuffleHistory, SongRowClickAction,
-    View,
+    sort_artists, touch_lru, NavidromeApp, PlaybackHistory, ReconnectDecision, ShuffleHistory,
+    SongRowClickAction, View,
 };
 use crate::audio::StreamFailure;
 use crate::models::{
-    Artist, ArtistSort, GlobalShortcutSettings, PlayModes, RepeatMode, ShortcutAction,
-    ShortcutSettings, Song, TranscodingQuality, VolumeNormalization,
+    Artist, ArtistSort, GlobalShortcutSettings, ListeningHistory, PlayModes, RepeatMode,
+    ShortcutAction, ShortcutSettings, Song, TranscodingQuality, VolumeNormalization,
 };
 use gpui_kit::{Keystroke, Modifiers};
 
@@ -237,6 +237,35 @@ fn auto_continue_result_rejects_queue_changes_and_stale_anchors() {
         2,
         "anchor"
     ));
+}
+
+#[test]
+fn playback_history_projection_preserves_order_duplicates_and_bound() {
+    let mut persisted = ListeningHistory::default();
+    for index in 0..205 {
+        persisted.record_started(
+            Song {
+                id: format!("song-{}", index % 3),
+                title: index.to_string(),
+                ..Song::default()
+            },
+            index,
+        );
+    }
+    let mut history = PlaybackHistory::default();
+    history.restore(&persisted);
+    assert_eq!(history.len(), 200);
+    assert_eq!(history.songs()[0].title, "204");
+    assert_eq!(history.songs()[1].title, "203");
+    assert_eq!(history.songs()[0].id, history.songs()[3].id);
+
+    history.record(Song {
+        id: "new".into(),
+        title: "Newest".into(),
+        ..Song::default()
+    });
+    assert_eq!(history.len(), 200);
+    assert_eq!(history.songs()[0].id, "new");
 }
 
 #[test]

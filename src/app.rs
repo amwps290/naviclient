@@ -112,8 +112,6 @@ pub(crate) struct SongListMulti {
 
 /// 重连后需要前进这么多才认为真的恢复，避免刚发出 Play 就清零计数。
 const RECOVERY_CONFIRMATION: Duration = Duration::from_secs(5);
-/// 抽屉只展示最近的实际播放事件；长期画像仍由 ListeningHistory 保留 1000 条。
-const PLAYBACK_HISTORY_DISPLAY_LIMIT: usize = 200;
 
 /// 一次自动重连计划：到点后从 `position` 重新拉流。
 struct Reconnect {
@@ -198,7 +196,7 @@ struct AppState {
     queue_drawer_open: bool,
     queue_drawer_tab: QueueDrawerTab,
     /// 最近实际开始播放的歌曲，新到旧排列；保留重复项，不等同于队列前缀。
-    playback_history: Vec<Song>,
+    playback_history: PlaybackHistory,
     now_playing: Option<Song>,
     now_playing_quality: Option<TranscodingQuality>,
     lyrics: Option<Lyrics>,
@@ -313,7 +311,7 @@ impl Default for AppState {
             queue_index: None,
             queue_drawer_open: false,
             queue_drawer_tab: QueueDrawerTab::default(),
-            playback_history: Vec::new(),
+            playback_history: PlaybackHistory::default(),
             now_playing: None,
             now_playing_quality: None,
             lyrics: None,
@@ -1094,10 +1092,7 @@ impl NavidromeApp {
             self.state
                 .listening_history
                 .record_started(song.clone(), started_at);
-            self.state.playback_history.insert(0, song.clone());
-            self.state
-                .playback_history
-                .truncate(PLAYBACK_HISTORY_DISPLAY_LIMIT);
+            self.state.playback_history.record(song.clone());
             self.ensure_cover(song.cover_art.as_deref(), false);
             self.listening_song_id = Some(song.id);
             self.listening_last_position = playback.position;
@@ -2255,13 +2250,13 @@ impl NavidromeApp {
         let server_id = self.config.active_server_id().map(str::to_string);
         self.state.loudness_cache = config::load_loudness(server_id.as_deref());
         self.state.listening_history = config::load_listening_history(server_id.as_deref());
-        self.state.playback_history = self
-            .state
-            .listening_history
-            .recent_songs(PLAYBACK_HISTORY_DISPLAY_LIMIT);
+        self.state
+            .playback_history
+            .restore(&self.state.listening_history);
         let history_covers = self
             .state
             .playback_history
+            .songs()
             .iter()
             .filter_map(|song| song.cover_art.clone())
             .take(40)
@@ -2353,7 +2348,7 @@ impl NavidromeApp {
 
     /// 断开当前服务器并重建连接与视图状态（切服务器、保存设置共用）。
     fn reconnect_active_server(&mut self) {
-        self.cancel_song_radio();
+        self.cancel_recommendation_tasks();
         self.daily_mix_generation = self.daily_mix_generation.wrapping_add(1);
         self.cancel_next_preload();
         self.finish_listening_event(false);

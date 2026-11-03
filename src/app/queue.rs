@@ -15,7 +15,7 @@ impl NavidromeApp {
             "favorites" => Some(&self.state.favorites.songs),
             "search" => Some(&self.state.search_results.as_ref()?.songs),
             "queue" => Some(&self.state.queue),
-            "history" => Some(&self.state.playback_history),
+            "history" => Some(self.state.playback_history.songs()),
             _ => None,
         }
     }
@@ -38,8 +38,7 @@ impl NavidromeApp {
             "history" => (Some(vec![songs[index].clone()]), 0),
             _ => (Some(songs.to_vec()), index),
         };
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         if let Some(songs) = replacement {
             let origin = Self::origin_for_scope(scope);
             self.state.queue_origins = vec![origin; songs.len()];
@@ -245,7 +244,7 @@ impl NavidromeApp {
     pub(super) fn play_selected_songs(&mut self, scope: &str) {
         if scope == "queue" {
             if let Some(index) = self.first_selected_index(scope) {
-                self.cancel_next_preload();
+                self.prepare_manual_queue_change();
                 self.state.shuffle_history.start(index);
                 self.play_queue_index(index);
                 self.save_session();
@@ -289,8 +288,7 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         let insert_at = match self.state.queue_index {
             Some(index) => (index + 1).min(self.state.queue.len()),
             None => 0,
@@ -376,8 +374,7 @@ impl NavidromeApp {
         index: usize,
         origin: QueueOrigin,
     ) {
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         self.state.queue = songs.to_vec();
         self.state.queue_origins = vec![origin; songs.len()];
         self.state.shuffle_history.start(index);
@@ -395,8 +392,7 @@ impl NavidromeApp {
 
     /// 将单首歌曲插入到当前播放歌曲之后；未在播放时插入队首（不自动播放）。
     pub(super) fn insert_next(&mut self, song: Song) {
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         let insert_at = match self.state.queue_index {
             Some(index) => (index + 1).min(self.state.queue.len()),
             None => 0,
@@ -413,8 +409,7 @@ impl NavidromeApp {
 
     /// 将单首歌曲追加到队列末尾（不自动播放；空队列时设为队首索引以便播放键可用）。
     pub(super) fn add_to_queue(&mut self, song: Song) {
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
@@ -432,8 +427,7 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         if self.state.queue.is_empty() {
             self.state.queue_index = Some(0);
         }
@@ -450,8 +444,7 @@ impl NavidromeApp {
         if index >= self.state.queue.len() {
             return;
         }
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         let removed_current = self.state.queue_index == Some(index);
         self.state.queue.remove(index);
         self.state.queue_origins.remove(index);
@@ -477,8 +470,7 @@ impl NavidromeApp {
 
     /// 清空当前播放歌曲之后的所有队列项。
     pub(super) fn clear_queue_after_current(&mut self) {
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         if let Some(current) = self.state.queue_index {
             let keep = current + 1;
             if self.state.queue.len() > keep {
@@ -494,8 +486,7 @@ impl NavidromeApp {
 
     /// 清空整个队列并停止播放。
     pub(super) fn clear_queue(&mut self) {
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         self.state.queue.clear();
         self.state.queue_origins.clear();
         self.state.queue_index = None;
@@ -507,8 +498,7 @@ impl NavidromeApp {
     /// 将队列项从 `from` 移动到 `to`，并修正当前索引。
     pub(super) fn move_queue_item(&mut self, from: usize, to: usize) {
         self.clear_song_multi();
-        self.cancel_song_radio();
-        self.cancel_next_preload();
+        self.prepare_manual_queue_change();
         let len = self.state.queue.len();
         if from >= len || to >= len || from == to {
             return;
@@ -556,7 +546,7 @@ impl NavidromeApp {
             self.notify_error(t!("Configure a server before playing"));
             return;
         };
-        self.cancel_song_radio();
+        self.cancel_recommendation_tasks();
         self.radio_generation = self.radio_generation.wrapping_add(1);
         let generation = self.radio_generation;
         let key = seed.key();
@@ -632,11 +622,23 @@ impl NavidromeApp {
             == Some(artist_id)
     }
 
-    pub(super) fn cancel_song_radio(&mut self) {
+    fn prepare_manual_queue_change(&mut self) {
+        self.cancel_recommendation_tasks();
+        self.cancel_next_preload();
+    }
+
+    pub(super) fn cancel_recommendation_tasks(&mut self) {
+        self.cancel_song_radio();
+        self.cancel_auto_continue();
+        // Daily Mix may keep generating for its cache/card, but a manual queue
+        // action must revoke the deferred "play when ready" intent.
+        self.state.daily_mix_play_when_ready = false;
+    }
+
+    fn cancel_song_radio(&mut self) {
         if self.radio_loading_key.take().is_some() {
             self.radio_generation = self.radio_generation.wrapping_add(1);
         }
-        self.cancel_auto_continue();
     }
 
     pub(super) fn finish_radio(
