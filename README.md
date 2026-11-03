@@ -64,16 +64,19 @@ JavaScript runtime.
   waiting for UI polling, including across sample-rate and channel changes.
 - Editable playback queue: play next, append to queue, remove, reorder,
   clear-after-current and clear-all, plus append-all from albums and playlists
-- Song radio from any track action menu: the seed starts immediately while the
-  client builds a 24-track continuation from server similarity results, with
-  bounded same-artist and same-genre fallbacks for compatible older servers.
-  An explicitly unsupported Sonic Similarity capability skips the doomed
-  request and goes directly to those fallbacks, while unknown legacy servers
-  retain optimistic compatibility. Artist pages also show up to 12 popular
-  songs, use stable artist IDs when the server advertises the OpenSubsonic Top
-  Songs extension, and provide one-click popular playback and artist radio.
-  Duplicate/blank IDs are removed, and manual queue edits or server switches
-  invalidate in-flight results instead of overwriting the user's Up Next
+- Song radio from any track action menu or the Now Playing screen: the seed starts
+  immediately while the shared recommendation engine builds a 24-track
+  continuation from server similarity, same-artist and same-genre facts.
+  Artist radio uses its own artist context, popular tracks and bounded album
+  candidates instead of forwarding the first popular song to song radio. Both
+  modes apply the same local listening-history deferral, deterministic ranking,
+  ID de-duplication and artist/album diversity rules as Daily Mix, and attach an
+  explainable reason plus a persistent SongRadio/ArtistRadio queue origin.
+  Servers without Sonic Similarity use the artist/genre fallbacks. In-flight
+  results are scoped by generation and server, so a manual queue edit or server
+  switch cannot overwrite the user's Up Next. Artist pages continue to show up
+  to 12 popular songs and prefer stable artist IDs when the server advertises
+  the OpenSubsonic Top Songs extension
 - Contextual Up Next drawer toggled from the player or `Q`; browsing and scroll
   position stay intact while the queue is inspected or edited
 - Import playlists from NetEase Cloud Music or QQ Music: paste a direct link,
