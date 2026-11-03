@@ -1,15 +1,33 @@
 //! Daily mix orchestration: server-scoped cache, cancellable generation and
 //! queue actions. Candidate fetching/ranking stays in `recommendation`.
 
-use std::collections::HashSet;
-
 use super::*;
 use crate::recommendation::{
     current_day_key, generate_auto_continue, generate_daily_mix, AutoContinueGenerationContext,
-    DailyMixGenerationContext, ListeningProfile,
+    DailyMixGenerationContext, ListeningProfile, RecommendationGenerationContext,
 };
 
 impl NavidromeApp {
+    pub(super) fn recommendation_generation_context(
+        &self,
+        server_id: String,
+        sonic_similarity: crate::models::CapabilitySupport,
+        recent_limit: usize,
+    ) -> RecommendationGenerationContext {
+        RecommendationGenerationContext {
+            server_id,
+            sonic_similarity,
+            recent_song_ids: self.state.listening_history.recent_song_ids(recent_limit),
+            listening_profile: ListeningProfile::from_history(&self.state.listening_history),
+            excluded_song_ids: self
+                .state
+                .queue
+                .iter()
+                .map(|song| song.id.clone())
+                .collect(),
+        }
+    }
+
     pub(super) fn set_auto_continue(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.config.auto_continue == enabled {
             return;
@@ -72,31 +90,19 @@ impl NavidromeApp {
             .as_ref()
             .map(|server| server.capabilities)
             .unwrap_or_default();
-        let recent_song_ids = self.state.listening_history.recent_song_ids(100);
-        let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
-        let excluded_song_ids = self
-            .state
-            .queue
-            .iter()
-            .map(|song| song.id.clone())
-            .collect::<HashSet<_>>();
+        let common = self.recommendation_generation_context(
+            server_id.clone(),
+            capabilities.sonic_similarity,
+            100,
+        );
         let tx = self.tx.clone();
         let message_server_id = server_id.clone();
         let message_anchor = anchor_song_id.clone();
         self.spawn_future(async move {
-            let result = generate_auto_continue(
-                api,
-                AutoContinueGenerationContext {
-                    server_id,
-                    seeds,
-                    sonic_similarity: capabilities.sonic_similarity,
-                    recent_song_ids,
-                    listening_profile,
-                    excluded_song_ids,
-                },
-            )
-            .await
-            .map_err(error_message);
+            let result =
+                generate_auto_continue(api, AutoContinueGenerationContext { common, seeds })
+                    .await
+                    .map_err(error_message);
             let _ = tx.send(Msg::AutoContinue {
                 generation,
                 server_id: message_server_id,
@@ -244,31 +250,25 @@ impl NavidromeApp {
             .as_ref()
             .map(|server| server.capabilities.sonic_similarity)
             .unwrap_or_default();
-        let mut recent_song_ids = self.state.listening_history.recent_song_ids(50);
-        recent_song_ids.extend(self.state.daily_mix_previous_ids.iter().cloned());
+        let mut common =
+            self.recommendation_generation_context(server_id.clone(), sonic_similarity, 50);
+        common
+            .recent_song_ids
+            .extend(self.state.daily_mix_previous_ids.iter().cloned());
         if let Some(snapshot) = &self.state.daily_mix {
-            recent_song_ids.extend(snapshot.tracks.iter().map(|track| track.song.id.clone()));
+            common
+                .recent_song_ids
+                .extend(snapshot.tracks.iter().map(|track| track.song.id.clone()));
         }
-        let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
-        let excluded_song_ids = self
-            .state
-            .queue
-            .iter()
-            .map(|song| song.id.clone())
-            .collect::<HashSet<_>>();
         let tx = self.tx.clone();
         let message_server_id = server_id.clone();
         self.spawn_future(async move {
             let result = generate_daily_mix(
                 api,
                 DailyMixGenerationContext {
-                    server_id,
+                    common,
                     day,
                     variant,
-                    sonic_similarity,
-                    recent_song_ids,
-                    listening_profile,
-                    excluded_song_ids,
                 },
             )
             .await

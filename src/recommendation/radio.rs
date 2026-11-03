@@ -2,8 +2,6 @@
 //! factual lists; selection, history filtering and diversity stay in the pure
 //! recommendation ranker.
 
-use std::collections::HashSet;
-
 use anyhow::{anyhow, Result};
 
 use super::candidates::{
@@ -11,7 +9,7 @@ use super::candidates::{
     MAX_CANDIDATES,
 };
 use super::{
-    recommend, CandidateSource, ListeningProfile, RecommendationCandidate, RecommendationContext,
+    recommend, CandidateSource, RecommendationCandidate, RecommendationGenerationContext,
     RecommendationKind, RecommendationRequest, RecommendedTrack,
 };
 use crate::api::OpenSubsonicProvider;
@@ -43,32 +41,33 @@ impl RadioSeed {
 
 #[derive(Clone, Debug)]
 pub struct RadioGenerationContext {
-    pub server_id: String,
+    pub common: RecommendationGenerationContext,
     pub seed: RadioSeed,
-    pub sonic_similarity: CapabilitySupport,
     pub top_songs_by_artist_id: CapabilitySupport,
-    pub recent_song_ids: HashSet<String>,
-    pub listening_profile: ListeningProfile,
-    pub excluded_song_ids: HashSet<String>,
 }
 
 pub async fn generate_radio(
     api: OpenSubsonicProvider,
     context: RadioGenerationContext,
 ) -> Result<Vec<RecommendedTrack>> {
-    let key = context.seed.key();
-    let kind = context.seed.kind();
+    let RadioGenerationContext {
+        common,
+        seed,
+        top_songs_by_artist_id,
+    } = context;
+    let key = seed.key();
+    let kind = seed.kind();
     let mut errors = Vec::new();
-    let mut candidates = match &context.seed {
+    let mut candidates = match &seed {
         RadioSeed::Song(song) => {
-            collect_song_candidates(api, song, context.sonic_similarity, &mut errors).await
+            collect_song_candidates(api, song, common.sonic_similarity, &mut errors).await
         }
         RadioSeed::Artist(artist) => {
             collect_artist_candidates(
                 api,
                 artist,
-                context.sonic_similarity,
-                context.top_songs_by_artist_id,
+                common.sonic_similarity,
+                top_songs_by_artist_id,
                 &mut errors,
             )
             .await
@@ -94,16 +93,10 @@ pub async fn generate_radio(
         &RecommendationRequest {
             kind,
             target_count: RADIO_TARGET,
-            seed: stable_generation_seed(&context.server_id, &key),
+            seed: stable_generation_seed(&common.server_id, &key),
         },
         candidates,
-        &RecommendationContext {
-            excluded_song_ids: context.excluded_song_ids,
-            recent_song_ids: context.recent_song_ids,
-            listening_profile: context.listening_profile,
-            max_tracks_per_artist: 3,
-            max_tracks_per_album: 2,
-        },
+        &common.into_ranking_context(3, 2),
     );
     if tracks.is_empty() {
         Err(anyhow!("all radio candidates were filtered out"))
@@ -270,6 +263,7 @@ fn tagged_or_record(
 
 #[cfg(test)]
 mod tests {
+    use super::super::RecommendationContext;
     use super::*;
     use crate::models::QueueOrigin;
 

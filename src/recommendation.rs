@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
-use crate::models::{ListeningEvent, ListeningHistory, QueueOrigin, Song};
+use crate::models::{CapabilitySupport, ListeningEvent, ListeningHistory, QueueOrigin, Song};
 
 mod auto_continue;
 mod candidates;
@@ -112,6 +112,31 @@ impl ListeningProfile {
             .clamp(-2.0, 8.0)
             * 0.75;
         song_score + artist_score + genre_score
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RecommendationGenerationContext {
+    pub server_id: String,
+    pub sonic_similarity: CapabilitySupport,
+    pub recent_song_ids: HashSet<String>,
+    pub listening_profile: ListeningProfile,
+    pub excluded_song_ids: HashSet<String>,
+}
+
+impl RecommendationGenerationContext {
+    fn into_ranking_context(
+        self,
+        max_tracks_per_artist: usize,
+        max_tracks_per_album: usize,
+    ) -> RecommendationContext {
+        RecommendationContext {
+            excluded_song_ids: self.excluded_song_ids,
+            recent_song_ids: self.recent_song_ids,
+            listening_profile: self.listening_profile,
+            max_tracks_per_artist,
+            max_tracks_per_album,
+        }
     }
 }
 

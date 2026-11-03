@@ -2,7 +2,7 @@
 //! 点击播放与按需预取封面。
 
 use super::*;
-use crate::recommendation::{generate_radio, ListeningProfile, RadioGenerationContext, RadioSeed};
+use crate::recommendation::{generate_radio, RadioGenerationContext, RadioSeed};
 
 /// Keep the legacy song/origin vectors aligned behind a small mutation API.
 /// Read paths can stay unchanged while queue edits stop duplicating fragile
@@ -642,9 +642,11 @@ impl NavidromeApp {
             .as_ref()
             .map(|server| server.capabilities)
             .unwrap_or_default();
-        let recent_song_ids = self.state.listening_history.recent_song_ids(50);
-        let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
-        let excluded_song_ids = HashSet::from([initial_song.id.clone()]);
+        let common = self.recommendation_generation_context(
+            server_id.clone(),
+            capabilities.sonic_similarity,
+            50,
+        );
         let tx = self.tx.clone();
         let message_server_id = server_id.clone();
         let message_key = key.clone();
@@ -653,13 +655,9 @@ impl NavidromeApp {
             let result = generate_radio(
                 api,
                 RadioGenerationContext {
-                    server_id,
+                    common,
                     seed,
-                    sonic_similarity: capabilities.sonic_similarity,
                     top_songs_by_artist_id: capabilities.top_songs_by_artist_id,
-                    recent_song_ids,
-                    listening_profile,
-                    excluded_song_ids,
                 },
             )
             .await

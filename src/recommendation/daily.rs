@@ -8,10 +8,10 @@ use tokio::task::JoinSet;
 
 use super::{
     recommend, CandidateSource, ListeningProfile, RecommendationCandidate, RecommendationContext,
-    RecommendationKind, RecommendationRequest, RecommendedTrack,
+    RecommendationGenerationContext, RecommendationKind, RecommendationRequest, RecommendedTrack,
 };
 use crate::api::OpenSubsonicProvider;
-use crate::models::{Album, CapabilitySupport, Song};
+use crate::models::{Album, Song};
 
 pub const DAILY_MIX_VERSION: u32 = 2;
 const DAILY_TARGET: usize = 30;
@@ -50,13 +50,9 @@ pub fn current_day_key() -> String {
 
 #[derive(Clone, Debug)]
 pub struct DailyMixGenerationContext {
-    pub server_id: String,
+    pub common: RecommendationGenerationContext,
     pub day: String,
     pub variant: u32,
-    pub sonic_similarity: CapabilitySupport,
-    pub recent_song_ids: HashSet<String>,
-    pub listening_profile: ListeningProfile,
-    pub excluded_song_ids: HashSet<String>,
 }
 
 pub async fn generate_daily_mix(
@@ -64,14 +60,17 @@ pub async fn generate_daily_mix(
     context: DailyMixGenerationContext,
 ) -> Result<DailyMixSnapshot> {
     let DailyMixGenerationContext {
-        server_id,
+        common,
         day,
         variant,
+    } = context;
+    let RecommendationGenerationContext {
+        server_id,
         sonic_similarity,
         recent_song_ids,
         listening_profile,
         excluded_song_ids,
-    } = context;
+    } = common;
     // Independent factual sources fail softly. A temporary failure in one
     // shelf must not discard usable candidates from the others.
     let (favorites, frequent, recent, newest, random) = tokio::join!(

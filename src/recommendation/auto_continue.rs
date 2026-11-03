@@ -2,8 +2,6 @@
 //! Generation starts only after the app observes a natural sequential queue
 //! boundary; this module only gathers bounded provider facts and ranks them.
 
-use std::collections::HashSet;
-
 use anyhow::{anyhow, Result};
 
 use super::candidates::{
@@ -11,30 +9,27 @@ use super::candidates::{
     MAX_CANDIDATES,
 };
 use super::{
-    recommend, CandidateSource, ListeningProfile, RecommendationCandidate, RecommendationContext,
+    recommend, CandidateSource, RecommendationCandidate, RecommendationGenerationContext,
     RecommendationKind, RecommendationRequest, RecommendedTrack,
 };
 use crate::api::OpenSubsonicProvider;
-use crate::models::{CapabilitySupport, Song};
+use crate::models::Song;
 
 const AUTO_CONTINUE_TARGET: usize = 20;
 
 #[derive(Clone, Debug)]
 pub struct AutoContinueGenerationContext {
-    pub server_id: String,
+    pub common: RecommendationGenerationContext,
     /// Latest song first; at most the last few queue tracks are needed.
     pub seeds: Vec<Song>,
-    pub sonic_similarity: CapabilitySupport,
-    pub recent_song_ids: HashSet<String>,
-    pub listening_profile: ListeningProfile,
-    pub excluded_song_ids: HashSet<String>,
 }
 
 pub async fn generate_auto_continue(
     api: OpenSubsonicProvider,
     context: AutoContinueGenerationContext,
 ) -> Result<Vec<RecommendedTrack>> {
-    if context.seeds.is_empty() {
+    let AutoContinueGenerationContext { common, seeds } = context;
+    if seeds.is_empty() {
         return Err(anyhow!("automatic continuation has no queue context"));
     }
 
@@ -53,10 +48,7 @@ pub async fn generate_auto_continue(
             .map_err(|error| format!("random albums: {error:#}"))
     };
     let artist_api = api.clone();
-    let artist_id = context
-        .seeds
-        .first()
-        .and_then(|song| song.artist_id.clone());
+    let artist_id = seeds.first().and_then(|song| song.artist_id.clone());
     let artist_albums = async move {
         if let Some(artist_id) = artist_id.filter(|id| !id.trim().is_empty()) {
             artist_api
@@ -111,9 +103,9 @@ pub async fn generate_auto_continue(
                 source: CandidateSource::SameArtist,
             }),
     );
-    if context.sonic_similarity.allows_optimistic_request() {
+    if common.sonic_similarity.allows_optimistic_request() {
         candidates.extend(
-            collect_similar_tracks(api.clone(), &context.seeds, &mut errors)
+            collect_similar_tracks(api.clone(), &seeds, &mut errors)
                 .await
                 .into_iter()
                 .map(|song| RecommendationCandidate {
@@ -123,7 +115,7 @@ pub async fn generate_auto_continue(
         );
     }
     candidates.extend(
-        collect_genre_tracks(api, &context.seeds, &mut errors)
+        collect_genre_tracks(api, &seeds, &mut errors)
             .await
             .into_iter()
             .map(|song| RecommendationCandidate {
@@ -147,8 +139,7 @@ pub async fn generate_auto_continue(
     }
     candidates.truncate(MAX_CANDIDATES);
 
-    let key = context
-        .seeds
+    let key = seeds
         .iter()
         .map(|song| song.id.as_str())
         .collect::<Vec<_>>()
@@ -157,16 +148,10 @@ pub async fn generate_auto_continue(
         &RecommendationRequest {
             kind: RecommendationKind::AutoContinue,
             target_count: AUTO_CONTINUE_TARGET,
-            seed: stable_generation_seed(&context.server_id, &format!("auto:{key}")),
+            seed: stable_generation_seed(&common.server_id, &format!("auto:{key}")),
         },
         candidates,
-        &RecommendationContext {
-            excluded_song_ids: context.excluded_song_ids,
-            recent_song_ids: context.recent_song_ids,
-            listening_profile: context.listening_profile,
-            max_tracks_per_artist: 3,
-            max_tracks_per_album: 2,
-        },
+        &common.into_ranking_context(3, 2),
     );
     if tracks.is_empty() {
         Err(anyhow!(
@@ -179,6 +164,7 @@ pub async fn generate_auto_continue(
 
 #[cfg(test)]
 mod tests {
+    use super::super::RecommendationContext;
     use super::*;
     use crate::models::QueueOrigin;
 
