@@ -2,6 +2,7 @@
 //! 点击播放与按需预取封面。
 
 use super::*;
+use crate::recommendation::{generate_radio, ListeningProfile, RadioGenerationContext, RadioSeed};
 
 impl NavidromeApp {
     /// 歌曲列表作用域对应的歌曲切片；列表滚动 / 事件处理时重新解析，
@@ -521,26 +522,47 @@ impl NavidromeApp {
         self.save_session();
     }
 
-    /// Start a radio immediately with the seed song while candidates are
-    /// generated in the background. The result is only appended if the user
-    /// has left the one-song seed queue untouched.
+    /// Start a song radio immediately with its seed while unified recommendation
+    /// candidates are generated in the background.
     pub(super) fn start_song_radio(&mut self, seed: Song) {
+        self.start_radio(
+            RadioSeed::Song(Box::new(seed.clone())),
+            seed,
+            QueueOrigin::SongRadio,
+        );
+    }
+
+    /// Artist radio has its own recommendation context. A loaded popular song
+    /// starts immediately, but candidate scoring is based on the artist rather
+    /// than treating that song as a song-radio shortcut.
+    pub(super) fn start_artist_radio_from_seed(&mut self, artist: Artist, initial_song: Song) {
+        self.start_radio(
+            RadioSeed::Artist(artist),
+            initial_song,
+            QueueOrigin::ArtistRadio,
+        );
+    }
+
+    fn start_radio(&mut self, seed: RadioSeed, initial_song: Song, origin: QueueOrigin) {
         let Some(api) = self.api.clone() else {
+            self.notify_error(t!("Configure a server before playing"));
+            return;
+        };
+        let Some(server_id) = self.config.active_server_id().map(str::to_string) else {
             self.notify_error(t!("Configure a server before playing"));
             return;
         };
         self.cancel_song_radio();
         self.radio_generation = self.radio_generation.wrapping_add(1);
         let generation = self.radio_generation;
-        self.radio_loading_song_id = Some(seed.id.clone());
+        let key = seed.key();
+        self.radio_loading_key = Some(key.clone());
 
         self.cancel_next_preload();
-        self.state.queue = vec![seed.clone()];
-        self.state.queue_origins = vec![QueueOrigin::SongRadio];
+        self.state.queue = vec![initial_song.clone()];
+        self.state.queue_origins = vec![origin];
         self.state.shuffle_history.start(0);
         // Explicitly starting a radio means "continue after this track".
-        // Repeat-one would contradict that intent, while repeat-all and
-        // shuffle still produce valid radio playback semantics.
         if self.state.playback_modes.repeat == RepeatMode::One {
             self.state.playback_modes.repeat = RepeatMode::Off;
             self.config.playback_modes = self.state.playback_modes;
@@ -554,73 +576,119 @@ impl NavidromeApp {
         self.play_queue_index(0);
         self.save_session();
 
-        let sonic_similarity = self
+        let capabilities = self
             .state
             .server
             .as_ref()
-            .map(|server| server.capabilities.sonic_similarity)
+            .map(|server| server.capabilities)
             .unwrap_or_default();
+        let recent_song_ids = self.state.listening_history.recent_song_ids(50);
+        let listening_profile = ListeningProfile::from_history(&self.state.listening_history);
+        let excluded_song_ids = HashSet::from([initial_song.id.clone()]);
         let tx = self.tx.clone();
-        let request_seed = seed.clone();
+        let message_server_id = server_id.clone();
+        let message_key = key.clone();
+        let message_initial_song_id = initial_song.id.clone();
         self.spawn_future(async move {
-            let result = api
-                .song_radio(&request_seed, 24, sonic_similarity)
-                .await
-                .map_err(error_message);
-            let _ = tx.send(Msg::SongRadio {
+            let result = generate_radio(
+                api,
+                RadioGenerationContext {
+                    server_id,
+                    seed,
+                    sonic_similarity: capabilities.sonic_similarity,
+                    top_songs_by_artist_id: capabilities.top_songs_by_artist_id,
+                    recent_song_ids,
+                    listening_profile,
+                    excluded_song_ids,
+                },
+            )
+            .await
+            .map_err(error_message);
+            let _ = tx.send(Msg::Radio {
                 generation,
-                seed,
+                server_id: message_server_id,
+                key: message_key,
+                initial_song_id: message_initial_song_id,
                 result,
             });
         });
     }
 
+    pub(super) fn song_radio_loading(&self, song_id: &str) -> bool {
+        self.radio_loading_key
+            .as_deref()
+            .and_then(|key| key.strip_prefix("song:"))
+            == Some(song_id)
+    }
+
+    pub(super) fn artist_radio_loading(&self, artist_id: &str) -> bool {
+        self.radio_loading_key
+            .as_deref()
+            .and_then(|key| key.strip_prefix("artist:"))
+            == Some(artist_id)
+    }
+
     pub(super) fn cancel_song_radio(&mut self) {
-        if self.radio_loading_song_id.take().is_some() {
+        if self.radio_loading_key.take().is_some() {
             self.radio_generation = self.radio_generation.wrapping_add(1);
         }
     }
 
-    pub(super) fn finish_song_radio(
+    pub(super) fn finish_radio(
         &mut self,
         generation: u64,
-        seed: Song,
-        result: Result<Vec<Song>, String>,
+        server_id: String,
+        key: String,
+        initial_song_id: String,
+        result: Result<Vec<crate::recommendation::RecommendedTrack>, String>,
     ) {
         if generation != self.radio_generation
-            || self.radio_loading_song_id.as_deref() != Some(seed.id.as_str())
+            || self.config.active_server_id() != Some(server_id.as_str())
+            || self.radio_loading_key.as_deref() != Some(key.as_str())
         {
             return;
         }
-        self.radio_loading_song_id = None;
+        self.radio_loading_key = None;
 
         let seed_queue_untouched = self.state.queue.len() == 1
             && self
                 .state
                 .queue
                 .first()
-                .is_some_and(|song| song.id == seed.id)
+                .is_some_and(|song| song.id == initial_song_id)
             && self.state.queue_index == Some(0)
             && self
                 .state
                 .now_playing
                 .as_ref()
-                .is_some_and(|song| song.id == seed.id);
+                .is_some_and(|song| song.id == initial_song_id);
         if !seed_queue_untouched {
             return;
         }
 
         match result {
-            Ok(candidates) if !candidates.is_empty() => {
-                let count = candidates.len();
-                self.state.queue.extend(candidates);
+            Ok(tracks) if !tracks.is_empty() => {
+                let count = tracks.len();
+                self.state
+                    .queue
+                    .extend(tracks.iter().map(|track| track.song.clone()));
                 self.state
                     .queue_origins
-                    .extend(std::iter::repeat_n(QueueOrigin::SongRadio, count));
+                    .extend(tracks.iter().map(|track| track.origin));
                 self.save_session();
-                self.notify_success(t!("Song radio added %{count} tracks", count = count));
+                if key.starts_with("artist:") {
+                    self.notify_success(t!("Artist radio added %{count} tracks", count = count));
+                } else {
+                    self.notify_success(t!("Song radio added %{count} tracks", count = count));
+                }
+            }
+            Ok(_) if key.starts_with("artist:") => {
+                self.notify_warning(t!("No tracks were found for this artist radio"))
             }
             Ok(_) => self.notify_warning(t!("No related tracks were found for this song")),
+            Err(error) if key.starts_with("artist:") => {
+                self.notify_error(t!("Could not build artist radio: %{error}", error = error))
+            }
             Err(error) => {
                 self.notify_error(t!("Could not build song radio: %{error}", error = error))
             }

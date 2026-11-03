@@ -19,9 +19,6 @@ use crate::models::{
     ServerInfo, Song,
 };
 
-const RADIO_FALLBACK_ALBUMS: usize = 6;
-const RADIO_FALLBACK_TRACKS_PER_ALBUM: usize = 4;
-
 #[derive(Clone)]
 pub struct OpenSubsonicProvider {
     client: reqwest::Client,
@@ -272,76 +269,6 @@ impl OpenSubsonicProvider {
             songs.push(serde_json::from_value(song.clone())?);
         }
         Ok(songs)
-    }
-
-    /// Build a song-radio candidate list. Similarity results are the primary
-    /// source; older compatible servers fall back to a bounded same-artist
-    /// sample and then songs from the same genre.
-    pub async fn song_radio(
-        &self,
-        seed: &Song,
-        count: u32,
-        sonic_similarity: CapabilitySupport,
-    ) -> Result<Vec<Song>> {
-        let count = count.max(1) as usize;
-        let mut errors = Vec::new();
-
-        if radio_uses_similarity(sonic_similarity) {
-            match self.similar_songs(&seed.id, count as u32).await {
-                Ok(songs) if !songs.is_empty() => {
-                    let candidates = unique_radio_candidates(seed, songs, count);
-                    if !candidates.is_empty() {
-                        return Ok(candidates);
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => errors.push(format!("similar songs: {error:#}")),
-            }
-        }
-
-        let mut fallback = Vec::new();
-        if let Some(artist_id) = seed.artist_id.as_deref().filter(|id| !id.is_empty()) {
-            match self.artist_albums(artist_id).await {
-                Ok(albums) => {
-                    for album in albums.into_iter().take(RADIO_FALLBACK_ALBUMS) {
-                        match self.album_songs(&album.id).await {
-                            Ok(songs) => fallback
-                                .extend(songs.into_iter().take(RADIO_FALLBACK_TRACKS_PER_ALBUM)),
-                            Err(error) => {
-                                errors.push(format!("artist album {}: {error:#}", album.id))
-                            }
-                        }
-                        if fallback.len() >= count {
-                            break;
-                        }
-                    }
-                }
-                Err(error) => errors.push(format!("artist albums: {error:#}")),
-            }
-        }
-
-        if fallback.len() < count {
-            if let Some(genre) = seed
-                .genre
-                .as_deref()
-                .filter(|genre| !genre.trim().is_empty())
-            {
-                match self.songs_by_genre(genre, count as u32, 0).await {
-                    Ok(songs) => fallback.extend(songs),
-                    Err(error) => errors.push(format!("genre songs: {error:#}")),
-                }
-            }
-        }
-
-        let candidates = unique_radio_candidates(seed, fallback, count);
-        if !candidates.is_empty() {
-            return Ok(candidates);
-        }
-        if errors.is_empty() {
-            Err(anyhow!("the server returned no radio candidates"))
-        } else {
-            Err(anyhow!(errors.join("; ")))
-        }
     }
 
     pub async fn similar_songs(&self, song_id: &str, count: u32) -> Result<Vec<Song>> {
@@ -718,14 +645,6 @@ fn artist_top_songs_params(
     vec![identity, ("count", count.max(1).to_string())]
 }
 
-/// Unknown capability keeps the established optimistic request behavior for
-/// legacy servers whose extension endpoint cannot be queried. Only an
-/// explicit unsupported result skips the similarity request and goes straight
-/// to the explainable artist/genre fallback.
-fn radio_uses_similarity(support: CapabilitySupport) -> bool {
-    support.allows_optimistic_request()
-}
-
 fn parse_array<T>(value: &Value, key: &str) -> Result<Vec<T>>
 where
     T: serde::de::DeserializeOwned,
@@ -740,15 +659,6 @@ where
         out.push(serde_json::from_value(item.clone())?);
     }
     Ok(out)
-}
-
-fn unique_radio_candidates(seed: &Song, songs: Vec<Song>, count: usize) -> Vec<Song> {
-    let mut seen = BTreeSet::from([seed.id.clone()]);
-    songs
-        .into_iter()
-        .filter(|song| !song.id.is_empty() && seen.insert(song.id.clone()))
-        .take(count)
-        .collect()
 }
 
 /// 解析单个 structuredLyrics 变体为歌词行（不含翻译）。
@@ -1210,13 +1120,6 @@ mod tests {
     }
 
     #[test]
-    fn explicit_similarity_unsupported_skips_the_optimistic_request() {
-        assert!(radio_uses_similarity(CapabilitySupport::Supported));
-        assert!(radio_uses_similarity(CapabilitySupport::Unknown));
-        assert!(!radio_uses_similarity(CapabilitySupport::Unsupported));
-    }
-
-    #[test]
     fn song_radio_requests_use_standard_subsonic_parameters() {
         let api = OpenSubsonicProvider::new("http://example.test", "alice", "secret").unwrap();
         let similar = api
@@ -1244,32 +1147,6 @@ mod tests {
         assert_eq!(params["genre"], "Jazz & Soul");
         assert_eq!(params["count"], "24");
         assert_eq!(params["offset"], "0");
-    }
-
-    #[test]
-    fn song_radio_candidates_exclude_seed_duplicates_and_blank_ids() {
-        let seed = Song {
-            id: "seed".into(),
-            title: "Seed".into(),
-            ..Song::default()
-        };
-        let song = |id: &str| Song {
-            id: id.into(),
-            title: id.into(),
-            ..Song::default()
-        };
-        let candidates = unique_radio_candidates(
-            &seed,
-            vec![song("seed"), song("a"), song("a"), song(""), song("b")],
-            8,
-        );
-        assert_eq!(
-            candidates
-                .iter()
-                .map(|song| song.id.as_str())
-                .collect::<Vec<_>>(),
-            ["a", "b"]
-        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::models::{
     Album, Artist, FavoriteKey, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
-use crate::recommendation::DailyMixSnapshot;
+use crate::recommendation::{DailyMixSnapshot, RecommendedTrack};
 
 /// 后台线程解码完成的封面结果，UI 线程只负责插入缓存。
 #[derive(Debug)]
@@ -76,10 +76,12 @@ pub enum Msg {
     },
     Search(Result<SearchResults, String>),
     PlayArtistSongs(Result<Vec<Song>, String>),
-    SongRadio {
+    Radio {
         generation: u64,
-        seed: Song,
-        result: Result<Vec<Song>, String>,
+        server_id: String,
+        key: String,
+        initial_song_id: String,
+        result: Result<Vec<RecommendedTrack>, String>,
     },
     Lyrics {
         song_id: String,

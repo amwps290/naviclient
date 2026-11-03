@@ -433,9 +433,10 @@ pub struct NavidromeApp {
     daily_mix_generation: u64,
     /// 艺术家热门歌曲请求代次；重复进入页面或重试时忽略迟到响应。
     artist_top_songs_generation: u64,
-    /// 歌曲电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
+    /// 电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
     radio_generation: u64,
-    radio_loading_song_id: Option<String>,
+    /// `song:<id>` 或 `artist:<id>`，同时用于按钮加载状态和迟到结果校验。
+    radio_loading_key: Option<String>,
     /// 删除服务器的确认弹窗：（服务器 id， 显示名）。None 表示无弹窗。
     server_remove_prompt: Option<(String, String)>,
 }
@@ -622,7 +623,7 @@ impl NavidromeApp {
             daily_mix_generation: 0,
             artist_top_songs_generation: 0,
             radio_generation: 0,
-            radio_loading_song_id: None,
+            radio_loading_key: None,
             server_remove_prompt: None,
         };
         app.state.playback_modes = app.config.playback_modes;

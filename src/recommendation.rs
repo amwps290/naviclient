@@ -7,12 +7,14 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
-use crate::models::{ListeningEvent, ListeningHistory, Song};
+use crate::models::{ListeningEvent, ListeningHistory, QueueOrigin, Song};
 
 mod daily;
+mod radio;
 pub(crate) use daily::{
     current_day_key, generate_daily_mix, DailyMixGenerationContext, DailyMixSnapshot,
 };
+pub(crate) use radio::{generate_radio, RadioGenerationContext, RadioSeed};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecommendationKind {
@@ -138,6 +140,10 @@ pub struct RecommendedTrack {
     pub song: Song,
     pub reason: RecommendationReason,
     pub score: f32,
+    /// Queue provenance is part of the recommendation result so every caller
+    /// preserves the distinction between manual and generated tracks.
+    #[serde(default)]
+    pub origin: QueueOrigin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,6 +298,7 @@ pub fn recommend(
             song: candidate.song.clone(),
             reason: candidate.reason,
             score: candidate.score,
+            origin: recommendation_origin(request.kind),
         })
         .collect()
 }
@@ -418,6 +425,15 @@ fn source_weight(kind: RecommendationKind, source: CandidateSource) -> u16 {
         (_, CandidateSource::SameGenre) => 40,
         (_, CandidateSource::Newest) => 25,
         (_, CandidateSource::Random) => 15,
+    }
+}
+
+fn recommendation_origin(kind: RecommendationKind) -> QueueOrigin {
+    match kind {
+        RecommendationKind::DailyMix => QueueOrigin::DailyMix,
+        RecommendationKind::SongRadio => QueueOrigin::SongRadio,
+        RecommendationKind::ArtistRadio => QueueOrigin::ArtistRadio,
+        RecommendationKind::AutoContinue => QueueOrigin::AutoContinue,
     }
 }
 

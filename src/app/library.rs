@@ -330,8 +330,11 @@ impl NavidromeApp {
     }
 
     pub(super) fn start_artist_radio(&mut self) {
-        if let Some(seed) = self.state.artist_top_songs.first().cloned() {
-            self.start_song_radio(seed);
+        if let (Some(artist), Some(initial_song)) = (
+            self.state.current_artist.clone(),
+            self.state.artist_top_songs.first().cloned(),
+        ) {
+            self.start_artist_radio_from_seed(artist, initial_song);
         }
     }
 
@@ -974,11 +977,13 @@ impl NavidromeApp {
                     }
                     Err(error) => self.notify_error(error),
                 },
-                Msg::SongRadio {
+                Msg::Radio {
                     generation,
-                    seed,
+                    server_id,
+                    key,
+                    initial_song_id,
                     result,
-                } => self.finish_song_radio(generation, seed, result),
+                } => self.finish_radio(generation, server_id, key, initial_song_id, result),
                 Msg::Lyrics { song_id, result } => {
                     if self.state.now_playing.as_ref().map(|song| song.id.as_str())
                         == Some(song_id.as_str())

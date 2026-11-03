@@ -517,7 +517,7 @@ impl NavidromeApp {
             },
         )));
         let radio_seed = song.clone();
-        let radio_loading = self.radio_loading_song_id.as_deref() == Some(song.id.as_str());
+        let radio_loading = self.song_radio_loading(&song.id);
         menu = menu.item(
             PopupMenuItem::new(if radio_loading {
                 t!("Building song radio…")

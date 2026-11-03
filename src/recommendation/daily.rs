@@ -539,6 +539,7 @@ mod tests {
                 },
                 reason: super::super::RecommendationReason::Explore,
                 score: 15.5,
+                origin: crate::models::QueueOrigin::DailyMix,
             }],
         };
         let json = serde_json::to_string(&snapshot).unwrap();

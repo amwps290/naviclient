@@ -3690,6 +3690,8 @@ impl NavidromeApp {
         let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
         let playback = self.audio.state();
         let accent = self.now_playing_accent(cx);
+        let radio_seed = song.clone();
+        let radio_loading = self.song_radio_loading(&song.id);
         let active_line = self
             .state
             .lyrics
@@ -3873,7 +3875,22 @@ impl NavidromeApp {
                                             cx,
                                         )),
                                 )
-                            }),
+                            })
+                            .child(
+                                Button::new("now-playing-song-radio")
+                                    .icon(PlayerIcon::Play)
+                                    .label(if radio_loading {
+                                        t!("Building song radio…")
+                                    } else {
+                                        t!("Start song radio")
+                                    })
+                                    .outline()
+                                    .disabled(self.api.is_none() || radio_loading)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start_song_radio(radio_seed.clone());
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
             .child(
@@ -5261,10 +5278,7 @@ impl NavidromeApp {
                 };
                 let popular_count = self.state.artist_top_songs.len();
                 let artist_for_play_all = artist.clone();
-                let artist_radio_loading =
-                    self.state.artist_top_songs.first().is_some_and(|song| {
-                        self.radio_loading_song_id.as_deref() == Some(song.id.as_str())
-                    });
+                let artist_radio_loading = self.artist_radio_loading(&artist.id);
                 v_flex()
                     .gap_5()
                     .child(
@@ -5309,7 +5323,7 @@ impl NavidromeApp {
                                     .child(
                                         Button::new("start-artist-radio")
                                             .label(if artist_radio_loading {
-                                                t!("Building song radio…")
+                                                t!("Building artist radio…")
                                             } else {
                                                 t!("Start artist radio")
                                             })
