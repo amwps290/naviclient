@@ -71,6 +71,7 @@ mod import;
 mod library;
 mod playlists;
 mod queue;
+mod queue_view;
 mod recommendations;
 mod views;
 use self::import::{ImportStage, ImportUi};
