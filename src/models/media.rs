@@ -1,5 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FavoriteKind {
+    Artist,
+    Album,
+    Song,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FavoriteKey {
+    pub kind: FavoriteKind,
+    pub id: String,
+}
+
+impl FavoriteKey {
+    pub fn new(kind: FavoriteKind, id: impl Into<String>) -> Self {
+        Self {
+            kind,
+            id: id.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Artist {
