@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 mod listening;
 mod media;
 mod playback;
+mod preferences;
 mod queue;
 mod server;
 mod shortcuts;
+mod sort;
 #[cfg(test)]
 use listening::LISTENING_HISTORY_LIMIT;
 pub use listening::{ListeningEvent, ListeningHistory};
@@ -19,9 +21,13 @@ pub use media::{
 pub use playback::{
     EqSettings, PlayModes, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,
 };
+#[cfg(test)]
+use preferences::locale_from_os_tag;
+pub use preferences::{LanguagePreference, ThemePreference};
 pub use queue::{normalize_queue_origins, PlaybackSession, QueueOrigin};
 pub use server::{CapabilitySupport, OpenSubsonicExtension, ServerCapabilities, ServerInfo};
 pub use shortcuts::{GlobalShortcutSettings, ShortcutAction, ShortcutSettings};
+pub use sort::{AlbumSort, ArtistSort};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FavoriteKind {
@@ -43,150 +49,6 @@ impl FavoriteKey {
             id: id.into(),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ThemePreference {
-    #[default]
-    Light,
-    Dark,
-    System,
-}
-
-impl ThemePreference {
-    /// 展示名（翻译键）。
-    pub fn label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Light => t!("Light"),
-            Self::Dark => t!("Dark"),
-            Self::System => t!("System"),
-        }
-    }
-}
-
-/// 界面语言偏好。`System` 跟随操作系统：Windows 经 `sys-locale` 检测，
-/// 中文环境自动落到简体，繁体区域（TW/HK/MO/Hant）落到繁体；
-/// 检测失败时回退英文。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LanguagePreference {
-    #[default]
-    System,
-    English,
-    ChineseSimplified,
-    ChineseTraditional,
-}
-
-impl LanguagePreference {
-    pub const ALL: [Self; 4] = [
-        Self::System,
-        Self::English,
-        Self::ChineseSimplified,
-        Self::ChineseTraditional,
-    ];
-
-    /// rust-i18n 的 locale 代码；`System` 在这里返回哨兵值，
-    /// 实际生效代码用 [`Self::resolve`]。
-    pub fn locale_code(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::English => "en",
-            Self::ChineseSimplified => "zh-CN",
-            Self::ChineseTraditional => "zh-TW",
-        }
-    }
-
-    /// 设置页按钮上的自称名：语言用自己的名字（英文不译、中文用中文原文），
-    /// `System` 走翻译键（跟随当前界面语言）。
-    pub fn native_label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::System => rust_i18n::t!("System"),
-            Self::English => std::borrow::Cow::Borrowed("English"),
-            Self::ChineseSimplified => std::borrow::Cow::Borrowed("简体中文"),
-            Self::ChineseTraditional => std::borrow::Cow::Borrowed("繁體中文"),
-        }
-    }
-
-    /// 解析成实际生效的 locale 代码（`System` 探测操作系统语言）。
-    pub fn resolve(self) -> &'static str {
-        match self {
-            Self::System => locale_from_os_tag(&sys_locale::get_locale().unwrap_or_default()),
-            other => other.locale_code(),
-        }
-    }
-}
-
-/// 由操作系统语言标签推断本应用支持的 locale。
-/// 纯函数便于测试：zh-TW/HK/MO/Hant 系繁体，其余 zh 简体，其他英文。
-pub fn locale_from_os_tag(tag: &str) -> &'static str {
-    let lower = tag.trim().to_lowercase();
-    if !lower.starts_with("zh") {
-        return "en";
-    }
-    let traditional = ["zh-tw", "zh-hk", "zh-mo", "zh-hant", "zh-tw_"]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix) || lower.contains("hant"));
-    if traditional {
-        "zh-TW"
-    } else {
-        "zh-CN"
-    }
-}
-
-/// 专辑列表的排序方式。除 `NewestAdded` 外均直接映射到
-/// Subsonic `getAlbumList2` 的服务端排序，保持增量分页可用。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AlbumSort {
-    /// 最近添加（`type=newest`）。
-    #[default]
-    NewestAdded,
-    /// 名称 A→Z（`type=alphabeticalByName`）。
-    Name,
-    /// 艺术家名称 A→Z（`type=alphabeticalByArtist`）。
-    Artist,
-    /// 发行年份新→旧（`type=byYear`，fromYear > toYear 表示倒序）。
-    Year,
-}
-
-impl AlbumSort {
-    pub fn label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::NewestAdded => t!("Recently added"),
-            Self::Name => t!("Name"),
-            Self::Artist => t!("Artist"),
-            Self::Year => t!("Year"),
-        }
-    }
-
-    pub const ALL: [Self; 4] = [Self::NewestAdded, Self::Name, Self::Artist, Self::Year];
-}
-
-/// 艺术家列表的排序方式。`getArtists` 不支持服务端排序参数，
-/// 全量列表已一次性加载，在客户端排序。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ArtistSort {
-    /// 名称 A→Z（服务器索引顺序）。
-    #[default]
-    Name,
-    /// 名称 Z→A。
-    NameDesc,
-    /// 专辑数多→少，同名按 A→Z。
-    AlbumCount,
-}
-
-impl ArtistSort {
-    pub fn label(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::Name => t!("Name (A–Z)"),
-            Self::NameDesc => t!("Name (Z–A)"),
-            Self::AlbumCount => t!("Album count"),
-        }
-    }
-
-    pub const ALL: [Self; 3] = [Self::Name, Self::NameDesc, Self::AlbumCount];
 }
 
 /// 一台配置好的服务端。`id` 由地址与用户名派生，用作缓存目录命名空间
