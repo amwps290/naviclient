@@ -4592,68 +4592,6 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    pub(super) fn render_queue_drawer(
-        &self,
-        width: f32,
-        overlay: bool,
-        cx: &Context<Self>,
-    ) -> gpui_kit::AnyElement {
-        let compact = width <= 340.0;
-        let tab = self.state.queue_drawer_tab;
-        let visible_count = match tab {
-            QueueDrawerTab::UpNext => self.state.queue.len(),
-            QueueDrawerTab::History => self.state.playback_history.len(),
-        };
-
-        v_flex()
-            .id("queue-drawer")
-            .w(px(width))
-            .min_w_0()
-            .flex_none()
-            .when(overlay, |this| this.absolute().top_0().right_0().bottom_0())
-            .when(!overlay, |this| this.h_full())
-            .occlude()
-            .bg(cx.theme().background)
-            .border_l_1()
-            .border_color(cx.theme().border)
-            .child(self.render_queue_drawer_header(tab, visible_count, cx))
-            .child(self.render_queue_drawer_tabs(tab, cx))
-            .when(tab == QueueDrawerTab::UpNext, |this| {
-                this.child(self.render_auto_continue_control(cx))
-            })
-            .when(
-                tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
-                |this| this.child(self.render_queue_empty_state(false, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
-                |this| {
-                    this.child(self.render_queue_action_bar(compact, cx)).child(
-                        v_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .child(self.render_song_list("queue", true, cx)),
-                    )
-                },
-            )
-            .when(
-                tab == QueueDrawerTab::History && self.state.playback_history.is_empty(),
-                |this| this.child(self.render_queue_empty_state(true, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::History && !self.state.playback_history.is_empty(),
-                |this| {
-                    this.child(
-                        v_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .child(self.render_song_list("history", false, cx)),
-                    )
-                },
-            )
-            .into_any_element()
-    }
-
     pub(super) fn render_content(
         &self,
         window: &mut Window,
