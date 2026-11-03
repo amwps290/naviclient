@@ -76,6 +76,13 @@ pub enum Msg {
     },
     Search(Result<SearchResults, String>),
     PlayArtistSongs(Result<Vec<Song>, String>),
+    AutoContinue {
+        generation: u64,
+        server_id: String,
+        anchor_song_id: String,
+        queue_len: usize,
+        result: Result<Vec<RecommendedTrack>, String>,
+    },
     Radio {
         generation: u64,
         server_id: String,

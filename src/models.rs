@@ -1194,6 +1194,9 @@ pub struct Config {
     /// 播放模式（随机开关 + 循环模式）。
     #[serde(default)]
     pub playback_modes: PlayModes,
+    /// 顺序播放自然到达队尾后，是否生成推荐曲目继续播放。
+    #[serde(default)]
+    pub auto_continue: bool,
     #[serde(default)]
     pub volume_normalization: VolumeNormalization,
     /// 侧边栏是否折叠为图标栏。
@@ -1243,6 +1246,7 @@ impl Default for Config {
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
             playback_modes: PlayModes::default(),
+            auto_continue: false,
             volume_normalization: VolumeNormalization::Track,
             sidebar_collapsed: false,
             show_lyrics_translation: default_true(),
@@ -1774,6 +1778,23 @@ mod tests {
                 repeat: RepeatMode::Off
             }
         );
+    }
+
+    #[test]
+    fn auto_continue_is_opt_in_and_round_trips() {
+        let legacy: Config = serde_json::from_str(
+            r#"{"server_url":"http://localhost:4533","username":"user","password":"pass"}"#,
+        )
+        .expect("legacy config without auto continue should still deserialize");
+        assert!(!legacy.auto_continue);
+
+        let json = serde_json::to_string(&Config {
+            auto_continue: true,
+            ..Config::default()
+        })
+        .expect("config should serialize");
+        let restored: Config = serde_json::from_str(&json).expect("config should deserialize");
+        assert!(restored.auto_continue);
     }
 
     #[test]

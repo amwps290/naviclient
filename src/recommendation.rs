@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{ListeningEvent, ListeningHistory, QueueOrigin, Song};
 
+mod auto_continue;
 mod daily;
 mod radio;
+pub(crate) use auto_continue::{generate_auto_continue, AutoContinueGenerationContext};
 pub(crate) use daily::{
     current_day_key, generate_daily_mix, DailyMixGenerationContext, DailyMixSnapshot,
 };
@@ -414,6 +416,10 @@ fn nonzero_limit(limit: usize) -> Option<usize> {
 
 fn source_weight(kind: RecommendationKind, source: CandidateSource) -> u16 {
     match (kind, source) {
+        (RecommendationKind::AutoContinue, CandidateSource::Similar) => 105,
+        (RecommendationKind::AutoContinue, CandidateSource::SameArtist) => 80,
+        (RecommendationKind::AutoContinue, CandidateSource::SameGenre) => 70,
+        (RecommendationKind::AutoContinue, CandidateSource::Favorite) => 55,
         (_, CandidateSource::Favorite) => 90,
         (RecommendationKind::SongRadio, CandidateSource::Similar) => 100,
         (RecommendationKind::ArtistRadio, CandidateSource::ArtistTop) => 100,

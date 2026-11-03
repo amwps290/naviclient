@@ -140,6 +140,106 @@ fn preload_target_matches_playback_modes_and_manual_repeat_one_skip() {
 }
 
 #[test]
+fn auto_continue_only_triggers_at_a_natural_sequential_queue_boundary() {
+    let sequential = PlayModes {
+        shuffle: false,
+        repeat: RepeatMode::Off,
+    };
+    assert!(super::should_auto_continue(
+        true,
+        sequential,
+        Some(2),
+        3,
+        true
+    ));
+    assert!(!super::should_auto_continue(
+        false,
+        sequential,
+        Some(2),
+        3,
+        true
+    ));
+    assert!(!super::should_auto_continue(
+        true,
+        sequential,
+        Some(1),
+        3,
+        true
+    ));
+    assert!(!super::should_auto_continue(
+        true,
+        sequential,
+        Some(2),
+        3,
+        false
+    ));
+    for modes in [
+        PlayModes {
+            shuffle: false,
+            repeat: RepeatMode::All,
+        },
+        PlayModes {
+            shuffle: false,
+            repeat: RepeatMode::One,
+        },
+        PlayModes {
+            shuffle: true,
+            repeat: RepeatMode::Off,
+        },
+    ] {
+        assert!(!super::should_auto_continue(true, modes, Some(2), 3, true));
+    }
+}
+
+#[test]
+fn auto_continue_result_rejects_queue_changes_and_stale_anchors() {
+    let modes = PlayModes {
+        shuffle: false,
+        repeat: RepeatMode::Off,
+    };
+    let song = |id: &str| Song {
+        id: id.into(),
+        title: id.into(),
+        ..Song::default()
+    };
+    let queue = vec![song("a"), song("anchor")];
+    assert!(super::auto_continue_context_matches(
+        true,
+        modes,
+        Some(1),
+        &queue,
+        2,
+        "anchor"
+    ));
+    assert!(!super::auto_continue_context_matches(
+        true,
+        modes,
+        Some(1),
+        &queue,
+        1,
+        "anchor"
+    ));
+    assert!(!super::auto_continue_context_matches(
+        true,
+        modes,
+        Some(1),
+        &queue,
+        2,
+        "old-anchor"
+    ));
+    let mut edited = queue;
+    edited.push(song("manual"));
+    assert!(!super::auto_continue_context_matches(
+        true,
+        modes,
+        Some(1),
+        &edited,
+        2,
+        "anchor"
+    ));
+}
+
+#[test]
 fn shuffle_reservation_and_forward_history_do_not_draw_a_second_random_song() {
     let mut history = ShuffleHistory::default();
     history.start(0);

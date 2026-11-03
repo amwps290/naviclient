@@ -437,6 +437,9 @@ pub struct NavidromeApp {
     radio_generation: u64,
     /// `song:<id>` 或 `artist:<id>`，同时用于按钮加载状态和迟到结果校验。
     radio_loading_key: Option<String>,
+    /// 自动续播生成代次和加载状态；任何手工队列意图都会使其失效。
+    auto_continue_generation: u64,
+    auto_continue_loading: bool,
     /// 删除服务器的确认弹窗：（服务器 id， 显示名）。None 表示无弹窗。
     server_remove_prompt: Option<(String, String)>,
 }
@@ -624,6 +627,8 @@ impl NavidromeApp {
             artist_top_songs_generation: 0,
             radio_generation: 0,
             radio_loading_key: None,
+            auto_continue_generation: 0,
+            auto_continue_loading: false,
             server_remove_prompt: None,
         };
         app.state.playback_modes = app.config.playback_modes;
@@ -1338,7 +1343,7 @@ impl NavidromeApp {
             .preload(self.preload_serial, url, cache_key, duration, gain);
     }
 
-    fn play_next(&mut self, natural_end: bool) {
+    fn play_next(&mut self, natural_end: bool) -> bool {
         self.freeze_next_preload();
         if let Some(next) = self.next_queue_index(natural_end) {
             if self.state.playback_modes.shuffle
@@ -1347,10 +1352,14 @@ impl NavidromeApp {
                 self.state.shuffle_history.advance(next);
             }
             self.play_queue_index(next);
+            true
+        } else {
+            false
         }
     }
 
     fn advance_queue(&mut self, forward: bool) {
+        self.cancel_auto_continue();
         self.freeze_next_preload();
         if forward {
             self.play_next(false);
@@ -1380,6 +1389,7 @@ impl NavidromeApp {
 
     /// 切换随机开关：取消预加载（下一首选择变化）并持久化。
     fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
+        self.cancel_auto_continue();
         self.cancel_next_preload();
         self.state.playback_modes.shuffle = !self.state.playback_modes.shuffle;
         self.config.playback_modes = self.state.playback_modes;
@@ -1395,6 +1405,7 @@ impl NavidromeApp {
 
     /// 循环模式循环切换：Off → All → One → Off；同样取消预加载并持久化。
     fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        self.cancel_auto_continue();
         self.cancel_next_preload();
         self.state.playback_modes.repeat = self.state.playback_modes.repeat.next();
         self.config.playback_modes = self.state.playback_modes;
@@ -1764,6 +1775,7 @@ impl NavidromeApp {
     }
 
     pub fn toggle_playback(&mut self) {
+        self.cancel_auto_continue();
         self.sync_gapless_transition();
         let playback = self.audio.state();
         if playback.active {
@@ -1780,6 +1792,7 @@ impl NavidromeApp {
 
     #[allow(dead_code)]
     pub fn stop_playback(&mut self) {
+        self.cancel_auto_continue();
         self.cancel_next_preload();
         self.audio.stop();
         self.resume_position = None;
@@ -3038,7 +3051,9 @@ impl NavidromeApp {
             self.ensure_scrobble_on_end();
             self.finish_listening_event(true);
             self.cache_measured_loudness(playback.loudness_db, playback.loudness_peak);
-            self.play_next(true);
+            if !self.play_next(true) {
+                self.maybe_start_auto_continue();
+            }
         }
     }
 

@@ -20,7 +20,7 @@ const MAX_ARTIST_ALBUMS: usize = 8;
 const MAX_TRACKS_PER_ALBUM: usize = 12;
 const MAX_SIMILARITY_SEEDS: usize = 3;
 const MAX_GENRE_SEEDS: usize = 2;
-const MAX_CANDIDATES: usize = 180;
+pub(super) const MAX_CANDIDATES: usize = 180;
 const REQUEST_CONCURRENCY: usize = 4;
 
 #[derive(Clone, Debug)]
@@ -272,7 +272,7 @@ fn tagged_or_record(
         .collect()
 }
 
-async fn collect_album_tracks(
+pub(super) async fn collect_album_tracks(
     api: OpenSubsonicProvider,
     albums: Vec<crate::models::Album>,
 ) -> Vec<Song> {
@@ -303,7 +303,7 @@ async fn collect_album_tracks(
     songs
 }
 
-async fn collect_similar_tracks(
+pub(super) async fn collect_similar_tracks(
     api: OpenSubsonicProvider,
     seeds: &[Song],
     errors: &mut Vec<String>,
@@ -325,7 +325,7 @@ async fn collect_similar_tracks(
     songs
 }
 
-async fn collect_genre_tracks(
+pub(super) async fn collect_genre_tracks(
     api: OpenSubsonicProvider,
     seeds: &[Song],
     errors: &mut Vec<String>,
@@ -363,7 +363,7 @@ async fn collect_genre_tracks(
     songs
 }
 
-fn stable_radio_seed(server_id: &str, key: &str) -> u64 {
+pub(super) fn stable_radio_seed(server_id: &str, key: &str) -> u64 {
     let mut hasher = Md5::new();
     hasher.update(server_id.as_bytes());
     hasher.update(key.as_bytes());

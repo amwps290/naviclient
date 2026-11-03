@@ -779,6 +779,19 @@ impl NavidromeApp {
                         Err(error) => log::warn!("random albums load failed: {error}"),
                     }
                 }
+                Msg::AutoContinue {
+                    generation,
+                    server_id,
+                    anchor_song_id,
+                    queue_len,
+                    result,
+                } => self.finish_auto_continue(
+                    generation,
+                    server_id,
+                    anchor_song_id,
+                    queue_len,
+                    result,
+                ),
                 Msg::DailyMix {
                     generation,
                     server_id,

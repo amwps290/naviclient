@@ -632,6 +632,7 @@ impl NavidromeApp {
         if self.radio_loading_key.take().is_some() {
             self.radio_generation = self.radio_generation.wrapping_add(1);
         }
+        self.cancel_auto_continue();
     }
 
     pub(super) fn finish_radio(

@@ -1539,6 +1539,16 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let queue_drawer = scope == "queue" && self.state.queue_drawer_open;
+        let recommendation_label = queue_drawer
+            .then(|| self.state.queue_origins.get(index).copied())
+            .flatten()
+            .and_then(|origin| match origin {
+                QueueOrigin::DailyMix => Some(t!("Daily Mix")),
+                QueueOrigin::SongRadio => Some(t!("Song radio")),
+                QueueOrigin::ArtistRadio => Some(t!("Artist radio")),
+                QueueOrigin::AutoContinue => Some(t!("Auto")),
+                QueueOrigin::Manual | QueueOrigin::Playlist => None,
+            });
         let Some(song) = self.song_for_scope(scope, index) else {
             return div().into_any_element();
         };
@@ -1684,12 +1694,32 @@ impl NavidromeApp {
                         .min_w_0()
                         .gap(px(2.0))
                         .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .line_height(rems(1.25))
-                                .truncate()
-                                .child(song.title.clone()),
+                            h_flex()
+                                .min_w_0()
+                                .gap_1p5()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .line_height(rems(1.25))
+                                        .truncate()
+                                        .child(song.title.clone()),
+                                )
+                                .when_some(recommendation_label, |this, label| {
+                                    this.child(
+                                        div()
+                                            .flex_none()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_full()
+                                            .bg(row_accent.opacity(0.1))
+                                            .text_xs()
+                                            .text_color(row_accent)
+                                            .child(label),
+                                    )
+                                }),
                         )
                         .child(
                             div()
@@ -4615,6 +4645,48 @@ impl NavidromeApp {
                                 this.state.queue_drawer_open = false;
                                 this.clear_song_multi();
                                 cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .min_h(px(52.0))
+                    .flex_none()
+                    .px_4()
+                    .py_2()
+                    .gap_3()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().border.opacity(0.7))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(t!("Automatic continuation")),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if self.auto_continue_loading {
+                                        t!("Finding more music…")
+                                    } else {
+                                        t!("Keep playing recommendations when the queue ends")
+                                    }),
+                            ),
+                    )
+                    .child(
+                        Switch::new("queue-auto-continue-switch")
+                            .checked(self.config.auto_continue)
+                            .accessibility_label(t!("Automatic continuation"))
+                            .on_change(cx.listener(|this, checked, _, cx| {
+                                this.set_auto_continue(*checked, cx);
                             })),
                     ),
             )

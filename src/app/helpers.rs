@@ -217,6 +217,34 @@ pub(super) fn should_preload_next(playback: &PlaybackState) -> bool {
         })
 }
 
+pub(super) fn should_auto_continue(
+    enabled: bool,
+    modes: PlayModes,
+    current: Option<usize>,
+    queue_len: usize,
+    natural_end: bool,
+) -> bool {
+    enabled
+        && natural_end
+        && !modes.shuffle
+        && modes.repeat == RepeatMode::Off
+        && queue_len > 0
+        && current == Some(queue_len - 1)
+}
+
+pub(super) fn auto_continue_context_matches(
+    enabled: bool,
+    modes: PlayModes,
+    current: Option<usize>,
+    queue: &[Song],
+    expected_len: usize,
+    anchor_song_id: &str,
+) -> bool {
+    queue.len() == expected_len
+        && queue.last().map(|song| song.id.as_str()) == Some(anchor_song_id)
+        && should_auto_continue(enabled, modes, current, queue.len(), true)
+}
+
 pub(super) fn next_queue_index(
     modes: PlayModes,
     current: usize,
