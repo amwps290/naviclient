@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::{ListeningEvent, ListeningHistory, QueueOrigin, Song};
 
 mod auto_continue;
+mod candidates;
 mod daily;
 mod radio;
 pub(crate) use auto_continue::{generate_auto_continue, AutoContinueGenerationContext};

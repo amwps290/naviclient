@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use anyhow::{anyhow, Result};
 
-use super::radio::{
-    collect_album_tracks, collect_genre_tracks, collect_similar_tracks, stable_radio_seed,
+use super::candidates::{
+    collect_album_tracks, collect_genre_tracks, collect_similar_tracks, stable_generation_seed,
     MAX_CANDIDATES,
 };
 use super::{
@@ -157,7 +157,7 @@ pub async fn generate_auto_continue(
         &RecommendationRequest {
             kind: RecommendationKind::AutoContinue,
             target_count: AUTO_CONTINUE_TARGET,
-            seed: stable_radio_seed(&context.server_id, &format!("auto:{key}")),
+            seed: stable_generation_seed(&context.server_id, &format!("auto:{key}")),
         },
         candidates,
         &RecommendationContext {
