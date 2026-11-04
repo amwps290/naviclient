@@ -69,6 +69,7 @@ mod artwork_view;
 mod content_view;
 mod covers;
 mod desktop;
+mod detail_view;
 mod helpers;
 mod home_view;
 mod import;
