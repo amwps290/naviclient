@@ -65,11 +65,13 @@ use crate::vinyl::VinylCover;
 #[cfg(test)]
 mod tests;
 
+mod artwork_view;
 mod content_view;
 mod covers;
 mod helpers;
 mod import;
 mod library;
+mod library_view;
 mod player_view;
 mod playlists;
 mod queue;
@@ -77,7 +79,6 @@ mod queue_view;
 mod recommendations;
 mod settings_view;
 mod song_view;
-mod views;
 use self::import::{ImportStage, ImportUi};
 use helpers::*;
 use playlists::{PlaylistUi, SongMenuContext};
