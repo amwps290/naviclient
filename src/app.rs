@@ -79,6 +79,7 @@ mod library_view;
 mod lyrics;
 mod media_controls;
 mod message_polling;
+mod mini_player_view;
 mod now_playing_view;
 mod platform_window;
 mod playback;
