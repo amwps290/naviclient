@@ -1,4 +1,5 @@
 use super::*;
+use rodio::source::UniformSourceIterator;
 
 #[test]
 fn subsonic_error_envelope_yields_the_server_message() {
