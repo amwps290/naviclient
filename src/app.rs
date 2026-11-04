@@ -76,6 +76,7 @@ mod queue;
 mod queue_view;
 mod recommendations;
 mod settings_view;
+mod song_view;
 mod views;
 use self::import::{ImportStage, ImportUi};
 use helpers::*;
