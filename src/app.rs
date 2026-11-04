@@ -65,6 +65,7 @@ use crate::vinyl::VinylCover;
 #[cfg(test)]
 mod tests;
 
+mod content_view;
 mod covers;
 mod helpers;
 mod import;
