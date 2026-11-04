@@ -70,6 +70,7 @@ mod covers;
 mod helpers;
 mod import;
 mod library;
+mod player_view;
 mod playlists;
 mod queue;
 mod queue_view;
