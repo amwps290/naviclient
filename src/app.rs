@@ -66,6 +66,7 @@ use crate::vinyl::VinylCover;
 mod tests;
 
 mod artwork_view;
+mod browse_view;
 mod content_view;
 mod covers;
 mod desktop;
