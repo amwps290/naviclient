@@ -38,17 +38,17 @@ impl NavidromeApp {
             380.0
         };
         let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
-        let playback = self.audio.state();
+        let playback = self.playback_for_display();
         let accent = self.now_playing_accent(cx);
         let radio_seed = song.clone();
         let radio_loading = self.song_radio_loading(&song.id);
         let active_line = self
             .state
             .lyrics
-            .as_ref()
+            .lyrics()
             .and_then(|lyrics| lyrics.active_line_index(playback.position));
-        let lyrics = self.state.lyrics.as_ref();
-        let lyrics_body = if self.state.lyrics_loading {
+        let lyrics = self.state.lyrics.lyrics();
+        let lyrics_body = if self.state.lyrics.loading() {
             div()
                 .flex_1()
                 .flex()
@@ -57,7 +57,7 @@ impl NavidromeApp {
                 .text_color(cx.theme().muted_foreground)
                 .child(t!("Loading lyrics..."))
                 .into_any_element()
-        } else if let Some(error) = &self.state.lyrics_error {
+        } else if let Some(error) = self.state.lyrics.error() {
             v_flex()
                 .flex_1()
                 .items_center()
@@ -65,7 +65,7 @@ impl NavidromeApp {
                 .gap_2()
                 .text_color(cx.theme().muted_foreground)
                 .child(t!("Lyrics are unavailable for this track."))
-                .child(div().text_xs().child(error.clone()))
+                .child(div().text_xs().child(error.to_string()))
                 .into_any_element()
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
             let synced = lyrics.is_synced();

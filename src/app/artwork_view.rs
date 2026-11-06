@@ -10,7 +10,7 @@ impl NavidromeApp {
         _cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let cover = cover_id
-            .and_then(|id| self.state.covers.get(id))
+            .and_then(|id| self.state.covers.image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
@@ -33,7 +33,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let cover = cover_id
-            .and_then(|id| self.state.covers.get(id))
+            .and_then(|id| self.state.covers.image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);

@@ -1,0 +1,96 @@
+//! Playlist read orchestration and applying accepted results to the UI.
+
+use super::*;
+use crate::playlist::PlaylistDetails;
+
+impl NavidromeApp {
+    pub(super) fn load_playlists(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        let request = self.state.playlists.begin_list(&mut self.library_requests);
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.playlists().await.map_err(error_message);
+            let _ = tx.send(Msg::Playlists { request, result });
+        });
+    }
+
+    pub(super) fn finish_playlists(
+        &mut self,
+        request: LibraryRequest,
+        result: Result<Vec<Playlist>, String>,
+    ) {
+        let Some(result) = self.state.playlists.complete_list(request, result) else {
+            return;
+        };
+        match result {
+            Ok(playlists) => {
+                let covers = playlists
+                    .iter()
+                    .filter_map(|playlist| playlist.cover_art.clone())
+                    .collect();
+                self.preload_covers(covers);
+            }
+            Err(error) => {
+                let error = error.to_string();
+                self.playlist_read_error(error);
+            }
+        }
+    }
+
+    pub(super) fn open_playlist(&mut self, playlist: Playlist) {
+        self.clear_song_multi();
+        self.ensure_cover(playlist.cover_art.as_deref(), true);
+        self.state.playlists.select(playlist);
+        self.state.view = View::PlaylistDetail;
+        self.load_playlist_detail();
+    }
+
+    pub(super) fn load_playlist_detail(&mut self) {
+        let Some(api) = self.api.clone() else { return };
+        let Some(playlist) = self.state.playlists.playlist() else {
+            return;
+        };
+        let playlist_id = playlist.id.clone();
+        let Some(request) = self
+            .state
+            .playlists
+            .begin_detail(&mut self.library_requests)
+        else {
+            return;
+        };
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = api.playlist(&playlist_id).await.map_err(error_message);
+            let _ = tx.send(Msg::PlaylistSongs { request, result });
+        });
+    }
+
+    pub(super) fn finish_playlist_detail(
+        &mut self,
+        request: LibraryRequest,
+        result: Result<PlaylistDetails, String>,
+    ) {
+        let Some(result) = self.state.playlists.complete_detail(request, result) else {
+            return;
+        };
+        match result {
+            Ok(details) => {
+                let cover = details.playlist.cover_art.clone();
+                let covers = details
+                    .songs
+                    .iter()
+                    .filter_map(|song| song.cover_art.clone())
+                    .take(40)
+                    .collect();
+                self.state
+                    .clear_song_selection_for_scope(SongScope::PlaylistDetail);
+                self.ensure_cover(cover.as_deref(), true);
+                self.preload_covers(covers);
+            }
+            Err(error) => {
+                let error = error.to_string();
+                self.notify_error(error);
+            }
+        }
+    }
+}

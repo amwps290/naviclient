@@ -1,9 +1,33 @@
-//! 应用内快捷键分发、快捷键录制、冲突校验和配置重置。
+//! 应用内按键分发与系统全局快捷键事件处理。
 
+use super::shortcut_bindings::match_shortcut;
 use super::*;
 
 impl NavidromeApp {
-    /// 处理全局键盘快捷键；输入框聚焦时不会触发（由输入框包装层阻止传播）。
+    pub(super) fn poll_global_shortcuts(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut changed = false;
+        for _ in 0..32 {
+            let Some(event) = self.global_shortcuts.try_recv() else {
+                break;
+            };
+            changed = true;
+            match event {
+                GlobalShortcutEvent::Triggered(action) => {
+                    self.execute_playback_shortcut(action, window, cx);
+                }
+                GlobalShortcutEvent::RegistrationReport { failures } => {
+                    self.state.settings.global_shortcut_failures = failures.into_iter().collect();
+                }
+            }
+        }
+        changed
+    }
+
+    /// 处理窗口内快捷键；录制优先，普通操作遵守输入框、弹窗和菜单焦点边界。
     pub(super) fn handle_keystroke(
         &mut self,
         keystroke: &Keystroke,
@@ -11,11 +35,11 @@ impl NavidromeApp {
         cx: &mut Context<Self>,
     ) {
         let can_record_shortcut =
-            self.state.settings_open && self.state.settings_section == SettingsSection::Shortcuts;
+            self.state.settings.open && self.state.settings.section == SettingsSection::Shortcuts;
         if !can_record_shortcut {
             self.cancel_shortcut_recording();
         }
-        if let Some(action) = self.state.recording_global_shortcut {
+        if let Some(recording) = self.state.settings.recording() {
             if keystroke.key == "escape" {
                 self.cancel_shortcut_recording();
                 cx.notify();
@@ -25,21 +49,12 @@ impl NavidromeApp {
                 keystroke.key.as_str(),
                 "control" | "shift" | "alt" | "platform" | "function"
             ) {
-                self.assign_global_shortcut(action, keystroke, cx);
-            }
-            return;
-        }
-        if let Some(action) = self.state.recording_shortcut {
-            if keystroke.key == "escape" {
-                self.cancel_shortcut_recording();
-                cx.notify();
-                return;
-            }
-            if !matches!(
-                keystroke.key.as_str(),
-                "control" | "shift" | "alt" | "platform" | "function"
-            ) {
-                self.assign_shortcut(action, keystroke, cx);
+                match recording {
+                    ShortcutRecording::Local(action) => self.assign_shortcut(action, keystroke, cx),
+                    ShortcutRecording::Global(action) => {
+                        self.assign_global_shortcut(action, keystroke, cx)
+                    }
+                }
             }
             return;
         }
@@ -56,19 +71,9 @@ impl NavidromeApp {
         let Some(shortcut) = match_shortcut(&self.config.shortcuts, keystroke) else {
             return;
         };
-        // 忽略按住重复触发的同一按键（250ms 内同键视为重复）。
-        let now = std::time::Instant::now();
-        let pressed_shortcut = keystroke.unparse();
-        let repeated = self.last_shortcut == pressed_shortcut
-            && now.duration_since(self.last_shortcut_at) < Duration::from_millis(250);
-        self.last_shortcut = pressed_shortcut;
-        self.last_shortcut_at = now;
-        // 选择移动豁免重复保护：按住 Shift+↑/↓ 可连续移动。
-        if repeated
-            && !matches!(
-                shortcut,
-                ShortcutAction::SelectPrevious | ShortcutAction::SelectNext
-            )
+        if !self
+            .shortcut_repeat
+            .allows(keystroke, shortcut, std::time::Instant::now())
         {
             return;
         }
@@ -108,19 +113,7 @@ impl NavidromeApp {
                 cx.notify();
             }
             ShortcutAction::CloseOverlays => {
-                if self.state.song_list_multi.is_some() {
-                    // 多选活跃时 Esc 只清空多选，不连带关闭页面/设置。
-                    self.clear_song_multi();
-                } else if self.state.settings_open {
-                    self.state.settings_open = false;
-                } else if self.state.queue_drawer_open {
-                    self.state.queue_drawer_open = false;
-                    self.clear_song_multi();
-                } else if self.state.view == View::NowPlaying {
-                    self.leave_now_playing();
-                } else if let Some(parent) = Self::detail_parent(self.state.view) {
-                    self.state.view = parent;
-                }
+                self.state.close_top_overlay();
                 cx.notify();
             }
             ShortcutAction::FocusSearch => {
@@ -130,8 +123,7 @@ impl NavidromeApp {
     }
 
     pub(super) fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.settings_open = false;
-        self.state.view = View::Search;
+        self.state.navigate_to(View::Search);
         cx.notify();
         let mut async_cx = window.to_async(cx);
         let _ = self
@@ -156,166 +148,6 @@ impl NavidromeApp {
             ShortcutAction::ToggleMute => self.toggle_mute(window, cx),
             _ => return,
         }
-        cx.notify();
-    }
-
-    pub(super) fn start_shortcut_recording(&mut self, action: ShortcutAction, global: bool) {
-        self.global_shortcuts.suspend();
-        self.state.recording_shortcut = (!global).then_some(action);
-        self.state.recording_global_shortcut = global.then_some(action);
-        self.state.shortcut_conflict = None;
-        self.state.global_shortcut_conflict = None;
-        self.state.global_shortcut_validation = None;
-    }
-
-    pub(super) fn cancel_shortcut_recording(&mut self) {
-        let was_recording = self.state.recording_shortcut.take().is_some();
-        let was_recording_global = self.state.recording_global_shortcut.take().is_some();
-        self.state.shortcut_conflict = None;
-        self.state.global_shortcut_conflict = None;
-        self.state.global_shortcut_validation = None;
-        if was_recording || was_recording_global {
-            self.global_shortcuts.update(&self.config.global_shortcuts);
-        }
-    }
-
-    pub(super) fn assign_shortcut(
-        &mut self,
-        action: ShortcutAction,
-        keystroke: &Keystroke,
-        cx: &mut Context<Self>,
-    ) {
-        let binding = keystroke.unparse();
-        if let Some(existing) = shortcut_conflict(&self.config.shortcuts, action, &binding) {
-            self.state.shortcut_conflict = Some((action, existing));
-            cx.notify();
-            return;
-        }
-        let previous = self.config.shortcuts.clone();
-        self.config.shortcuts.set(action, binding);
-        if let Err(error) = config::save(&self.config) {
-            self.config.shortcuts = previous;
-            self.notify_error(t!(
-                "Shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.cancel_shortcut_recording();
-        cx.notify();
-    }
-
-    pub(super) fn assign_global_shortcut(
-        &mut self,
-        action: ShortcutAction,
-        keystroke: &Keystroke,
-        cx: &mut Context<Self>,
-    ) {
-        let binding = keystroke.unparse();
-        if let Err(error) = crate::global_shortcuts::validate(&binding) {
-            self.state.global_shortcut_validation = Some((action, error));
-            self.state.global_shortcut_conflict = None;
-            cx.notify();
-            return;
-        }
-        if let Some(existing) =
-            global_shortcut_conflict(&self.config.global_shortcuts, action, &binding)
-        {
-            self.state.global_shortcut_conflict = Some((action, existing));
-            self.state.global_shortcut_validation = None;
-            cx.notify();
-            return;
-        }
-        let previous = self.config.global_shortcuts.clone();
-        self.config.global_shortcuts.set(action, binding);
-        if let Err(error) = config::save(&self.config) {
-            self.config.global_shortcuts = previous;
-            self.notify_error(t!(
-                "Global shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.state.global_shortcut_failures.remove(&action);
-        self.cancel_shortcut_recording();
-        cx.notify();
-    }
-
-    pub(super) fn reset_shortcut(&mut self, action: ShortcutAction, cx: &mut Context<Self>) {
-        if let Some(existing) =
-            shortcut_conflict(&self.config.shortcuts, action, action.default_binding())
-        {
-            self.cancel_shortcut_recording();
-            self.state.shortcut_conflict = Some((action, existing));
-            cx.notify();
-            return;
-        }
-        let previous = self.config.shortcuts.clone();
-        self.config.shortcuts.reset(action);
-        if let Err(error) = config::save(&self.config) {
-            self.config.shortcuts = previous;
-            self.notify_error(t!(
-                "Shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.cancel_shortcut_recording();
-        cx.notify();
-    }
-
-    pub(super) fn reset_all_shortcuts(&mut self, cx: &mut Context<Self>) {
-        let previous = self.config.shortcuts.clone();
-        self.config.shortcuts.reset_all();
-        if let Err(error) = config::save(&self.config) {
-            self.config.shortcuts = previous;
-            self.notify_error(t!(
-                "Shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.cancel_shortcut_recording();
-        cx.notify();
-    }
-
-    pub(super) fn reset_global_shortcut(&mut self, action: ShortcutAction, cx: &mut Context<Self>) {
-        let default = action
-            .default_global_binding()
-            .expect("global shortcut actions have defaults");
-        if let Some(existing) =
-            global_shortcut_conflict(&self.config.global_shortcuts, action, default)
-        {
-            self.cancel_shortcut_recording();
-            self.state.global_shortcut_conflict = Some((action, existing));
-            self.state.global_shortcut_validation = None;
-            cx.notify();
-            return;
-        }
-        let previous = self.config.global_shortcuts.clone();
-        self.config.global_shortcuts.reset(action);
-        if let Err(error) = config::save(&self.config) {
-            self.config.global_shortcuts = previous;
-            self.notify_error(t!(
-                "Global shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.state.global_shortcut_failures.remove(&action);
-        self.cancel_shortcut_recording();
-        self.global_shortcuts.update(&self.config.global_shortcuts);
-        cx.notify();
-    }
-
-    pub(super) fn reset_all_global_shortcuts(&mut self, cx: &mut Context<Self>) {
-        let previous = self.config.global_shortcuts.clone();
-        self.config.global_shortcuts.reset_all();
-        if let Err(error) = config::save(&self.config) {
-            self.config.global_shortcuts = previous;
-            self.notify_error(t!(
-                "Global shortcut save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        self.state.global_shortcut_failures.clear();
-        self.cancel_shortcut_recording();
-        self.global_shortcuts.update(&self.config.global_shortcuts);
         cx.notify();
     }
 }

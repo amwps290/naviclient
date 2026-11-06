@@ -1,5 +1,19 @@
 use super::*;
+use crate::audio::decoder::PreparedStream;
+use crate::audio::device_output::{AudioOutput, DevicePlayback};
+use crate::audio::error::{FailureError, StreamFailure};
 use crate::audio::preload::tests::{client, wait_for, wav, TestCache};
+use crate::audio::stream_cache::cache_paths;
+use crate::audio::stream_cache::BufferProgress;
+use crate::audio::stream_control::StreamControl;
+use crate::audio::transport::Transport;
+use crate::audio::worker::run_playback;
+use crate::audio::{AudioHandle, PlaybackState};
+use rodio::Player;
+use std::fs;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Instant;
 
 fn stereo() -> ChannelCount {
     ChannelCount::new(2).unwrap()
@@ -8,25 +22,20 @@ fn rate(hz: u32) -> SampleRate {
     SampleRate::new(hz).unwrap()
 }
 
-fn track(frames: usize, hz: u32, channels: u16, value: f32, gain: f32) -> OutputTrack {
-    let control = StreamControl::new(true);
-    let (_, receiver) = mpsc::channel();
-    let error = Arc::new(Mutex::new(None));
+pub(in crate::audio) fn track(
+    frames: usize,
+    hz: u32,
+    channels: u16,
+    value: f32,
+    gain: f32,
+) -> OutputTrack {
     let duration = Duration::from_secs_f64(frames as f64 / hz as f64);
-    let source = BufferedStreamSource {
-        control,
-        receiver,
-        queued: VecDeque::from([vec![value; frames * channels as usize]]),
-        current: Vec::new().into_iter(),
-        channels: ChannelCount::new(channels).unwrap(),
-        sample_rate: rate(hz),
-        duration: Some(duration),
-        producer_finished: true,
-        terminal_error: None,
-        shared_error: error.clone(),
-        last_data: Instant::now(),
-        silence_remaining: 0,
-    };
+    let (source, error) = crate::audio::buffered_stream::tests::from_samples(
+        vec![value; frames * channels as usize],
+        ChannelCount::new(channels).unwrap(),
+        rate(hz),
+        Some(duration),
+    );
     OutputTrack::new(
         PreparedStream {
             source,
@@ -76,10 +85,10 @@ fn track_boundary_has_no_added_or_missing_samples_and_keeps_gains_separate() {
 #[test]
 fn different_rates_and_channels_match_individually_normalized_audio() {
     let first = track(44_100, 44_100, 1, 0.25, 1.0)
-        .source
+        .into_source()
         .collect::<Vec<_>>();
     let second = track(96_000, 96_000, 2, -0.5, 1.0)
-        .source
+        .into_source()
         .collect::<Vec<_>>();
     assert!((first.len() as isize - 96_000).abs() <= 4);
     assert!((second.len() as isize - 96_000).abs() <= 4);
@@ -196,12 +205,17 @@ fn boundary_notification_masks_old_worker_snapshot_and_is_consumed_once() {
         position: Duration::from_secs(180),
         loudness_db: -8.0,
         seek_serial: 3,
+        command_serial: 5,
+        output_name: Some("device".into()),
+        output_sample_rate: 48_000,
+        output_channels: 2,
         ..Default::default()
     }));
     let audio = AudioHandle {
         tx,
         state: state.clone(),
         transition: Arc::new(Mutex::new(Some(next.clone()))),
+        transport: Arc::new(Mutex::new(Transport::default())),
     };
     assert!(next.start(
         Duration::from_secs(180),
@@ -209,10 +223,18 @@ fn boundary_notification_masks_old_worker_snapshot_and_is_consumed_once() {
     ));
     let snapshot = audio.state();
     assert!(snapshot.active && !snapshot.ended);
+    let progress = audio.progress();
+    assert!(progress.active && !progress.ended);
+    assert_eq!(progress.transition_id, Some(7));
+    assert_eq!(progress.position, Duration::ZERO);
     assert_eq!(snapshot.position, Duration::ZERO);
     assert_eq!(snapshot.duration, Some(Duration::from_secs(10)));
     assert_eq!(snapshot.loudness_db, 0.0);
     assert_eq!(snapshot.seek_serial, 3);
+    assert_eq!(snapshot.command_serial, 5);
+    assert_eq!(snapshot.output_name.as_deref(), Some("device"));
+    assert_eq!(snapshot.output_sample_rate, 48_000);
+    assert_eq!(snapshot.output_channels, 2);
     assert_eq!(audio.cancel_preload().unwrap().id, 7);
     assert!(audio.take_transition().is_none());
     *state.lock().unwrap() = PlaybackState {
@@ -221,6 +243,7 @@ fn boundary_notification_masks_old_worker_snapshot_and_is_consumed_once() {
         ..snapshot
     };
     assert_eq!(audio.state().position, Duration::from_millis(50));
+    assert_eq!(audio.progress().position, Duration::from_millis(50));
     audio.stop();
     assert!(audio.transition.lock().unwrap().is_none());
 }
@@ -248,18 +271,16 @@ impl Engine {
             tx,
             state: state.clone(),
             transition: Arc::new(Mutex::new(None)),
+            transport: Arc::new(Mutex::new(Transport::default())),
         };
         let (player, output) = Player::new();
-        let slot = Slot::default();
-        let device = AudioOutput {
-            sink: None,
-            name: None,
+        let device = AudioOutput::new(DevicePlayback::headless(
             player,
-            channels: stereo(),
-            sample_rate: rate(48_000),
-            handoff: slot.clone(),
-            eq: crate::audio::eq::new_eq_handle(crate::models::EqSettings::default()),
-        };
+            None,
+            stereo(),
+            rate(48_000),
+        ));
+        let slot = device.handoff.clone();
         let path = cache.0.clone();
         let worker = thread::spawn(move || run_playback(rx, state, path, client(), device));
         audio.play(
@@ -306,7 +327,13 @@ impl Engine {
 
     fn pump_until(&mut self, mut condition: impl FnMut(&PlaybackState) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !condition(&self.audio().state()) {
+        loop {
+            let state = self.audio().state();
+            // A projected intent can satisfy the condition before the worker
+            // clears its Player. These sampling tests wait for acknowledgement.
+            if !self.audio().transport.lock().unwrap().pending() && condition(&state) {
+                break;
+            }
             assert!(
                 Instant::now() < deadline,
                 "audio worker did not reach expected state"
@@ -325,6 +352,125 @@ impl Drop for Engine {
         self.output.take();
         self.worker.take().unwrap().join().unwrap();
     }
+}
+
+#[test]
+fn stopping_clears_the_previous_tracks_loudness_and_progress() {
+    let mut engine = Engine::new();
+    let output = engine.output.as_mut().unwrap();
+    assert_eq!(output.find(|sample| *sample != 0.0), Some(0.25));
+    assert!(output.by_ref().take(8192).all(|sample| sample == 0.25));
+    wait_for(|| engine.audio().state().loudness_peak > 0.0);
+    engine.audio().stop();
+    engine.pump_until(|state| !state.active);
+    let state = engine.audio().state();
+    assert_eq!(state.loudness_db, 0.0);
+    assert_eq!(state.loudness_peak, 0.0);
+    assert_eq!(state.position, Duration::ZERO);
+    assert_eq!(state.buffered, Duration::ZERO);
+    assert_eq!(state.duration, None);
+    assert!(!state.ended);
+}
+
+#[test]
+fn seek_preparation_keeps_pause_until_explicit_resume() {
+    let mut engine = Engine::new();
+    engine.audio().pause();
+    wait_for(|| engine.audio().state().paused);
+    engine.audio().seek(Duration::from_secs(3));
+    engine.pump_until(|state| state.seek_serial == 1);
+    assert!(engine.audio().state().paused);
+    assert!(engine
+        .output
+        .as_mut()
+        .unwrap()
+        .by_ref()
+        .take(4096)
+        .all(|sample| sample == 0.0));
+    engine.audio().resume();
+    engine.pump_until(|state| !state.paused);
+    assert_eq!(
+        engine
+            .output
+            .as_mut()
+            .unwrap()
+            .find(|sample| *sample != 0.0),
+        Some(0.25)
+    );
+}
+
+#[test]
+fn explicit_play_after_pause_starts_the_new_stream_with_playing_intent() {
+    let mut engine = Engine::new();
+    engine.audio().pause();
+    wait_for(|| engine.audio().state().paused);
+    engine.audio().play(
+        "http://127.0.0.1:1/b".into(),
+        "b".into(),
+        Some(Duration::from_secs(12)),
+        1.0,
+        Duration::ZERO,
+        None,
+    );
+    engine.pump_until(|state| state.fully_buffered && !state.paused);
+    assert_eq!(
+        engine
+            .output
+            .as_mut()
+            .unwrap()
+            .find(|sample| *sample != 0.0),
+        Some(-0.25)
+    );
+}
+
+#[test]
+fn selecting_then_seeking_twice_and_pausing_rebuilds_the_selected_track_at_accumulated_target() {
+    let mut engine = Engine::new();
+    engine.audio().play(
+        "http://127.0.0.1:1/b".into(),
+        "b".into(),
+        Some(Duration::from_secs(12)),
+        1.0,
+        Duration::ZERO,
+        None,
+    );
+    let song = crate::models::Song {
+        duration: Some(12),
+        ..Default::default()
+    };
+    for seconds in [3, 2] {
+        let timeline =
+            crate::playback_timeline::PlaybackTimeline::for_song(&engine.audio().state(), &song);
+        engine.audio().seek(timeline.seek_seconds(seconds));
+    }
+    engine.audio().pause();
+    assert_eq!(engine.audio().state().position, Duration::from_secs(5));
+    assert_eq!(engine.audio().state().seek_serial, 0);
+    engine.pump_until(|state| state.seek_serial == 1 && state.paused);
+    assert_eq!(engine.audio().state().position, Duration::from_secs(5));
+    engine.audio().resume();
+    engine.pump_until(|state| !state.paused);
+    assert_eq!(
+        engine
+            .output
+            .as_mut()
+            .unwrap()
+            .find(|sample| *sample != 0.0),
+        Some(-0.25)
+    );
+}
+
+#[test]
+fn seeking_after_stop_is_acknowledged_without_creating_an_active_track() {
+    let mut engine = Engine::new();
+    engine.audio().stop();
+    engine.pump_until(|state| !state.active);
+    engine.audio().seek(Duration::from_secs(5));
+    engine.pump_until(|state| !state.active && state.position.is_zero());
+    let state = engine.audio().state();
+    assert!(!state.ended);
+    assert_eq!(state.seek_serial, 0);
+    assert_eq!(state.duration, None);
 }
 
 #[test]
@@ -374,8 +520,7 @@ fn manual_skip_reuses_the_armed_track_without_a_second_decoder() {
         Duration::ZERO,
         Some(1),
     );
-    engine
-        .pump_until(|state| state.active && prepared_control.fully_decoded.load(Ordering::Acquire));
+    engine.pump_until(|state| state.active && prepared_control.fully_decoded());
     assert_eq!(
         engine
             .output

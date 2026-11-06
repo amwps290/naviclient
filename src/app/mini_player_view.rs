@@ -1,5 +1,6 @@
 //! 迷你播放器窗口的封面、歌曲信息和播放控制渲染。
 
+use super::player_controls_view::play_button_style;
 use super::*;
 
 impl NavidromeApp {
@@ -11,7 +12,7 @@ impl NavidromeApp {
         let theme = cx.theme().clone();
         let song = self.state.now_playing.clone();
         let has_track = song.is_some();
-        let playback = self.audio.state();
+        let playback = self.playback_for_display();
         let is_playing = playback.active && !playback.paused;
         let duration = playback.duration.unwrap_or_default();
         let progress_percent = if duration.is_zero() {
@@ -22,21 +23,13 @@ impl NavidromeApp {
 
         let cover_id = song.as_ref().and_then(|song| song.cover_art.as_deref());
         let cover = cover_id
-            .and_then(|id| self.state.covers.get(id))
+            .and_then(|id| self.state.covers.image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
 
         let (base, raw_accent) = self.now_playing_palette(cx);
         let accent = self.now_playing_accent(cx);
-        let accent_fg = accent_foreground(accent);
-        let play_button_style = ButtonCustomVariant::new(cx)
-            .color(accent)
-            .foreground(accent_fg)
-            .hover(adjust_lightness(accent, 0.05))
-            .active(adjust_lightness(accent, -0.05))
-            .shadow(true);
-
         let light = theme.background.l >= 0.5;
         let base_strength = if light { 0.36 } else { 0.3 };
         let accent_strength = if light { 0.28 } else { 0.24 };
@@ -181,7 +174,7 @@ impl NavidromeApp {
                         PlayerIcon::Play
                     })
                     .tooltip(if is_playing { t!("Pause") } else { t!("Play") })
-                    .custom(play_button_style)
+                    .custom(play_button_style(accent, cx))
                     .with_size(px(26.0))
                     .rounded_full()
                     .disabled(!has_track)
@@ -206,12 +199,10 @@ impl NavidromeApp {
 
         // 滚轮调音量后 1 秒内，进度线位置改为显示当前音量，给无面板的迷你窗口
         // 一个即时反馈；平时仍显示播放进度。
-        let volume_flash = self
-            .mini_volume_flash
-            .is_some_and(|at| at.elapsed() < Duration::from_secs(1));
+        let volume_flash = self.volume.mini_flash_visible(std::time::Instant::now());
         let (bar_fraction, bar_color) = if volume_flash {
             (
-                effective_volume(self.config.volume, self.muted),
+                self.volume.output_volume(self.config.volume),
                 accent.opacity(0.95),
             )
         } else {
@@ -258,14 +249,9 @@ impl NavidromeApp {
             .border_color(theme.border.opacity(0.5))
             .text_color(theme.foreground)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
-                let delta_y = f32::from(event.delta.pixel_delta(px(16.0)).y);
-                if delta_y.abs() < f32::EPSILON {
-                    return;
+                if this.adjust_volume_from_scroll(event, window, cx) {
+                    this.show_mini_volume_flash(cx);
                 }
-                let delta = if delta_y > 0.0 { 0.05 } else { -0.05 };
-                this.adjust_volume(delta, window, cx);
-                this.show_mini_volume_flash(cx);
-                cx.stop_propagation();
             }))
             .when(cfg!(target_os = "windows"), |this| {
                 this.window_control_area(WindowControlArea::Drag)

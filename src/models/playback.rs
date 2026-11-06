@@ -1,6 +1,27 @@
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
+/// One runtime playback occurrence, retained by retries and seeks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlaybackId(u128);
+
+impl PlaybackId {
+    pub(crate) fn new() -> Self {
+        use std::sync::{
+            atomic::{AtomicU64, Ordering},
+            OnceLock,
+        };
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        static PROCESS: OnceLock<u64> = OnceLock::new();
+        let process = *PROCESS.get_or_init(rand::random);
+        Self((u128::from(process) << 64) | u128::from(NEXT.fetch_add(1, Ordering::Relaxed)))
+    }
+
+    pub(crate) fn bytes(self) -> [u8; 16] {
+        self.0.to_le_bytes()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscodingQuality {
@@ -108,72 +129,6 @@ impl RepeatMode {
             Self::Off => t!("Repeat off"),
             Self::All => t!("Repeat all"),
             Self::One => t!("Repeat current track"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EqSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub gains_db: [f32; 10],
-}
-
-impl Default for EqSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            gains_db: [0.0; 10],
-        }
-    }
-}
-
-impl EqSettings {
-    pub const BANDS: [f32; 10] = [
-        31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
-    ];
-
-    pub const PRESETS: [(&'static str, [f32; 10]); 8] = [
-        ("Flat", [0.0; 10]),
-        (
-            "Bass boost",
-            [7.0, 6.0, 4.5, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ),
-        (
-            "Treble boost",
-            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.5, 5.0, 6.5],
-        ),
-        (
-            "Vocal",
-            [-2.0, -1.5, 0.0, 2.0, 4.0, 4.0, 3.0, 1.5, 0.0, -1.0],
-        ),
-        ("Rock", [5.0, 4.0, 3.0, 1.0, -0.5, -1.0, 0.5, 2.5, 3.5, 4.0]),
-        ("Pop", [-1.0, 0.5, 3.0, 4.0, 3.0, 0.5, -1.0, -1.0, 0.0, 1.0]),
-        ("Jazz", [4.0, 3.0, 1.0, 2.0, -1.0, -1.0, 0.0, 1.0, 2.5, 3.5]),
-        (
-            "Classical",
-            [4.0, 3.0, 2.0, 0.0, -1.0, -1.0, 0.0, 2.5, 3.5, 4.5],
-        ),
-    ];
-
-    pub fn preset_label(name: &'static str) -> std::borrow::Cow<'static, str> {
-        match name {
-            "Flat" => t!("Flat"),
-            "Bass boost" => t!("Bass boost"),
-            "Treble boost" => t!("Treble boost"),
-            "Vocal" => t!("Vocal"),
-            "Rock" => t!("Rock"),
-            "Pop" => t!("Pop"),
-            "Jazz" => t!("Jazz"),
-            "Classical" => t!("Classical"),
-            other => std::borrow::Cow::Borrowed(other),
-        }
-    }
-
-    pub fn clamp_gains(&mut self) {
-        for gain in &mut self.gains_db {
-            *gain = gain.clamp(-12.0, 12.0);
         }
     }
 }

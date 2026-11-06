@@ -1,6 +1,11 @@
 //! Structured playback failures and error classification across I/O layers.
 
-use super::*;
+use std::io;
+use std::sync::{Arc, Mutex};
+
+use rust_i18n::t;
+
+pub(super) type SharedStreamError = Arc<Mutex<Option<FailureError>>>;
 
 /// 播放失败的结构化原因，用来在界面上区分「本地网络」「服务端」「解码」三类问题。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +24,8 @@ pub enum StreamFailure {
     Decode,
     /// 本地音频输出设备问题。
     Output,
+    /// 本地播放准备无法启动，例如系统线程资源不足。
+    Preparation,
 }
 
 impl StreamFailure {
@@ -32,6 +39,7 @@ impl StreamFailure {
             Self::Truncated => t!("Audio stream was cut off"),
             Self::Decode => t!("Cannot decode this track"),
             Self::Output => t!("Audio output failed"),
+            Self::Preparation => t!("Audio preparation failed"),
         }
     }
 
@@ -51,6 +59,7 @@ impl StreamFailure {
             ),
             Self::Decode => t!("Client: the received data is not decodable audio."),
             Self::Output => t!("Local: the audio device failed; unrelated to the network."),
+            Self::Preparation => t!("Local: audio could not be prepared. Retry playback or restart the app."),
         }
     }
 
@@ -120,6 +129,12 @@ pub(super) fn classify_io(error: &io::Error) -> StreamFailure {
         .and_then(|inner| inner.downcast_ref::<FailureError>())
     {
         return failure.kind;
+    }
+    if let Some(reqwest) = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<reqwest::Error>())
+    {
+        return classify_reqwest(reqwest);
     }
     match error.kind() {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => StreamFailure::Timeout,

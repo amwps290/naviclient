@@ -1,6 +1,8 @@
 //! 切歌系统通知（Linux D-Bus org.freedesktop.Notifications）。
 //!
 //! 设计要点：
+//! - **后台发送**：单个线程顺序发送，只保留最新待发送通知；
+//!   D-Bus 调用和封面文件检查不阻塞界面轮询。
 //! - **同 ID 替换防堆积**：快速连续切歌时，后续通知携带上一条的原始
 //!   ID，通知服务器按规范用新内容替换旧通知，不产生堆积。
 //! - **失败静默**：通知是纯增益（无 D-Bus 会话、服务器忙碌、被
@@ -24,56 +26,14 @@ pub(crate) fn notification_body(artist: &str, album: &str) -> String {
     }
 }
 
-#[cfg(target_os = "linux")]
-mod imp {
-    use std::path::Path;
-
-    use notify_rust::{Notification, Timeout};
-
-    /// 切歌通知发送器：维护上一次通知的原始 ID 用于替换。
-    pub(crate) struct TrackNotifier {
-        last_id: Option<u32>,
-    }
-
-    impl TrackNotifier {
-        pub(crate) fn new() -> Self {
-            Self { last_id: None }
-        }
-
-        /// 发送一条“正在播放”通知；失败静默（只记日志）。
-        pub(crate) fn track_changed(&mut self, title: &str, body: &str, cover_path: Option<&Path>) {
-            let mut notification = Notification::new();
-            notification
-                .appname("Navidrome Client")
-                .summary(title)
-                .body(body)
-                .timeout(Timeout::Milliseconds(4000));
-            // 替换语义：携带上一条的 ID，快速切歌只保留最新一条。
-            if let Some(id) = self.last_id {
-                notification.id(id);
-            }
-            if let Some(path) = cover_path.filter(|path| path.is_file()) {
-                // image-path hint 是桌面通知规范的正文大图；
-                // icon 兜底给不支持 image-path 的服务器。
-                let path = path.to_string_lossy().into_owned();
-                notification.icon(&path);
-                notification.hint(notify_rust::Hint::ImagePath(path));
-            }
-            match notification.show() {
-                Ok(handle) => {
-                    self.last_id = Some(handle.id());
-                }
-                Err(error) => {
-                    log::debug!("track notification failed: {error}");
-                    self.last_id = None;
-                }
-            }
-        }
-    }
-}
+#[cfg(any(target_os = "linux", test))]
+mod worker;
 
 #[cfg(target_os = "linux")]
-pub(crate) use imp::TrackNotifier;
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub(crate) use linux::TrackNotifier;
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) struct TrackNotifier;
@@ -91,6 +51,8 @@ impl TrackNotifier {
     }
 
     pub(crate) fn track_changed(&mut self, _title: &str, _body: &str, _cover_path: Option<&Path>) {}
+
+    pub(crate) fn cancel_pending(&self) {}
 }
 
 #[cfg(test)]

@@ -35,12 +35,15 @@ impl NavidromeApp {
                     .child(self.header_refresh_button(
                         "refresh-search",
                         t!("Run search again"),
-                        false,
+                        self.state.search.loading(),
                         cx,
                         |this, cx| this.submit_search(cx),
                     )),
             );
-        if self.state.search_results.is_some() {
+        if self.state.search.loading() && self.state.search.results().is_none() {
+            content = content.child(self.render_list_skeleton(6, cx));
+        }
+        if self.state.search.results().is_some() {
             // 过滤只在有结果后出现；会话内状态，不持久化。
             content = content.child(h_flex().gap_2().children(SearchFilter::ALL.map(|filter| {
                 Button::new(SharedString::from(format!(
@@ -50,14 +53,14 @@ impl NavidromeApp {
                 .label(filter.label())
                 .ghost()
                 .small()
-                .selected(self.state.search_filter == filter)
+                .selected(self.state.search.filter() == filter)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_search_filter(filter, cx);
                 }))
             })));
         }
-        if let Some(results) = &self.state.search_results {
-            let filter = self.state.search_filter;
+        if let Some(results) = self.state.search.results() {
+            let filter = self.state.search.filter();
             let show_artists = filter == SearchFilter::All || filter == SearchFilter::Artists;
             let show_albums = filter == SearchFilter::All || filter == SearchFilter::Albums;
             let show_songs = filter == SearchFilter::All || filter == SearchFilter::Songs;
@@ -108,7 +111,7 @@ impl NavidromeApp {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child(t!("Songs")),
                         )
-                        .child(self.render_song_list("search", false, cx));
+                        .child(self.render_song_list(SongScope::Search, cx));
                 } else if filter == SearchFilter::Songs {
                     content = content.child(
                         div()

@@ -1,65 +1,56 @@
-use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
-use md5::{Digest, Md5};
-use reqwest::blocking::{Client, Response};
-use reqwest::header::{CONTENT_RANGE, CONTENT_TYPE, RANGE};
-use reqwest::StatusCode;
-use rodio::{ChannelCount, Decoder, Player, Sample, SampleRate, Source};
-use rust_i18n::t;
-use url::Url;
+use anyhow::{Context, Result};
 
 use crate::models::EqSettings;
 
-mod error;
-pub(crate) use error::FailureError;
-pub use error::StreamFailure;
-use error::{classify_anyhow, classify_io, classify_reqwest, failure_io};
-mod http_stream;
-use http_stream::*;
+mod buffered_stream;
 mod decoder;
-use decoder::*;
-mod preload;
-use preload::{Preloader, StreamControl};
-mod gapless;
-pub use gapless::TrackTransition;
-use gapless::{ArmedTrack, AutoTrack, GaplessSource, OutputTrack, Transition};
+mod device_output;
 mod eq;
-use eq::{new_eq_handle, EqHandle};
+mod error;
+mod gapless;
+mod http_stream;
+mod loudness_meter;
+mod next_track;
 mod output;
-pub use output::list_output_devices;
-use output::{
-    normalize_for_output, open_audio_device, report_output_device, AudioOutput, LoudnessMeter,
-};
-mod worker;
+mod output_track;
+mod preload;
+mod preparation;
+mod preparation_state;
+mod stream_cache;
+mod stream_control;
+mod stream_response;
 #[cfg(test)]
-use worker::{apply_playback_intent, coalesce_seek_commands, run_playback};
+pub(crate) mod test_transport;
+mod track_state;
+mod track_transition;
+mod transport;
+mod worker;
+
+pub use error::StreamFailure;
+pub use output::{list_output_devices, OutputDevice};
+pub use track_transition::TrackTransition;
+
+use track_transition::Transition;
+use transport::{Transport, WorkerCommand};
 use worker::{run_worker, Command};
 
-const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
-const DECODED_CHUNK_FRAMES: usize = 4096;
-const DECODED_BUFFER_CHUNKS: usize = 512;
-const STARTUP_BUFFER_CHUNKS: usize = 16;
-const STARTUP_BUFFER_TIMEOUT: Duration = Duration::from_secs(20);
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(20);
 /// 一条曲目在一次播放中最多自动重连几次（用尽后向用户报错）。
 pub(crate) const PLAYBACK_RECONNECT_ATTEMPTS: u8 = 2;
-const HTTP_READ_RETRIES: usize = 3;
-const TRANSCODE_END_RETRIES: usize = 1;
-const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-
-type SharedStreamError = Arc<Mutex<Option<FailureError>>>;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlaybackState {
+    /// Last transport command whose state the worker has published.
+    pub(crate) command_serial: u64,
+    /// The worker exited, including output/client initialization failures.
+    pub(crate) worker_closed: bool,
+    /// The current track is attached to the output, beyond startup/seek preparation.
+    pub(crate) output_connected: bool,
     pub active: bool,
     pub paused: bool,
     pub ended: bool,
@@ -90,9 +81,10 @@ pub struct PlaybackState {
 
 #[derive(Clone)]
 pub struct AudioHandle {
-    tx: Sender<Command>,
+    tx: Sender<WorkerCommand>,
     state: Arc<Mutex<PlaybackState>>,
     transition: Arc<Mutex<Option<Arc<Transition>>>>,
+    transport: Arc<Mutex<Transport>>,
 }
 
 impl AudioHandle {
@@ -110,6 +102,7 @@ impl AudioHandle {
             tx,
             state,
             transition,
+            transport: Arc::new(Mutex::new(Transport::default())),
         })
     }
 
@@ -121,11 +114,10 @@ impl AudioHandle {
         gain: f32,
         start_position: Duration,
         preload_id: Option<u64>,
-    ) {
+    ) -> bool {
         self.cancel_transition();
         self.transition.lock().unwrap().take();
         if self
-            .tx
             .send(Command::Play {
                 url,
                 cache_key,
@@ -137,13 +129,16 @@ impl AudioHandle {
             .is_err()
         {
             log::error!("failed to send play command: audio worker is unavailable");
+            return false;
         }
+        true
     }
 
     pub fn pause(&self) {
-        let _ = self.tx.send(Command::Pause);
+        let _ = self.send(Command::Pause);
     }
 
+    /// Whether the worker accepted the reservation, before preparation starts.
     pub fn preload(
         &self,
         id: u64,
@@ -151,22 +146,30 @@ impl AudioHandle {
         cache_key: String,
         duration_hint: Option<Duration>,
         gain: f32,
-    ) {
+    ) -> bool {
         let transition = Transition::new(id, duration_hint);
         *self.transition.lock().unwrap() = Some(transition.clone());
-        let _ = self.tx.send(Command::Preload {
-            id,
-            url,
-            cache_key,
-            duration_hint,
-            gain,
-            transition,
-        });
+        if self
+            .send(Command::Preload {
+                id,
+                url,
+                cache_key,
+                duration_hint,
+                gain,
+                transition: transition.clone(),
+            })
+            .is_err()
+        {
+            transition.cancel();
+            log::error!("failed to send preload command: audio worker is unavailable");
+            return false;
+        }
+        true
     }
 
     pub fn cancel_preload(&self) -> Option<TrackTransition> {
         let event = self.freeze_preload();
-        let _ = self.tx.send(Command::CancelPreload);
+        let _ = self.send(Command::CancelPreload);
         event
     }
 
@@ -186,22 +189,22 @@ impl AudioHandle {
     }
 
     pub fn resume(&self) {
-        let _ = self.tx.send(Command::Resume);
+        let _ = self.send(Command::Resume);
     }
 
     pub fn stop(&self) {
         self.cancel_transition();
         self.transition.lock().unwrap().take();
-        let _ = self.tx.send(Command::Stop);
+        let _ = self.send(Command::Stop);
     }
 
     pub fn set_volume(&self, volume: f32) {
-        let _ = self.tx.send(Command::SetVolume(volume));
+        let _ = self.send(Command::SetVolume(volume));
     }
 
     pub fn set_cache_directory(&self, cache_dir: PathBuf) {
         self.cancel_transition();
-        if self.tx.send(Command::SetCacheDirectory(cache_dir)).is_err() {
+        if self.send(Command::SetCacheDirectory(cache_dir)).is_err() {
             log::error!("failed to update cache directory: audio worker is unavailable");
         }
     }
@@ -209,7 +212,7 @@ impl AudioHandle {
     /// 切换输出设备；播放中会在新设备上从当前位置继续，暂停意图保留。
     pub fn set_output_device(&self, name: Option<String>) {
         self.cancel_transition();
-        if self.tx.send(Command::SetOutputDevice(name)).is_err() {
+        if self.send(Command::SetOutputDevice(name)).is_err() {
             log::error!("failed to switch output device: audio worker is unavailable");
         }
     }
@@ -217,17 +220,41 @@ impl AudioHandle {
     /// 更新均衡器设置；音频线程内重算系数，正在播放的曲目在下一个
     /// 版本检查点（约千帧）生效。
     pub fn set_equalizer(&self, settings: EqSettings) {
-        if self.tx.send(Command::SetEqualizer(settings)).is_err() {
+        if self.send(Command::SetEqualizer(settings)).is_err() {
             log::error!("failed to update equalizer: audio worker is unavailable");
         }
     }
 
     pub fn seek(&self, position: Duration) {
         self.cancel_transition();
-        let _ = self.tx.send(Command::Seek(position));
+        let _ = self.send(Command::Seek(position));
     }
 
+    /// Responsive control state, including commands accepted but not yet processed.
     pub fn state(&self) -> PlaybackState {
+        self.transport
+            .lock()
+            .unwrap()
+            .observe(self.observed_state())
+    }
+
+    /// Actual output progress for listening/reporting. Pending seek targets are
+    /// inactive baselines, and replacement tracks cannot inherit old activity.
+    pub(crate) fn progress(&self) -> PlaybackState {
+        self.transport
+            .lock()
+            .unwrap()
+            .progress(self.observed_state())
+    }
+
+    fn send(&self, command: Command) -> std::result::Result<(), mpsc::SendError<WorkerCommand>> {
+        self.transport
+            .lock()
+            .unwrap()
+            .send(&self.tx, self.observed_state(), command)
+    }
+
+    fn observed_state(&self) -> PlaybackState {
         let mut state = self
             .state
             .lock()
@@ -236,13 +263,21 @@ impl AudioHandle {
         // The output callback can lead the worker by one poll. Never expose the
         // previous song's end/position/loudness as the newly started song.
         if let Some(transition) = self.transition.lock().unwrap().as_ref() {
-            if transition.event().is_some() && state.transition_id != Some(transition.id) {
+            if !state.worker_closed
+                && transition.event().is_some()
+                && state.transition_id != Some(transition.id)
+            {
                 state = PlaybackState {
                     active: true,
+                    output_connected: true,
                     paused: state.paused,
                     duration: transition.duration,
                     transition_id: Some(transition.id),
                     seek_serial: state.seek_serial,
+                    command_serial: state.command_serial,
+                    output_name: state.output_name,
+                    output_sample_rate: state.output_sample_rate,
+                    output_channels: state.output_channels,
                     ..Default::default()
                 };
             }

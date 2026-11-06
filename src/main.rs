@@ -17,6 +17,7 @@ mod media_session;
 mod models;
 mod msg;
 mod notify;
+mod playback_timeline;
 mod playlist;
 pub mod recommendation;
 mod secrets;

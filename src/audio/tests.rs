@@ -1,43 +1,89 @@
-use super::*;
+use std::collections::VecDeque;
+use std::io::{self, SeekFrom};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use anyhow::anyhow;
 use rodio::source::UniformSourceIterator;
+use rodio::{ChannelCount, Player, SampleRate, Source};
+
+use super::decoder::stream_ended_too_early;
+use super::error::{classify_anyhow, classify_io, failure_io, FailureError};
+use super::http_stream::{logical_playback_position, near_estimated_end, seek_target};
+use super::loudness_meter::LoudnessMeter;
+use super::output::normalize_for_output;
+use super::stream_control::StreamControl;
+use super::transport::{Transport, WorkerCommand};
+use super::worker::commands::coalesce_seek_commands;
+use super::worker::playback::apply_playback_intent;
+use super::worker::Command;
+use super::{test_transport, AudioHandle, PlaybackState, StreamFailure};
 
 #[test]
-fn subsonic_error_envelope_yields_the_server_message() {
-    // 标准错误信封：取出服务端给出的真实原因与错误码。
-    let body = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"transcoding not configured"}}}"#;
-    assert_eq!(
-        subsonic_error_detail(body),
-        "transcoding not configured (Subsonic error 0)"
-    );
-    // 只有错误码：仍可给出可辨识的描述。
-    assert_eq!(
-        subsonic_error_detail(r#"{"error":{"code":70}}"#),
-        "Subsonic error 70"
-    );
-    // JSON 但非信封结构：回退原始正文。
-    let gateway = r#"{"detail":"gateway panic"}"#;
-    assert_eq!(subsonic_error_detail(gateway), gateway);
+fn preload_acceptance_preserves_current_playback_and_delivers_the_reservation() {
+    let (tx, rx) = mpsc::channel();
+    let playback = PlaybackState {
+        active: true,
+        output_connected: true,
+        position: Duration::from_secs(165),
+        duration: Some(Duration::from_secs(180)),
+        fully_buffered: true,
+        ..Default::default()
+    };
+    let audio = AudioHandle {
+        tx,
+        state: Arc::new(Mutex::new(playback.clone())),
+        transition: Arc::new(Mutex::new(None)),
+        transport: Arc::new(Mutex::new(Transport::default())),
+    };
+    assert!(audio.preload(
+        42,
+        "fixture".into(),
+        "next".into(),
+        Some(Duration::from_secs(120)),
+        0.75
+    ));
+    let message = rx.try_recv().unwrap();
+    assert!(message.serial.is_none());
+    let Command::Preload {
+        id,
+        url,
+        cache_key,
+        duration_hint,
+        gain,
+        transition,
+    } = message.command
+    else {
+        panic!("expected one preload command");
+    };
+    assert_eq!(id, 42);
+    assert_eq!(url, "fixture");
+    assert_eq!(cache_key, "next");
+    assert_eq!(duration_hint, Some(Duration::from_secs(120)));
+    assert_eq!(gain, 0.75);
+    assert!(transition.pending());
+    assert!(Arc::ptr_eq(
+        &transition,
+        audio.transition.lock().unwrap().as_ref().unwrap()
+    ));
+    assert_eq!(audio.state(), playback);
+    assert_eq!(audio.progress(), playback);
+    assert!(rx.try_recv().is_err());
 }
 
 #[test]
-fn subsonic_error_envelope_falls_back_to_raw_text_when_unparseable() {
-    // 非 JSON 正文：截断保留前 200 字符。
-    let html = "<html>502 Bad Gateway</html>";
-    assert_eq!(subsonic_error_detail(html), html);
-    let long = "x".repeat(300);
-    assert_eq!(
-        subsonic_error_detail(&long),
-        format!("{}…", "x".repeat(200))
-    );
-    // 空正文：给出占位描述而不是空字符串。
-    assert_eq!(
-        subsonic_error_detail(""),
-        "the server returned an empty response"
-    );
-    assert_eq!(
-        subsonic_error_detail("   "),
-        "the server returned an empty response"
-    );
+fn rejected_preload_cancels_its_unsubmitted_transition() {
+    let mut fixture = test_transport::Fixture::new(PlaybackState::default());
+    fixture.disconnect();
+    assert!(!fixture
+        .audio
+        .preload(42, "fixture".into(), "song".into(), None, 1.0));
+    let transition = fixture.audio.transition.lock().unwrap().clone().unwrap();
+    assert!(!transition.pending());
+    assert!(transition.event().is_none());
+    assert!(fixture.audio.freeze_preload().is_none());
+    assert!(!fixture.audio.progress().active);
 }
 
 #[test]
@@ -55,6 +101,7 @@ fn network_failures_are_retryable_but_decode_and_output_are_not() {
     for kind in [
         StreamFailure::Decode,
         StreamFailure::Output,
+        StreamFailure::Preparation,
         StreamFailure::Http(404),
     ] {
         assert!(!kind.is_retryable(), "{kind:?} should not be retried");
@@ -107,6 +154,7 @@ fn restoring_playback_sends_one_command_with_the_saved_position() {
         tx,
         state: Arc::new(Mutex::new(PlaybackState::default())),
         transition: Arc::new(Mutex::new(None)),
+        transport: Arc::new(Mutex::new(Transport::default())),
     };
     audio.play(
         "test".into(),
@@ -117,9 +165,69 @@ fn restoring_playback_sends_one_command_with_the_saved_position() {
         None,
     );
     assert!(
-        matches!(rx.recv().unwrap(), Command::Play { start_position, .. } if start_position == Duration::from_secs(42))
+        matches!(rx.recv().unwrap().command, Command::Play { start_position, .. } if start_position == Duration::from_secs(42))
     );
     assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn relative_seeks_accumulate_before_the_worker_processes_the_commands() {
+    let (tx, _rx) = mpsc::channel();
+    let audio = AudioHandle {
+        tx,
+        state: Arc::new(Mutex::new(PlaybackState {
+            active: true,
+            position: Duration::from_secs(20),
+            duration: Some(Duration::from_secs(120)),
+            ..Default::default()
+        })),
+        transition: Arc::new(Mutex::new(None)),
+        transport: Arc::new(Mutex::new(Transport::default())),
+    };
+    let song = crate::models::Song {
+        duration: Some(120),
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let timeline = crate::playback_timeline::PlaybackTimeline::for_song(&audio.state(), &song);
+        audio.seek(timeline.seek_seconds(5));
+    }
+    assert_eq!(audio.state().position, Duration::from_secs(30));
+}
+
+#[test]
+fn newly_selected_track_supplies_its_own_position_and_duration_before_worker_poll() {
+    let (tx, _rx) = mpsc::channel();
+    let audio = AudioHandle {
+        tx,
+        state: Arc::new(Mutex::new(PlaybackState {
+            active: true,
+            position: Duration::from_secs(100),
+            duration: Some(Duration::from_secs(120)),
+            ended: true,
+            ..Default::default()
+        })),
+        transition: Arc::new(Mutex::new(None)),
+        transport: Arc::new(Mutex::new(Transport::default())),
+    };
+    audio.play(
+        "test".into(),
+        "new-song".into(),
+        Some(Duration::from_secs(180)),
+        1.0,
+        Duration::ZERO,
+        None,
+    );
+    let song = crate::models::Song {
+        duration: Some(180),
+        ..Default::default()
+    };
+    let timeline = crate::playback_timeline::PlaybackTimeline::for_song(&audio.state(), &song);
+    assert_eq!(timeline.position, Duration::ZERO);
+    assert_eq!(timeline.duration, Some(Duration::from_secs(180)));
+    assert!(!audio.state().ended);
+    audio.seek(timeline.seek_seconds(5));
+    assert_eq!(audio.state().position, Duration::from_secs(5));
 }
 
 #[test]
@@ -139,34 +247,65 @@ fn prepared_audio_obeys_current_intent_instead_of_the_cleared_sink() {
 
 #[test]
 fn coalesces_slider_seek_events_to_the_latest_position() {
-    let (sender, receiver) = mpsc::channel();
-    sender.send(Command::Seek(Duration::from_secs(20))).unwrap();
-    sender.send(Command::Seek(Duration::from_secs(30))).unwrap();
-    sender.send(Command::Pause).unwrap();
+    let (sender, receiver) = mpsc::channel::<WorkerCommand>();
+    sender
+        .send(WorkerCommand {
+            command: Command::Seek(Duration::from_secs(20)),
+            serial: Some(1),
+        })
+        .unwrap();
+    sender
+        .send(WorkerCommand {
+            command: Command::Seek(Duration::from_secs(30)),
+            serial: Some(2),
+        })
+        .unwrap();
+    sender
+        .send(WorkerCommand {
+            command: Command::Pause,
+            serial: Some(3),
+        })
+        .unwrap();
 
     let first = receiver.recv().unwrap();
-    let Command::Seek(initial) = first else {
+    let Command::Seek(initial) = first.command else {
         panic!("expected seek command");
     };
     let mut pending = VecDeque::new();
-    let (latest, count) = coalesce_seek_commands(initial, &receiver, &mut pending);
+    let (latest, serial, count) =
+        coalesce_seek_commands(initial, first.serial, &receiver, &mut pending);
 
     assert_eq!(latest, Duration::from_secs(30));
+    assert_eq!(serial, Some(2));
     assert_eq!(count, 2);
-    assert!(matches!(pending.pop_front(), Some(Command::Pause)));
+    assert!(matches!(
+        pending.pop_front(),
+        Some(WorkerCommand {
+            command: Command::Pause,
+            serial: Some(3),
+        })
+    ));
 }
 
 #[test]
 fn seek_coalescing_preserves_intervening_transport_commands() {
     let (tx, rx) = mpsc::channel();
-    tx.send(Command::Pause).unwrap();
-    tx.send(Command::Seek(Duration::from_secs(30))).unwrap();
+    tx.send(Command::Pause.into()).unwrap();
+    tx.send(Command::Seek(Duration::from_secs(30)).into())
+        .unwrap();
     let mut pending = VecDeque::new();
-    let (position, count) = coalesce_seek_commands(Duration::from_secs(10), &rx, &mut pending);
+    let (position, _, count) =
+        coalesce_seek_commands(Duration::from_secs(10), None, &rx, &mut pending);
     assert_eq!((position, count), (Duration::from_secs(10), 1));
-    assert!(matches!(pending.pop_front(), Some(Command::Pause)));
+    assert!(matches!(
+        pending.pop_front(),
+        Some(WorkerCommand {
+            command: Command::Pause,
+            ..
+        })
+    ));
     assert!(
-        matches!(rx.recv().unwrap(), Command::Seek(position) if position == Duration::from_secs(30))
+        matches!(rx.recv().unwrap().command, Command::Seek(position) if position == Duration::from_secs(30))
     );
 }
 
@@ -258,15 +397,6 @@ fn distinguishes_truncated_streams_from_natural_ends() {
 }
 
 #[test]
-fn buffer_progress_maps_cached_bytes_to_duration() {
-    let progress = BufferProgress::new(25, Some(100));
-    assert_eq!(
-        progress.buffered_duration(Duration::from_secs(200)),
-        Duration::from_secs(50)
-    );
-}
-
-#[test]
 fn synthetic_stall_silence_does_not_advance_the_track_position() {
     let control = StreamControl::new(false);
     let sample_rate = SampleRate::new(1_000).unwrap();
@@ -295,111 +425,11 @@ fn synthetic_stall_silence_does_not_advance_the_track_position() {
 }
 
 #[test]
-fn completed_cache_is_read_without_network_access() {
-    let cache_dir = std::env::temp_dir().join(format!(
-        "navidrome-audio-cache-test-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::create_dir_all(&cache_dir).unwrap();
-    let (complete_path, _) = cache_paths(&cache_dir, "server:song-1");
-    fs::write(&complete_path, b"cached audio bytes").unwrap();
-
-    let client = Client::new();
-    let mut reader = HttpRangeReader::open(
-        client,
-        "http://127.0.0.1:1/unreachable".to_string(),
-        &cache_dir,
-        "server:song-1",
-    )
-    .unwrap();
-    let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).unwrap();
-
-    assert_eq!(bytes, b"cached audio bytes");
-    drop(reader);
-    fs::remove_dir_all(cache_dir).unwrap();
-}
-
-#[test]
-fn cache_write_failure_falls_back_to_network_playback() {
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0_u8; 1024];
-        let _ = stream.read(&mut request).unwrap();
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\naudio")
-            .unwrap();
-    });
-    let invalid_cache_dir = std::env::temp_dir().join(format!(
-        "navidrome-audio-cache-file-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::write(&invalid_cache_dir, b"not a directory").unwrap();
-
-    let mut reader = HttpRangeReader::open(
-        Client::new(),
-        format!("http://{address}/audio"),
-        &invalid_cache_dir,
-        "server:song-1",
-    )
-    .unwrap();
-    let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).unwrap();
-
-    assert_eq!(bytes, b"audio");
-    drop(reader);
-    server.join().unwrap();
-    fs::remove_file(invalid_cache_dir).unwrap();
-}
-
-#[test]
 fn accepts_small_transcode_length_estimation_errors_only_near_the_end() {
     assert!(near_estimated_end(9_399_881, 9_623_552));
     assert!(near_estimated_end(95, 100));
     assert!(!near_estimated_end(94, 100));
     assert!(!near_estimated_end(0, 0));
-}
-
-#[test]
-fn detects_transcoded_streams_without_logging_authentication_data() {
-    assert!(is_transcoded_stream(
-        "https://example.test/rest/stream.view?id=song-1&maxBitRate=320&t=secret"
-    ));
-    assert!(!is_transcoded_stream(
-        "https://example.test/rest/stream.view?id=song-1&t=secret"
-    ));
-    assert!(!is_transcoded_stream("not a url"));
-}
-
-#[test]
-fn cache_paths_are_stable_and_server_specific() {
-    let cache_dir = Path::new("cache");
-    let first = cache_paths(cache_dir, "https://one.example:song-1");
-    let same = cache_paths(cache_dir, "https://one.example:song-1");
-    let other_server = cache_paths(cache_dir, "https://two.example:song-1");
-
-    assert_eq!(first, same);
-    assert_ne!(first, other_server);
-    assert_eq!(
-        first.0.extension().and_then(|value| value.to_str()),
-        Some("audio")
-    );
-    assert_eq!(
-        first.1.extension().and_then(|value| value.to_str()),
-        Some("part")
-    );
 }
 
 #[test]
@@ -491,29 +521,4 @@ fn normalizes_each_song_before_it_enters_the_shared_player_queue() {
         (96_000.0_f64 - second_count as f64).abs() < 4096.0,
         "96k song produced {second_count} samples (expected ~96000)"
     );
-}
-
-#[test]
-fn temporary_decoder_starvation_outputs_silence_instead_of_ending() {
-    let (sender, receiver) = mpsc::sync_channel(1);
-    let shared_error = Arc::new(Mutex::new(None));
-    let mut source = BufferedStreamSource {
-        control: StreamControl::new(false),
-        receiver,
-        queued: VecDeque::new(),
-        current: Vec::new().into_iter(),
-        channels: ChannelCount::new(2).unwrap(),
-        sample_rate: SampleRate::new(48_000).unwrap(),
-        duration: Some(Duration::from_secs(180)),
-        producer_finished: false,
-        terminal_error: None,
-        shared_error: Arc::clone(&shared_error),
-        last_data: Instant::now(),
-        silence_remaining: 0,
-    };
-
-    assert_eq!(source.next(), Some(0.0));
-    assert_eq!(source.next(), Some(0.0));
-    assert!(shared_error.lock().unwrap().is_none());
-    drop(sender);
 }

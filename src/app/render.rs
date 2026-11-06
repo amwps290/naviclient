@@ -1,25 +1,23 @@
 //! GPUI 主窗口渲染循环与顶层布局。
 
+use super::view_helpers::compact_window_layout;
 use super::*;
 
 impl Render for NavidromeApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let playback = self.audio.state();
+        let playback = self.playback_for_display();
         let cover = self
             .state
             .now_playing
             .as_ref()
             .and_then(|song| song.cover_art.as_ref())
-            .and_then(|id| self.state.covers.get(id))
+            .and_then(|id| self.state.covers.image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
-        let animate_cover = self.state.view == View::NowPlaying
-            && !self.mini_mode
-            && !self.state.settings_open
-            && playback.active
-            && !playback.paused
-            && window.is_visible();
+        let animate_cover = self
+            .playback_presentation()
+            .animate_cover(&playback, window.is_visible());
         self.vinyl_cover
             .prepare(cover, animate_cover, &self.runtime, window);
         let progress = playback
@@ -38,21 +36,12 @@ impl Render for NavidromeApp {
             }
         });
 
-        if self.mini_mode {
-            // Lock the mini window to its target size: if the user drags a border
-            // to resize it, snap it back on the next frame.
-            if let Some(target) = self.mini_target_size {
-                let viewport = window.viewport_size();
-                let resized = (viewport.width - target.width).abs() > px(1.0)
-                    || (viewport.height - target.height).abs() > px(1.0);
-                if resized {
-                    window.resize(target);
-                }
-            }
+        if self.mini_window.is_mini() {
+            self.sync_mini_window_size(window);
             return self.render_mini(window, cx);
         }
 
-        let settings_open = self.state.settings_open;
+        let settings_open = self.state.settings.open;
         let viewport_width = f32::from(window.viewport_size().width);
         // 900px 级窗口采用结构化紧凑模式：侧栏只保留图标，释放宽度给
         // 内容和播放器；用户保存的展开偏好在窗口恢复宽度后自动回来。
@@ -164,30 +153,15 @@ impl Render for NavidromeApp {
                                         .child(t!("LIBRARY")),
                                 )
                             })
-                            .child(self.nav_button(
-                                View::Home,
-                                t!("Home"),
-                                AppIcon::Home,
-                                None,
-                                sidebar_collapsed,
-                                cx,
-                            ))
+                            .child(self.nav_button(View::Home, None, sidebar_collapsed, cx))
                             .child(self.nav_button(
                                 View::Favorites,
-                                t!("Favorites"),
-                                AppIcon::Heart,
-                                Some(
-                                    self.state.favorites.artists.len()
-                                        + self.state.favorites.albums.len()
-                                        + self.state.favorites.songs.len(),
-                                ),
+                                Some(self.state.favorites.total()),
                                 sidebar_collapsed,
                                 cx,
                             ))
                             .child(self.nav_button(
                                 View::Artists,
-                                t!("Artists"),
-                                AppIcon::Artists,
                                 Some(self.state.artists.len()),
                                 sidebar_collapsed,
                                 cx,
@@ -195,12 +169,11 @@ impl Render for NavidromeApp {
                             .child(
                                 self.nav_button(
                                     View::Albums,
-                                    t!("Albums"),
-                                    AppIcon::Albums,
                                     // 专辑列表是增量分页加载，只有拉尽后总数才可信；
                                     // 拉尽前不显示，避免给出误导性的“当前页数”。
                                     self.state
-                                        .albums_exhausted
+                                        .albums
+                                        .exhausted()
                                         .then_some(self.state.albums.len()),
                                     sidebar_collapsed,
                                     cx,
@@ -208,28 +181,17 @@ impl Render for NavidromeApp {
                             )
                             .child(self.nav_button(
                                 View::Genres,
-                                t!("Genres"),
-                                AppIcon::Genres,
                                 Some(self.state.genres.len()),
                                 sidebar_collapsed,
                                 cx,
                             ))
                             .child(self.nav_button(
                                 View::Playlists,
-                                t!("Playlists"),
-                                AppIcon::Playlists,
-                                Some(self.state.playlists.len()),
+                                Some(self.state.playlists.items().len()),
                                 sidebar_collapsed,
                                 cx,
                             ))
-                            .child(self.nav_button(
-                                View::Search,
-                                t!("Search"),
-                                KitIcon::Search,
-                                None,
-                                sidebar_collapsed,
-                                cx,
-                            ))
+                            .child(self.nav_button(View::Search, None, sidebar_collapsed, cx))
                             .child(self.sidebar_collapse_toggle(
                                 sidebar_collapsed,
                                 auto_collapsed_sidebar,

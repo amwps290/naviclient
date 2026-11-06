@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -20,19 +20,18 @@ use gpui_kit::component::{
     slider::{Slider, SliderEvent, SliderState, SliderValue},
     switch::Switch,
     tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable,
-    Sizable, Theme, ThemeMode, TitleBar, WindowExt,
+    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Theme,
+    ThemeMode, TitleBar, WindowExt,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, size, uniform_list, Animation, AnimationExt, App, AppContext, Context, Entity,
+    relative, rems, uniform_list, Animation, AnimationExt, App, AppContext, Context, Entity,
     FontWeight, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
     IntoElement, Keystroke, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels,
-    Render, ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement, Styled,
+    Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled,
     StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
 };
-use rand::{seq::SliceRandom, thread_rng};
 use rust_i18n::t;
 use smol::Timer;
 use tokio::runtime::Runtime;
@@ -49,14 +48,13 @@ use crate::global_shortcuts::{
 };
 use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
 use crate::models::{
-    normalize_queue_origins, Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey,
-    FavoriteKind, Favorites, Genre, LanguagePreference, ListeningHistory, Lyrics, PlayModes,
-    PlaybackSession, Playlist, QueueOrigin, RepeatMode, SearchResults, ServerInfo, ServerProfile,
-    ShortcutAction, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
+    Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
+    Genre, LanguagePreference, PlayModes, PlaybackQueue, PlaybackSession, Playlist, QueueEntry,
+    QueueOrigin, RepeatMode, SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song,
+    ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 use crate::msg::{error_message, Msg};
 use crate::notify;
-use crate::recommendation::DailyMixSnapshot;
 use crate::secrets;
 use crate::single_instance;
 use crate::tray::{self, TrayCommand};
@@ -65,48 +63,184 @@ use crate::vinyl::VinylCover;
 #[cfg(test)]
 mod tests;
 
+mod album_details;
+mod album_grid_view;
+mod album_paging;
+mod appearance_settings_view;
+mod artist_details;
+mod artist_grid_view;
+mod artist_library;
+mod artwork_helpers;
 mod artwork_view;
+mod audio_output;
+mod auto_continue;
+mod auto_continue_state;
 mod browse_view;
+mod connection;
 mod content_view;
+mod cover_state;
+mod cover_texture_state;
+mod cover_textures;
 mod covers;
+mod daily_mix;
+mod daily_mix_state;
+mod daily_mix_view;
 mod desktop;
+mod desktop_settings_view;
+mod desktop_state;
 mod detail_view;
-mod helpers;
+mod equalizer;
+mod equalizer_state;
+mod equalizer_view;
+mod favorite_button_view;
+mod favorites;
+mod genre_library;
+mod home_feature_view;
+mod home_library;
+mod home_section_view;
 mod home_view;
 mod import;
+mod import_flow;
+mod import_view;
 mod library;
+mod library_helpers;
+mod library_navigation;
+mod library_playback;
+mod library_requests;
+mod library_skeleton_view;
 mod library_view;
+mod listening;
+mod listening_state;
+mod loudness;
+mod loudness_state;
 mod lyrics;
+mod lyrics_state;
+mod media_command_state;
+mod media_commands;
 mod media_controls;
 mod message_polling;
+mod metadata_links;
 mod mini_player_view;
+mod mini_window;
+mod mini_window_state;
+mod navigation;
 mod now_playing_view;
+mod paged_collection;
 mod platform_window;
 mod playback;
+mod playback_display;
 mod playback_lifecycle;
+mod playback_logic;
+mod playback_modes;
+mod playback_occurrence;
+mod playback_preload;
+mod playback_reconnect;
+mod playback_session;
+mod playback_settings_view;
+mod playback_start;
+mod playback_transport;
+mod player_controls_view;
+mod player_progress_view;
 mod player_view;
+mod playlist_dialog;
+mod playlist_dialog_view;
+mod playlist_edit_state;
+mod playlist_library;
 mod playlist_list_view;
+mod playlist_loading;
 mod playlists;
+mod polling;
+mod preferences;
+mod preload_state;
 mod queue;
+mod queue_edits;
+mod queue_logic;
+mod queue_navigation;
 mod queue_view;
+mod radio;
+mod radio_state;
 mod recommendations;
+mod redraw_state;
 mod render;
+mod scrolling_text_state;
+mod scrolling_text_view;
+mod search;
+mod search_state;
 mod search_view;
+mod server_cache;
+mod server_connection;
+mod server_edit;
+mod server_form_view;
+mod server_lifecycle;
+mod server_list_view;
+mod server_profile_edit;
+mod server_profiles;
+mod server_removal_state;
+mod server_remove_dialog;
 mod server_settings_view;
-mod settings;
+mod session_state;
+mod settings_navigation_view;
+mod settings_overlay;
+mod settings_state;
 mod settings_view;
-mod shell_view;
+mod shortcut_bindings;
+mod shortcut_config;
+mod shortcut_edit;
+mod shortcut_repeat;
+mod shortcut_row_view;
 mod shortcut_settings_view;
 mod shortcuts;
+mod sidebar_view;
+mod song_info_view;
+mod song_list;
+mod song_menu;
+mod song_playback;
+mod song_row_actions;
+mod song_row_view;
+mod song_scope;
+mod song_selection;
 mod song_view;
 mod startup;
 mod state;
-use self::import::{ImportStage, ImportUi};
-use helpers::*;
+mod titlebar_view;
+mod view_helpers;
+mod view_state;
+mod volume;
+mod volume_state;
+mod volume_view;
+
+use self::import::ImportUi;
+pub(crate) use auto_continue_state::AutoContinueRequest;
+pub(crate) use cover_state::CoverRequest;
+use cover_texture_state::CoverTextures;
+pub(crate) use daily_mix_state::DailyMixRequest;
+use desktop_state::DesktopState;
+use equalizer_state::EqualizerState;
+pub(crate) use favorites::FavoriteChange;
+pub(crate) use home_library::HomeAlbumSection;
+use import_flow::ImportStage;
+pub(crate) use library_playback::LibraryPlaybackRequest;
+pub(crate) use library_requests::LibraryRequest;
+use library_requests::LibraryRequests;
+use mini_window_state::MiniWindowState;
+pub(crate) use paged_collection::PageRequest;
+use paged_collection::PageRequests;
 use platform_window::*;
-use playlists::{PlaylistUi, SongMenuContext};
-pub(crate) use state::SongListMulti;
-use state::{AppState, Reconnect, SettingsSection, RECOVERY_CONFIRMATION};
+use playback_reconnect::PlaybackReconnect;
+use playlist_dialog::PlaylistUi;
+use playlist_edit_state::PlaylistEditOrigin;
+use preload_state::PreloadState;
+pub(crate) use radio_state::RadioRequest;
+use scrolling_text_state::TextWidthCache;
+use search_state::SearchFilter;
+use server_removal_state::ServerRemovalState;
+use session_state::SessionState;
+use settings_state::{SettingsSection, ShortcutRecording};
+use shortcut_repeat::ShortcutRepeatGuard;
+use song_scope::SongScope;
+use state::AppState;
+use view_state::{QueueDrawerTab, View};
+use volume_state::VolumeState;
 
 /// 全局视觉 token 修正：普通控件统一 8px，卡片/弹窗统一 12px；
 /// 同时提高亮色主题的小号次要文字对比度。
@@ -138,8 +272,7 @@ pub struct NavidromeApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     audio: AudioHandle,
-    next_preload: Option<NextPreload>,
-    preload_serial: u64,
+    preload: PreloadState,
     media_session: MediaSession,
     global_shortcuts: GlobalShortcutManager,
     default_cover: Arc<GpuiImage>,
@@ -155,79 +288,46 @@ pub struct NavidromeApp {
     name_input: Entity<InputState>,
     playback_slider: Entity<SliderState>,
     volume_slider: Entity<SliderState>,
-    muted: bool,
-    volume_before_mute: f32,
-    volume_save_generation: u64,
-    volume_panel_open: bool,
-    volume_panel_dragging: bool,
-    volume_panel_generation: u64,
+    /// Volume interactions survive library/server state resets.
+    volume: VolumeState,
     lyrics_scroll_handle: ScrollHandle,
-    lyrics_scroll_target: Option<Pixels>,
     content_scroll_handle: ScrollHandle,
     /// 设置卡片内容区的滚动句柄。
     settings_scroll: ScrollHandle,
     /// 每个歌曲列表作用域的 uniform_list 滚动句柄：视口虚拟化 + 按需预取封面。
-    song_list_scrolls: RefCell<HashMap<&'static str, UniformListScrollHandle>>,
+    song_list_scrolls: RefCell<HashMap<SongScope, UniformListScrollHandle>>,
     /// 待发出的 Toast 通知：错误站点大多拿不到 Window，先入队，
     /// 由 UI 循环统一用 window.push_notification 冲刷。
     pending_notifications: Vec<(NotificationType, SharedString)>,
     cover_slots: Arc<tokio::sync::Semaphore>,
-    /// GPUI 会把 `Image` 解码结果保留在全局资产缓存和窗口纹理中；这里只
-    /// 记录最近实际渲染过的图片 id，并把超限项排队到 UI 轮询器显式释放。
-    cover_image_lru: RefCell<VecDeque<u64>>,
-    pending_cover_image_evictions: RefCell<VecDeque<u64>>,
-    /// 状态整体重置或同一 id 的源图片被替换时，仍需保留图片句柄到下一次
-    /// UI 轮询，才能从 GPUI 全局资产缓存与窗口 atlas 中成对移除。
-    pending_cover_asset_releases: RefCell<VecDeque<Arc<GpuiImage>>>,
-    title_width_cache: RefCell<HashMap<(u32, FontWeight, SharedString), Pixels>>,
+    /// Retention and pending texture/asset releases survive server state resets.
+    cover_textures: RefCell<CoverTextures>,
+    text_width_cache: RefCell<TextWidthCache>,
     tray_rx: Receiver<TrayCommand>,
     /// 切歌系统通知发送器（同 ID 替换防堆积）。
     track_notifier: notify::TrackNotifier,
-    /// 上一次通知过的曲目 id（曲目变化时才发通知）。
-    last_notified_track: Option<String>,
-    /// 上一次同步给托盘的暂停状态。
-    last_tray_paused: Option<bool>,
+    /// Track notification and tray deduplication survive library state resets.
+    desktop: DesktopState,
     main_hwnd: Option<isize>,
     quitting: Arc<AtomicBool>,
-    last_shortcut: String,
-    last_shortcut_at: std::time::Instant,
-    resume_position: Option<Duration>,
+    /// Repeated-key suppression survives library/server state resets.
+    shortcut_repeat: ShortcutRepeatGuard,
+    session: SessionState,
+    server_cache_writer: config::ServerCacheWriter,
     /// 播放因网络/服务端问题中断后的自动重连计划。
-    reconnect: Option<Reconnect>,
-    /// 当前曲目已用掉的自动重连次数，以及断点位置；播放确实恢复前进后清零。
-    reconnect_attempts: Option<(String, u8, Duration)>,
-    last_session_save: std::time::Instant,
-    /// 当前本地收听事件及其实际前进时长（seek 跳跃不计入）。
-    listening_song_id: Option<String>,
-    listening_last_position: Duration,
-    listening_accumulated: Duration,
-    last_listening_history_save: std::time::Instant,
-    active_lyric_index: Option<usize>,
+    reconnect: PlaybackReconnect,
     _subscriptions: Vec<Subscription>,
-    mini_mode: bool,
-    restore_size: Option<Size<Pixels>>,
-    restore_maximized: bool,
-    mini_target_size: Option<Size<Pixels>>,
-    /// 迷你窗口滚轮调音量的闪光：进度线短暂显示音量，约 1 秒后恢复进度。
-    mini_volume_flash: Option<std::time::Instant>,
-    mini_volume_flash_generation: u64,
+    mini_window: MiniWindowState,
     /// 均衡器 10 段滑杆状态（设置页）。
     eq_sliders: Vec<Entity<SliderState>>,
-    /// 均衡器配置保存的防抖代次。
-    eq_save_generation: u64,
-    /// 每日精选生成代次；换一批、重试和切服务器都会作废旧结果。
-    daily_mix_generation: u64,
-    /// 艺术家热门歌曲请求代次；重复进入页面或重试时忽略迟到响应。
-    artist_top_songs_generation: u64,
-    /// 电台请求代次；新请求、手工队列编辑或切服务器都会作废旧结果。
-    radio_generation: u64,
-    /// `song:<id>` 或 `artist:<id>`，同时用于按钮加载状态和迟到结果校验。
-    radio_loading_key: Option<String>,
-    /// 自动续播生成代次和加载状态；任何手工队列意图都会使其失效。
-    auto_continue_generation: u64,
-    auto_continue_loading: bool,
-    /// 删除服务器的确认弹窗：（服务器 id， 显示名）。None 表示无弹窗。
-    server_remove_prompt: Option<(String, String)>,
+    /// Equalizer edits and persistence survive library/server state resets.
+    equalizer: EqualizerState,
+    /// 专辑与流派分页请求编号；切服务器时保留以隔离迟到响应。
+    album_page_requests: PageRequests,
+    /// 媒体库请求编号；切服务器时保留以隔离迟到响应。
+    library_requests: LibraryRequests,
+    /// 删除确认目标独立保存，不随服务器和页面状态重建而丢失。
+    server_removal: ServerRemovalState,
 }
 
 impl NavidromeApp {

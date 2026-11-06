@@ -2,6 +2,7 @@
 //! `views.rs`; this module owns the drawer-specific header, tabs, empty states
 //! and queue actions so the main view router does not absorb another large UI.
 
+use super::artwork_helpers::{accent_foreground, adjust_lightness};
 use super::*;
 
 impl NavidromeApp {
@@ -15,7 +16,7 @@ impl NavidromeApp {
         let tab = self.state.queue_drawer_tab;
         let visible_count = match tab {
             QueueDrawerTab::UpNext => self.state.queue.len(),
-            QueueDrawerTab::History => self.state.playback_history.len(),
+            QueueDrawerTab::History => self.state.listening.recent_songs().len(),
         };
 
         v_flex()
@@ -45,22 +46,22 @@ impl NavidromeApp {
                         v_flex()
                             .flex_1()
                             .min_h_0()
-                            .child(self.render_song_list("queue", true, cx)),
+                            .child(self.render_song_list(SongScope::Queue, cx)),
                     )
                 },
             )
             .when(
-                tab == QueueDrawerTab::History && self.state.playback_history.is_empty(),
+                tab == QueueDrawerTab::History && self.state.listening.recent_songs().is_empty(),
                 |this| this.child(self.render_queue_empty_state(true, cx)),
             )
             .when(
-                tab == QueueDrawerTab::History && !self.state.playback_history.is_empty(),
+                tab == QueueDrawerTab::History && !self.state.listening.recent_songs().is_empty(),
                 |this| {
                     this.child(
                         v_flex()
                             .flex_1()
                             .min_h_0()
-                            .child(self.render_song_list("history", false, cx)),
+                            .child(self.render_song_list(SongScope::History, cx)),
                     )
                 },
             )
@@ -169,7 +170,7 @@ impl NavidromeApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if self.auto_continue_loading {
+                            .child(if self.state.auto_continue.loading() {
                                 t!("Finding more music…")
                             } else {
                                 t!("Keep playing recommendations when the queue ends")
@@ -259,7 +260,7 @@ impl NavidromeApp {
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.state.queue.is_empty() {
-                            this.play_song_at_scope("queue", 0);
+                            this.play_song_at_scope(SongScope::Queue, 0);
                         }
                         cx.notify();
                     })),
@@ -286,14 +287,9 @@ impl NavidromeApp {
                     .tooltip(t!("Save as playlist"))
                     .ghost()
                     .small()
-                    .disabled(self.playlist_ui.busy || self.api.is_none())
+                    .disabled(self.state.playlists.editing() || self.api.is_none())
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.name_playlist(
-                            None,
-                            crate::playlist::song_ids(&this.state.queue),
-                            window,
-                            cx,
-                        );
+                        this.name_playlist(None, this.state.queue.song_ids(), window, cx);
                     })),
             )
             .child(div().flex_1())

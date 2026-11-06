@@ -1,7 +1,6 @@
 use std::sync::{mpsc, Arc, RwLock};
 use std::time::Duration;
 
-use gpui_kit::Image;
 use windows::core::{factory, HSTRING};
 use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Media::{
@@ -18,17 +17,8 @@ use windows::Win32::System::WinRT::{
     ISystemMediaTransportControlsInterop, RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED,
 };
 
-use super::{track_id, MediaCommand, MediaUpdate};
-
-#[derive(Clone, PartialEq, Eq)]
-struct TrackSnapshot {
-    id: String,
-    title: String,
-    artist: String,
-    album: String,
-    duration: Duration,
-    cover_id: Option<u64>,
-}
+use super::state::{same_track, PlaybackStatus, Snapshot, Track};
+use super::{MediaCommand, MediaUpdate};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct TimelineSnapshot {
@@ -42,7 +32,7 @@ struct Inner {
     button_token: i64,
     position_token: Option<i64>,
     current_track: Arc<RwLock<Option<String>>>,
-    track: Option<TrackSnapshot>,
+    track: Option<Arc<Track>>,
     status: MediaPlaybackStatus,
     timeline: Option<TimelineSnapshot>,
     can_play: bool,
@@ -231,46 +221,32 @@ impl Inner {
         update: MediaUpdate<'_>,
         restored_seek_serial: u64,
     ) -> windows::core::Result<()> {
-        let track = update.song.map(|song| TrackSnapshot {
-            id: track_id(update.server, &song.id),
-            title: song.title.clone(),
-            artist: song.artist.clone(),
-            album: song.album.clone(),
-            duration: update.playback.duration.unwrap_or_else(|| {
-                Duration::from_secs(song.duration.unwrap_or_default().max(0) as u64)
-            }),
-            cover_id: update.cover.map(|cover| cover.id),
-        });
+        let snapshot = Snapshot::project(self.track.as_ref(), &update, restored_seek_serial);
+        let track = snapshot.track;
 
-        if self.track != track {
-            self.update_metadata(track.as_ref(), update.cover)?;
+        if !same_track(&self.track, &track) {
+            self.update_metadata(track.as_deref())?;
             *self
                 .current_track
                 .write()
                 .unwrap_or_else(|error| error.into_inner()) =
-                track.as_ref().map(|track| track.id.clone());
+                track.as_ref().map(|track| track.path.clone());
             self.track = track.clone();
             self.timeline = None;
         }
 
-        let status = if track.is_none() || update.playback.ended || update.playback.error.is_some()
-        {
-            MediaPlaybackStatus::Stopped
-        } else if update.playback.active && !update.playback.paused {
-            MediaPlaybackStatus::Playing
-        } else {
-            MediaPlaybackStatus::Paused
+        let status = match snapshot.status {
+            PlaybackStatus::Stopped => MediaPlaybackStatus::Stopped,
+            PlaybackStatus::Paused => MediaPlaybackStatus::Paused,
+            PlaybackStatus::Playing => MediaPlaybackStatus::Playing,
         };
         if self.status != status {
             self.controls.SetPlaybackStatus(status)?;
             self.status = status;
         }
 
-        let can_play = track.is_some() && update.can_play;
-        let can_pause = track.is_some()
-            && update.playback.active
-            && !update.playback.ended
-            && update.playback.error.is_none();
+        let can_play = track.is_some() && snapshot.can_play;
+        let can_pause = snapshot.can_pause;
         if self.can_play != can_play {
             self.controls.SetIsPlayEnabled(can_play)?;
             self.can_play = can_play;
@@ -280,13 +256,13 @@ impl Inner {
             self.controls.SetIsStopEnabled(can_pause)?;
             self.can_pause = can_pause;
         }
-        if self.can_next != update.can_next {
-            self.controls.SetIsNextEnabled(update.can_next)?;
-            self.can_next = update.can_next;
+        if self.can_next != snapshot.can_next {
+            self.controls.SetIsNextEnabled(snapshot.can_next)?;
+            self.can_next = snapshot.can_next;
         }
-        if self.can_previous != update.can_previous {
-            self.controls.SetIsPreviousEnabled(update.can_previous)?;
-            self.can_previous = update.can_previous;
+        if self.can_previous != snapshot.can_previous {
+            self.controls.SetIsPreviousEnabled(snapshot.can_previous)?;
+            self.can_previous = snapshot.can_previous;
         }
 
         let enabled = track.is_some();
@@ -298,14 +274,11 @@ impl Inner {
         if let Some(track) = track {
             let timeline = TimelineSnapshot {
                 duration: track.duration,
-                position_second: update.position.as_secs(),
-                seek_serial: update
-                    .playback
-                    .seek_serial
-                    .wrapping_add(restored_seek_serial),
+                position_second: snapshot.position.as_secs(),
+                seek_serial: snapshot.seek_serial,
             };
             if self.timeline_supported && self.timeline != Some(timeline) {
-                match self.update_timeline(track.duration, update.position) {
+                match self.update_timeline(track.duration, snapshot.position) {
                     Ok(()) => self.timeline = Some(timeline),
                     Err(error) => {
                         self.timeline_supported = false;
@@ -317,11 +290,7 @@ impl Inner {
         Ok(())
     }
 
-    fn update_metadata(
-        &mut self,
-        track: Option<&TrackSnapshot>,
-        cover: Option<&Arc<Image>>,
-    ) -> windows::core::Result<()> {
+    fn update_metadata(&mut self, track: Option<&Track>) -> windows::core::Result<()> {
         let updater = self.controls.DisplayUpdater()?;
         updater.ClearAll()?;
         self.thumbnail_stream = None;
@@ -336,7 +305,7 @@ impl Inner {
         properties.SetArtist(&HSTRING::from(track.artist.as_str()))?;
         properties.SetAlbumTitle(&HSTRING::from(track.album.as_str()))?;
 
-        if let Some(cover) = cover {
+        if let Some(cover) = &track.cover {
             match thumbnail_from_bytes(&cover.bytes) {
                 Ok((reference, stream)) => {
                     updater.SetThumbnail(&reference)?;

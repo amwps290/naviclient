@@ -49,7 +49,10 @@ JavaScript runtime.
   placeholder set
 - Responsive album and artist grids with virtualized-ready component foundations
 - Audio playback with play/pause, stop, previous/next, seek, and queue
-  progression
+  progression. Controls respond immediately to accepted commands; listening
+  history, track notifications, Scrobble thresholds and retry confirmation wait
+  for connected output and observed progress. Failed startup buffering creates
+  no listening event or track notification.
 - Stall detection and recovery: when audio stops arriving (bad Wi-Fi, overloaded
   server, idle-timeout proxy) the player bar and mini player switch to a
   "Buffering Ns" state instead of looking frozen, and playback resumes from the
@@ -173,8 +176,10 @@ JavaScript runtime.
   selects a range from the keyboard cursor, Ctrl+A selects all, Esc clears.
   A floating action bar offers play / play-next / add-to-queue / add-to-
   playlist / favorite (smart direction) for the whole selection, and Enter
-  plays it. Queue rows keep in-place semantics: batch play just jumps to the
-  first selected position instead of rebuilding the queue
+  plays it. Queue batch play and Enter jump to the first selected position and
+  preserve the complete queue. Selection follows queue entries through
+  insertions and reordering, including duplicate songs; removing selected entries
+  keeps the surviving selections and clears a removed cursor
 - Shift+Up/Down extends the multi-selection around its anchor (folding back past
   the anchor shrinks it naturally), and “Song info…” in the song menu opens a
   read-only dialog with track, disc, duration, format (suffix, bit rate, file
@@ -207,7 +212,8 @@ JavaScript runtime.
   Linux tray menu refreshes with the next playback-state update
 - Navidrome-synced favorites for artists, albums, and songs
 - Track-change desktop notifications on Linux (D-Bus) with the cached cover,
-  title, artist and album; rapid switching replaces the previous notification
+  title, artist and album; notifications send in the background, and rapid
+  switching keeps the latest pending track and replaces the previous notification
   instead of stacking, and failures are silently ignored
 - Linux system tray (StatusNotifierItem via ksni): left click toggles
   playback, the menu offers play/pause, previous, next, show window and exit,
@@ -308,20 +314,103 @@ be reflected in the former before implementation starts.
 UI code imports GPUI through `gpui_kit` and styled components through
 `gpui_kit::component`. Kit initializes the platform and window root; the
 application asset source combines custom player icons with Kit's built-in icons.
+Application icon loading and enumeration use one embedded-file registry, keeping
+custom asset precedence and the existing icon paths.
 
-- `src/api.rs` - Subsonic API client, authentication, and JSON models parsing
-- `src/audio.rs` - background audio worker using `rodio`
-- `src/audio/preload.rs` - cancellable next-track preparation and decoder suspension
-- `src/audio/gapless.rs` - continuous output, track-boundary events and atomic cancellation
-- `src/app.rs` - GPUI application state, navigation, library views, and player
+Audio implementation modules import dependencies explicitly from their owning
+modules rather than relying on parent wildcard imports. Decoder buffer sizes,
+startup/stall timing, HTTP retry counts and disk-cache capacity live with their
+implementations; the facade does not re-export internal stream types for them.
+
+Shared decode-completion flags and cache-byte counters keep their atomic fields
+private. Consumers use narrow query methods; publication retains the existing
+acquire/release ordering for completion and relaxed ordering for byte progress.
+
+- `src/api.rs` and `src/api/` - Subsonic client facade, authentication, and API modules
+- `src/api/lyrics.rs` and `src/api/lyrics/response.rs` - capability-aware lyrics requests and legacy fallback, separate from pure variant selection, timestamp offsets and translation pairing; HTTP contract tests preserve request order and empty-result/error handling
+- `src/audio.rs` - public audio handle, shared playback state and worker startup; no HTTP, file-cache or decoder implementation imports
+- `src/audio/worker.rs` - worker startup, loop-owned playback resources and ordered playback phases
+- `src/audio/worker/commands.rs` and `src/audio/worker/playback.rs` - command dispatch and seek coalescing, prepared-stream attachment, preloading eligibility and playback publication; shared worker ownership retains cancellation and device teardown order
+- `src/audio/transport.rs` - pending playback intent, shared command ordering, worker acknowledgements and actual output progress for listening/reporting
+- `src/audio/device_output.rs` - owned device stream, player and format; successful replacement before releasing old output, with stable EQ and gapless handles
+- `src/audio/output_track.rs` - prepared-stream diagnostics and per-track loudness/gain/EQ/output-format assembly, with private source ownership and explicit sample consumption
+- `src/audio/eq.rs` and `src/audio/eq/shared.rs` - native-rate per-channel filtering and opaque shared settings/revision publication; readers copy changed settings before updating coefficients, and cloned handles survive output replacement
+- `src/audio/loudness_meter.rs` - cumulative raw-sample RMS/peak accounting and transparent source wrapping, separate from device discovery and output effects
+- `src/audio/decoder.rs` - decoder construction, bounded PCM production and terminal-result classification
+- `src/audio/buffered_stream.rs` - startup-buffer ownership, nonblocking playback consumption and stall timing
+- `src/audio/stream_control.rs` - shared cancellation, decoder sleeping/promotion and lifecycle guards, preparation reuse waits, monotonic arrival timing, synthetic silence and first I/O failure retention
+- `src/audio/preparation.rs` and `src/audio/preparation_state.rs` - foreground preparation ownership, cancellation on replacement/stop/shutdown, completion identity, wait timing, pause intent and thread creation failures
+- `src/audio/track_state.rs` - current stream source, decode diagnostics, gapless clock boundaries and shared playback snapshots
+- `src/audio/track_transition.rs` - reserved-track start/cancel arbitration, immutable boundary/loudness metadata and once-only event consumption, separate from sample-chain ownership
+- `src/audio/stream_cache.rs` - disk-cache ownership, contiguous byte progress, partial-file reuse, speculative isolation and verified publication
+- `src/audio/http_stream.rs` - HTTP byte cursors, cache reuse, range reads and retries
+- `src/audio/stream_response.rs` - validated audio responses, range bounds, source length checks and bounded server-error diagnostics
+- `src/audio/next_track.rs` - deferred reservations, prepared-stream reuse, armed handoff ownership and worker shutdown cleanup
+- `src/audio/preload.rs` - next-track job scheduling, stale-result rejection and prepared-stream reuse, separate from shared stream control
+- `src/audio/gapless.rs` - continuous output and sample-accurate prepared-track handoff, using the separate transition state machine
+- `src/playback_timeline.rs` - shared song duration selection and bounded, saturating relative seeks for UI and system media controls
+- `src/app.rs` and `src/app/` - GPUI orchestration, views, and isolated feature state
+- `src/app/titlebar_view.rs`, `src/app/sidebar_view.rs`, `src/app/navigation.rs` and `src/app/view_state.rs` - window navigation, shared section presentation, isolated navigation/overlay transitions and detail-page relationships
+- `src/app/home_view.rs`, `src/app/home_feature_view.rs`, `src/app/home_section_view.rs` and `src/app/daily_mix_view.rs` - Home composition, listening feature, lazy album sections and Daily Mix controls
+- `src/app/player_controls_view.rs` and `src/app/favorite_button_view.rs` - shared player styles, shuffle/repeat controls and favorite buttons
+- `src/app/player_view.rs` - responsive player bar layout, current-track artwork, metadata, navigation and accessory controls
+- `src/app/player_progress_view.rs` - playback progress, buffering feedback and playback retry
+- `src/app/volume_view.rs` and `src/app/volume.rs` - volume panel rendering and shared wheel-volume dispatch for the player bar and mini player
+- `src/app/library_view.rs` and `src/app/library_skeleton_view.rs` - shared page controls and loading placeholders
+- `src/app/browse_view.rs` - library browse pages, local sort menus and genre grids
+- `src/app/album_grid_view.rs` and `src/app/artist_grid_view.rs` - reusable library artwork cards
+- `src/app/metadata_links.rs` and `src/app/library_navigation.rs` - artist and album links sharing small navigation projections with song menus
+- `src/app/equalizer_view.rs` - player equalizer popover, presets and band controls
+- `src/app/scrolling_text_view.rs` and `src/app/scrolling_text_state.rs` - scrolling labels, bounded font-aware measurement cache and animation timing
+- `src/app/settings_view.rs`, `src/app/settings_overlay.rs` and `src/app/settings_navigation_view.rs` - settings composition, overlay and shared section presentation
+- `src/app/playback_settings_view.rs`, `src/app/desktop_settings_view.rs` and `src/app/appearance_settings_view.rs` - section-specific preference controls
+- `src/app/shortcuts.rs`, `src/app/shortcut_edit.rs` and `src/app/shortcut_config.rs` - key dispatch, recording/conflict workflows and shortcut-only save-failure rollback
+- `src/global_shortcuts.rs` and `src/global_shortcuts/` - shared binding validation and parsed registration keys, owned registration replacement and cleanup, and a separate Windows API/message-loop adapter
+- `src/app/shortcut_repeat.rs` - matched-key repeat suppression with a shared 250ms clock, preserving selection-movement exemptions across library resets
+- `src/app/shortcut_settings_view.rs` and `src/app/shortcut_row_view.rs` - shortcut section composition and shared app/global binding rows, preserving platform restrictions and feedback
+- `src/app/server_settings_view.rs`, `src/app/server_list_view.rs` and `src/app/server_form_view.rs` - connection status, server rows and edit form
+- `src/app/server_profiles.rs`, `src/app/server_lifecycle.rs` and `src/app/server_cache.rs` - profile changes, outgoing-server persistence, reconnect resets and restoration of server-scoped caches
+- `src/app/server_profile_edit.rs`, `src/app/server_remove_dialog.rs` and `src/app/server_removal_state.rs` - server form workflows, removal dialog rendering and events, and single-use removal targets independent of reconnecting library state
+- `src/app/queue_edits.rs` - owned queue additions, selected-index corrections, shuffle-history remapping and removal outcomes
+- `src/app/queue_navigation.rs` - borrowed queue progression, controllable shuffle choices and prepared forward/backward history shared with preload targeting
+- `src/app/playback_modes.rs` - shared shuffle/repeat edits and mode-only persistence, retaining requested runtime modes on save failure and avoiding unchanged radio saves
+- `src/app/song_selection.rs` - scoped cursor, multi-selection, fixed range anchors and bounded remapping after list changes
+- `src/app/song_scope.rs` - seven typed list scopes shared by rendering, selection, scrolling, playback and menus, with stable IDs, page/drawer routing and layout rules
+- `src/app/song_playback.rs` - shared row, detail-page and multi-selection queue actions, validated playback plans and existing queue targeting; full-list appends retain scope origins while selected appends remain manual
+- `src/app/song_view.rs` and `src/app/song_row_view.rs` - virtualized list layout with its multi-selection toolbar, and individual song rows with their playing/hover indicators
+- `src/app/song_row_actions.rs` - shared row event dispatch with queue occurrence resolution for delayed clicks, moves, removals and menu opening
+- `src/app/song_info_view.rs` - read-only track metadata dialog
+- `src/app/playback_occurrence.rs` - playback identity, terminal handling and reporting once per occurrence
+- `src/app/playback_start.rs` - prepared stream requests and accepted queue, selection, shuffle-history and resume-position updates
+- `src/app/preload_state.rs` and `src/app/playback_preload.rs` - accepted next-track reservations, occurrence/quality reuse checks and one-time gapless event application
+- `src/app/session_state.rs` - prepared session restoration, server identity checks, bounded resume/display/save timelines and save throttling
+- `src/config/server_writer.rs` - serial background server-cache writes, one pending snapshot per server and data kind, retry ownership, flushes and cancellation before cache deletion
+- `src/config/server_writer/mailbox.rs` - private synchronization, retry deadlines and fresh-attempt receipts; immutable write tasks carry their own revision through completion, preserving newer pending snapshots
+- `src/app/polling.rs` and `src/app/redraw_state.rs` - background polling, playback redraw cadence, visibility recovery and shared cover animation eligibility
 - `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
-- `src/vinyl.rs` - progressive rotation frames, bounded texture cache, and animation timing
-- `src/media_session.rs` and `src/media_session/linux.rs` - shared media commands and Linux MPRIS integration
-- `src/playlist.rs` and `src/app/playlists.rs` - playlist edit validation, dialogs, and song menus
-- `src/recommendation.rs` - deterministic candidate scoring, de-duplication, recent-play deferral, and diversity constraints
-- `src/api/playlist_tests.rs` - HTTP contract tests for playlist editing
-- `src/models.rs` - shared API data structures
-- `src/config.rs` - persisted server settings
+- `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, progressive frame delivery and cancellation, and bounded background raster generation
+- `src/vinyl/rotation.rs` - texture-independent rotation timing and adjacent-frame selection, advancing only when both frames are drawable
+- `src/media_session.rs` and `src/media_session/` - shared media commands and snapshots, Linux MPRIS and Windows SMTC integration
+- `src/media_session/linux/interfaces.rs` and `src/media_session/linux/artwork.rs` - MPRIS interface contracts and connection-owned local artwork, with separate file preparation, publication, replacement and directory cleanup
+- `src/tray.rs` and `src/tray/` - shared commands and platform routing, backend-owned Linux SNI handles and Windows message loops, centralized Linux menu callbacks and isolated ARGB conversion
+- `src/app/playback_transport.rs` - shared playback controls for UI, shortcuts, tray and media commands, plus manual stream retry
+- `src/app/media_commands.rs` and `src/app/media_command_state.rs` - media command dispatch, queue capabilities, playback and seek decisions from the audio handle's current state
+- `src/playlist.rs` - playlist edit validation and ordered song occurrences
+- `src/app/playlists.rs` and `src/app/playlist_edit_state.rs` - serial playlist writes with request identity and initiating workflow
+- `src/app/playlist_dialog.rs` and `src/app/playlist_dialog_view.rs` - playlist dialog inputs, focus, rendering and actions
+- `src/app/song_menu.rs` - song menus with library snapshots and queue occurrence identity
+- `src/import/matcher.rs` and `src/import/scoring.rs` - bounded library searches, retry and ordered matching orchestration, separate from pure metadata normalization, scoring and automatic acceptance
+- `src/import/http.rs` - shared metadata request sending, HTTP status checks and JSON errors; each source retains its request format and API status rules
+- `src/import/netease.rs`, `src/import/netease/hydration.rs` and `src/import/netease/response.rs` - ordered 500-track detail batches and one missing-track retry pass, separate from metadata decoding and complete-playlist validation
+- `src/import/qq.rs` and `src/import/qq/response.rs` - public musicu POST requests separated from layered API checks, metadata decoding and unavailable-track accounting
+- `src/recommendation.rs` and `src/recommendation/` - shared recommendation contracts, listening affinity, deterministic candidate ranking and multi-pass selection; selection owns uniqueness, diversity and Daily Mix bucket counts together
+- `src/recommendation/daily.rs` and `src/recommendation/daily/` - Daily Mix orchestration, versioned cache snapshots, style admission and bounded fact collection with ID-only album request plans; shared metadata and genre-seed helpers keep affinity, style and provider requests consistent
+- `src/recommendation/radio.rs` and `src/recommendation/radio/collection.rs` - song and artist radio orchestration and provider collection, preserving source phases and completion ordering; finalization handles source failures and caps the pool at 180 before shared ranking selects up to 24 tracks
+- `src/test_support/http.rs` - test-only HTTP request capture with scripted responses and endpoint handlers shared by metadata import, Daily Mix, radio, lyrics and playlist editing tests; one transport owns header limits, read/write timeouts and worker cleanup
+- `src/api/playlists/tests.rs` - playlist state simulation and HTTP contract tests using the shared transport, retaining ordered form parameters and large-playlist coverage
+- `src/models.rs` and `src/models/` - shared API and playback data structures
+- `src/config.rs` and `src/config/` - configuration persistence, server-scoped caches and migrations
+- `src/secrets.rs`, `src/secrets/migration.rs` and `src/secrets/windows_credentials.rs` - credential facade, ordered config migration and Windows API adapter; isolated migration tests cover partial success, failure retention, retries and active-profile mirrors
 - `src/msg.rs` - background task results delivered to the UI
 
 Playback uses a read-through disk cache and a buffered HTTP reader. Servers
@@ -338,6 +427,113 @@ Original quality level they automatically fall back to a 320 kbps server
 transcode — the quality pill and the stream log show the effective level, and
 a decode error explains the cause if the server refuses to transcode.
 
+Transport controls share the latest requested position and playback intent while
+the audio worker processes commands. Consecutive relative seeks accumulate,
+and a seek immediately after selecting a track uses that track's position and
+duration. Worker acknowledgements restore the live playback clock; stale results
+cannot overwrite a newer request.
+Buttons, shortcuts, tray actions and system media controls share the same
+play/pause decisions. Each command reads the audio handle's latest accepted
+state, so failed preparation or delivery cannot suppress a later retry or make
+the next toggle use a pause state that was never accepted.
+
+Manual queue edits update entries, the selected index and both shuffle-history
+branches together. Single and batch play-next operations share the same ordered
+insertion path. Play-next and append consume prepared song collections across
+the application and queue storage, avoiding a second metadata copy; browsed
+collections and retained menu snapshots are copied only at the action boundary.
+Adding play-next tracks to an empty queue selects its first entry
+and enables Play while waiting for an explicit playback request. Stop immediately
+finishes the partial listening event, clears playback and pending lyrics/radio
+state, and cancels pending track notifications; queued songs remain available.
+
+Queue navigation prepares next/previous targets and optional history updates
+without changing application state. Preload targeting shares the same selection
+policy, including forward-history and reservation priority, the eight-entry
+shuffle exclusion window, and natural versus manual repeat-one behavior.
+Prepared history is committed through the existing accepted-audio start path.
+
+Shuffle, repeat and radio-start mode edits share one persistence boundary.
+Failed saves keep the requested modes in memory and in later session snapshots;
+starting radio changes modes only when disabling repeat-one, preserving shuffle.
+
+Queue edits also remap the list cursor, selected entries and range anchor.
+Appending radio or continuation tracks keeps selection on existing entries.
+Accepted queue replacements, restored sessions and changed library/history lists
+clear selection in the affected scope; failed starts and stale or failed search
+results preserve it. Toolbar counts and favorite summaries borrow selected songs;
+playlist and favorite batch actions copy only their required IDs or keys. Delayed
+queue row events follow the original occurrence through moves and insertions,
+and become inert when that occurrence is removed or the queue is restored.
+
+Playback requests prepare the signed URL, effective quality, cache identity and
+starting position before changing the queue or current selection. Queue
+replacement, shuffle navigation, radio starts and automatic continuation commit
+only when the audio worker accepts the command. Rejected requests preserve the
+selected track, shuffle history and restored position; deleting the current
+entry stops playback if its replacement cannot start. Preloading uses the same
+stream-profile preparation as foreground playback.
+
+Session loading and legacy migration share the same server-address comparison,
+including omitted HTTP schemes, trailing slashes, host case and default ports;
+reverse-proxy paths retain their case. Restoration prepares queue entries,
+selection, shuffle history and the resume position together. Saved positions,
+displayed progress, seeking and startup requests share the current track's bounds,
+while unknown track lengths keep their saved offset.
+Play resumes a saved offset or starts from zero; Retry uses the current logical
+position, so a finished track's old output position cannot restart it at the end.
+
+Session, loudness, genre, listening-history and Daily Mix files share one
+background writer so ordinary updates and periodic saves avoid serialization and
+filesystem waits on the UI thread. Each server keeps its latest pending snapshot
+for each data kind; failed writes retry after five seconds, including empty
+collections, while other kinds can still be saved. Server switches and exit wait
+for submitted saves. A switch back can use the latest unsaved snapshots, and
+deleting a server's local data cancels all its pending retries and waits for any
+active replacement before removing the files. Existing JSON formats and filenames
+are preserved; startup reads, legacy migration and global preferences retain
+their existing persistence paths.
+
+Each queue entry has a runtime identity that survives moves and removals.
+Replaying an entry creates a new playback occurrence; retrying its stream retains
+that occurrence's reporting, listening history and media-session identity.
+Repeated copies of the same song therefore have distinct media track paths, so
+an old absolute-position command cannot seek the next occurrence. Runtime
+identities are recreated on restoration; the saved session format is unchanged.
+
+Playlist writes retain whether they came from a song menu, a playlist dialog or
+the import review. Accepted results update only that workflow; failed imports
+keep their matched tracks in order for retry, and stale or duplicate responses
+cannot close a later dialog. Queue menu actions follow the selected occurrence
+through moves and insertions. Removing or replacing that occurrence invalidates
+the old Play/Remove action, even when the new queue contains the same song IDs.
+
+Scrolling labels cache widths by text, font size and the full font configuration,
+including family, weight, style, features and fallbacks. The cache retains at most
+20,000 measurements and evicts the least recently used entry when full. Changing
+fonts therefore measures the new layout without a bulk cache reset. Navigation
+links carry only artist or album metadata, share ID validation with song menus,
+and render as static text when the target ID is absent or blank. Song-to-album
+navigation preserves the artist ID for the album detail header.
+
+Settings headers and navigation share section titles and ordering. Preference
+sections render independently, resolving the audio cache directory only in
+Playback. Server form rendering, saving and cancelling share the same target
+selection; an obsolete edit target cannot fall back to another server. An
+unconfigured active server opens its form automatically, while configured
+servers open their forms through the row's edit button.
+
+Main titlebars and sidebar entries share section titles and icons. Expanded and
+collapsed sidebar entries use the same navigation action and library-loading
+rules; detail pages keep their library section selected, and both the back button
+and Escape use the same parent mapping. Home album sections build their grids
+only when expanded, preserving the six-album preview limit and the default
+collapsed Random section. Navigation state is tested without a window: Escape
+clears multi-selection before closing settings, then the queue drawer, then
+returning from Now Playing or a detail page. Repeated Now Playing entry keeps
+the original return page; entry and exit reset lyric following without
+discarding cached lyrics or pending requests.
+
 Preloading starts within the last 15 seconds only after the current track's
 remaining audio has been decoded, keeping its playback independent of network
 bandwidth. One speculative task prepares up to 16 chunks of 4096 frames
@@ -345,6 +541,10 @@ bandwidth. One speculative task prepares up to 16 chunks of 4096 frames
 HTTP read-ahead buffer. The decoder then waits on a condition variable. Queue
 edits, seeks, playback-mode changes, quality changes and cache-directory changes
 invalidate the preparation. A reserved shuffle choice is reused when advancing.
+Frontend reservations are recorded after the audio worker accepts the command.
+Reusing a preparation requires the same queue occurrence, audio quality and a
+zero start position. A stale transition cannot consume a newer reservation, and
+queue identity checks prevent another copy of the same song from being promoted.
 Each track is normalized to the output device format with its own ReplayGain
 and loudness meter. At a natural end, the output callback starts the prepared
 track in the same sample request; the UI consumes a single transition event to

@@ -9,9 +9,11 @@
 //!
 //! 只取元数据用于匹配用户自己的 Navidrome 曲库，不获取音源。
 
+mod http;
 mod matcher;
 mod netease;
 mod qq;
+mod scoring;
 
 pub use matcher::match_playlist;
 
@@ -23,12 +25,27 @@ use url::Url;
 
 use crate::models::Song;
 
-/// 匹配结果：歌曲与失败标记都和导入曲目一一对应。失败标记用于区分
-/// “确实没有合适候选”和“服务器请求失败，未能完成检查”。
+/// 每首曲目的匹配结果，区分匹配成功、无合适候选和请求失败。
+#[derive(Clone, Debug)]
+pub enum TrackMatch {
+    Matched(Box<Song>),
+    Unmatched,
+    Failed,
+}
+
+impl TrackMatch {
+    pub fn song(&self) -> Option<&Song> {
+        match self {
+            Self::Matched(song) => Some(song),
+            Self::Unmatched | Self::Failed => None,
+        }
+    }
+}
+
+/// 按导入曲目顺序排列，保留重复出现的条目。
 #[derive(Debug)]
 pub struct MatchedSongs {
-    pub songs: Vec<Option<Song>>,
-    pub failures: Vec<bool>,
+    pub entries: Vec<TrackMatch>,
 }
 
 #[cfg(test)]

@@ -2,9 +2,14 @@ use std::sync::Arc;
 
 use gpui_kit::{Hsla, Image as GpuiImage};
 
+use crate::app::{
+    AutoContinueRequest, CoverRequest, DailyMixRequest, FavoriteChange, HomeAlbumSection,
+    LibraryPlaybackRequest, LibraryRequest, PageRequest, RadioRequest,
+};
+use crate::audio::OutputDevice;
 use crate::import::{ImportedPlaylist, MatchedSongs};
 use crate::models::{
-    Album, Artist, FavoriteKey, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
+    Album, Artist, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
 use crate::recommendation::{DailyMixSnapshot, RecommendedTrack};
@@ -18,99 +23,112 @@ pub struct DecodedCover {
 
 #[derive(Debug)]
 pub enum Msg {
-    Ping(Result<ServerInfo, String>),
-    OpenSubsonicInfo {
-        base_url: String,
+    Ping {
+        request: LibraryRequest,
         result: Result<ServerInfo, String>,
     },
-    Artists(Result<Vec<Artist>, String>),
+    OpenSubsonicInfo {
+        request: LibraryRequest,
+        result: Result<ServerInfo, String>,
+    },
+    Artists {
+        request: LibraryRequest,
+        result: Result<Vec<Artist>, String>,
+    },
     ArtistAlbums {
-        artist_id: String,
+        request: LibraryRequest,
         result: Result<Vec<Album>, String>,
     },
     ArtistTopSongs {
-        generation: u64,
-        artist_id: String,
+        request: LibraryRequest,
         result: Result<Vec<Song>, String>,
     },
-    Albums(Result<Vec<Album>, String>),
-    NewestAlbums(Result<Vec<Album>, String>),
-    Genres(Result<Vec<Genre>, String>),
-    OutputDevices(Result<Vec<(String, bool)>, String>),
-    GenreAlbums {
-        genre: String,
+    Albums {
+        request: PageRequest,
         result: Result<Vec<Album>, String>,
     },
-    RecentAlbums(Result<Vec<Album>, String>),
-    FrequentAlbums(Result<Vec<Album>, String>),
-    RandomAlbums(Result<Vec<Album>, String>),
+    HomeAlbums {
+        section: HomeAlbumSection,
+        request: LibraryRequest,
+        result: Result<Vec<Album>, String>,
+    },
+    Genres {
+        request: LibraryRequest,
+        result: Result<Vec<Genre>, String>,
+    },
+    OutputDevices {
+        request: LibraryRequest,
+        result: Result<Vec<OutputDevice>, String>,
+    },
+    GenreAlbums {
+        request: PageRequest,
+        result: Result<Vec<Album>, String>,
+    },
     DailyMix {
-        generation: u64,
-        server_id: String,
+        request: DailyMixRequest,
         result: Result<DailyMixSnapshot, String>,
     },
     AlbumSongs {
-        album_id: String,
+        request: LibraryRequest,
         result: Result<Vec<Song>, String>,
     },
     Playlists {
-        generation: u64,
-        request: u64,
+        request: LibraryRequest,
         result: Result<Vec<Playlist>, String>,
     },
     PlaylistEdited {
-        generation: u64,
+        request: LibraryRequest,
         result: Result<PlaylistEdited, String>,
     },
-    Favorites(Result<Favorites, String>),
+    Favorites {
+        request: LibraryRequest,
+        result: Result<Favorites, String>,
+    },
     FavoriteChanged {
-        key: FavoriteKey,
-        starred: bool,
+        change: FavoriteChange,
         result: Result<(), String>,
     },
     PlaylistSongs {
-        generation: u64,
-        request: u64,
-        playlist_id: String,
+        request: LibraryRequest,
         result: Result<PlaylistDetails, String>,
     },
-    Search(Result<SearchResults, String>),
-    PlayArtistSongs(Result<Vec<Song>, String>),
+    Search {
+        request: LibraryRequest,
+        result: Result<SearchResults, String>,
+    },
+    LibraryPlayback {
+        request: LibraryPlaybackRequest,
+        result: Result<Vec<Song>, String>,
+    },
     AutoContinue {
-        generation: u64,
-        server_id: String,
-        anchor_song_id: String,
-        queue_len: usize,
+        request: AutoContinueRequest,
         result: Result<Vec<RecommendedTrack>, String>,
     },
     Radio {
-        generation: u64,
-        server_id: String,
-        key: String,
-        initial_song_id: String,
+        request: RadioRequest,
         result: Result<Vec<RecommendedTrack>, String>,
     },
     Lyrics {
-        song_id: String,
+        request: LibraryRequest,
         result: Result<Lyrics, String>,
     },
     Cover {
-        id: String,
+        request: CoverRequest,
         result: Result<DecodedCover, String>,
     },
     /// 外部歌单链接解析 + 拉取完成（app/import.rs 的第一阶段）。
     ImportResolved {
-        generation: u64,
+        request: LibraryRequest,
         result: Result<ImportedPlaylist, String>,
     },
     /// 匹配进度（每完成一首一条，代价很小，UI 循环 50ms 消费）。
     ImportProgress {
-        generation: u64,
+        request: LibraryRequest,
         done: usize,
     },
     /// 匹配完成（第二阶段）：结果与导入曲目一一对应。
     ImportMatched {
-        generation: u64,
+        request: LibraryRequest,
         result: Result<MatchedSongs, String>,
     },
 }

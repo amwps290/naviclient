@@ -4,7 +4,22 @@ use anyhow::Result;
 use gpui_kit::component::IconNamed;
 use gpui_kit::{AssetSource, SharedString};
 
-const ICON_FILES: [&str; 42] = [
+// Generate asset lookup and enumeration from the same embedded-file list.
+macro_rules! embedded_icons {
+    ($($filename:literal),* $(,)?) => {
+        const ICON_FILES: &[&str] = &[$($filename),*];
+
+        fn application_icon(path: &str) -> Option<&'static [u8]> {
+            match path {
+                $(concat!("icons/", $filename) =>
+                    Some(include_bytes!(concat!("../assets/icons/", $filename))),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+embedded_icons! {
     "window-close.svg",
     "window-maximize.svg",
     "window-minimize.svg",
@@ -47,7 +62,7 @@ const ICON_FILES: [&str; 42] = [
     "trash.svg",
     "pencil.svg",
     "keyboard.svg",
-];
+}
 
 pub struct Assets;
 
@@ -158,65 +173,7 @@ impl IconNamed for PlayerIcon {
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        let bytes: Option<&'static [u8]> = match path {
-            "icons/window-close.svg" => Some(include_bytes!("../assets/icons/window-close.svg")),
-            "icons/window-maximize.svg" => {
-                Some(include_bytes!("../assets/icons/window-maximize.svg"))
-            }
-            "icons/window-minimize.svg" => {
-                Some(include_bytes!("../assets/icons/window-minimize.svg"))
-            }
-            "icons/window-restore.svg" => {
-                Some(include_bytes!("../assets/icons/window-restore.svg"))
-            }
-            "icons/media-previous.svg" => {
-                Some(include_bytes!("../assets/icons/media-previous.svg"))
-            }
-            "icons/media-play.svg" => Some(include_bytes!("../assets/icons/media-play.svg")),
-            "icons/media-pause.svg" => Some(include_bytes!("../assets/icons/media-pause.svg")),
-            "icons/media-next.svg" => Some(include_bytes!("../assets/icons/media-next.svg")),
-            "icons/media-stop.svg" => Some(include_bytes!("../assets/icons/media-stop.svg")),
-            "icons/mini-player.svg" => Some(include_bytes!("../assets/icons/mini-player.svg")),
-            "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
-            "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
-            "icons/shuffle.svg" => Some(include_bytes!("../assets/icons/shuffle.svg")),
-            "icons/queue.svg" => Some(include_bytes!("../assets/icons/queue.svg")),
-            "icons/heart.svg" => Some(include_bytes!("../assets/icons/heart.svg")),
-            "icons/heart-filled.svg" => Some(include_bytes!("../assets/icons/heart-filled.svg")),
-            "icons/repeat.svg" => Some(include_bytes!("../assets/icons/repeat.svg")),
-            "icons/repeat-one.svg" => Some(include_bytes!("../assets/icons/repeat-one.svg")),
-            "icons/chevron-right.svg" => Some(include_bytes!("../assets/icons/chevron-right.svg")),
-            "icons/chevron-up.svg" => Some(include_bytes!("../assets/icons/chevron-up.svg")),
-            "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
-            "icons/arrow-left.svg" => Some(include_bytes!("../assets/icons/arrow-left.svg")),
-            "icons/vinyl-highlight.svg" => {
-                Some(include_bytes!("../assets/icons/vinyl-highlight.svg"))
-            }
-            "icons/vinyl-grooves.svg" => Some(include_bytes!("../assets/icons/vinyl-grooves.svg")),
-            "icons/tonearm.svg" => Some(include_bytes!("../assets/icons/tonearm.svg")),
-            "icons/tonearm-shade.svg" => Some(include_bytes!("../assets/icons/tonearm-shade.svg")),
-            "icons/tonearm-highlight.svg" => {
-                Some(include_bytes!("../assets/icons/tonearm-highlight.svg"))
-            }
-            "icons/tonearm-stylus.svg" => {
-                Some(include_bytes!("../assets/icons/tonearm-stylus.svg"))
-            }
-            "icons/volume-high.svg" => Some(include_bytes!("../assets/icons/volume-high.svg")),
-            "icons/volume-low.svg" => Some(include_bytes!("../assets/icons/volume-low.svg")),
-            "icons/volume-muted.svg" => Some(include_bytes!("../assets/icons/volume-muted.svg")),
-            "icons/house.svg" => Some(include_bytes!("../assets/icons/house.svg")),
-            "icons/mic-vocal.svg" => Some(include_bytes!("../assets/icons/mic-vocal.svg")),
-            "icons/disc-album.svg" => Some(include_bytes!("../assets/icons/disc-album.svg")),
-            "icons/genre-tags.svg" => Some(include_bytes!("../assets/icons/genre-tags.svg")),
-            "icons/list-music.svg" => Some(include_bytes!("../assets/icons/list-music.svg")),
-            "icons/eq.svg" => Some(include_bytes!("../assets/icons/eq.svg")),
-            "icons/server.svg" => Some(include_bytes!("../assets/icons/server.svg")),
-            "icons/cloud-off.svg" => Some(include_bytes!("../assets/icons/cloud-off.svg")),
-            "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
-            "icons/pencil.svg" => Some(include_bytes!("../assets/icons/pencil.svg")),
-            "icons/keyboard.svg" => Some(include_bytes!("../assets/icons/keyboard.svg")),
-            _ => None,
-        };
+        let bytes = application_icon(path);
 
         match bytes {
             Some(bytes) => Ok(Some(Cow::Borrowed(bytes))),
@@ -228,7 +185,8 @@ impl AssetSource for Assets {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(
             ICON_FILES
-                .into_iter()
+                .iter()
+                .copied()
                 .map(|filename| format!("icons/{filename}"))
                 .filter(|name| name.starts_with(path))
                 .map(SharedString::from),

@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub(crate) mod http;
+
 /// 递归收集 `src/` 下所有 Rust 源码文件（含测试文件本身）。
 pub(crate) fn rust_source_files(root: impl AsRef<Path>) -> Vec<PathBuf> {
     let mut files = Vec::new();

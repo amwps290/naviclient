@@ -1,4 +1,5 @@
 mod config;
+mod equalizer;
 mod listening;
 mod media;
 mod playback;
@@ -9,16 +10,17 @@ mod shortcuts;
 mod sort;
 
 pub use config::{Config, ServerProfile};
+pub use equalizer::EqSettings;
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
     Album, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics, Playlist,
     SearchResults, Song,
 };
 pub use playback::{
-    EqSettings, PlayModes, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,
+    PlayModes, PlaybackId, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,
 };
 pub use preferences::{LanguagePreference, ThemePreference};
-pub use queue::{normalize_queue_origins, PlaybackSession, QueueOrigin};
+pub use queue::{PlaybackQueue, PlaybackSession, QueueEntry, QueueEntryId, QueueOrigin};
 pub use server::{CapabilitySupport, OpenSubsonicExtension, ServerCapabilities, ServerInfo};
 pub use shortcuts::{GlobalShortcutSettings, ShortcutAction, ShortcutSettings};
 pub use sort::{AlbumSort, ArtistSort};

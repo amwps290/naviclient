@@ -7,7 +7,13 @@ use std::time::Duration;
 
 use gpui_kit::Image;
 
-use crate::{audio::PlaybackState, models::Song};
+use crate::{
+    audio::PlaybackState,
+    models::{PlaybackId, Song},
+};
+
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+mod state;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -40,6 +46,7 @@ pub enum MediaCommand {
 pub struct MediaUpdate<'a> {
     pub server: &'a str,
     pub song: Option<&'a Song>,
+    pub occurrence: Option<PlaybackId>,
     pub cover: Option<&'a Arc<Image>>,
     pub playback: &'a PlaybackState,
     pub position: Duration,
@@ -50,23 +57,17 @@ pub struct MediaUpdate<'a> {
     pub can_previous: bool,
 }
 
-pub fn track_id(server: &str, song_id: &str) -> String {
+pub fn track_id(server: &str, song_id: &str, occurrence: Option<PlaybackId>) -> String {
     use md5::{Digest, Md5};
     let mut hash = Md5::new();
     hash.update(server.as_bytes());
     hash.update([0]);
     hash.update(song_id.as_bytes());
+    if let Some(occurrence) = occurrence {
+        hash.update([0]);
+        hash.update(occurrence.bytes());
+    }
     format!("/org/mpris/MediaPlayer2/track/t{:x}", hash.finalize())
-}
-
-pub fn seek_offset(position: Duration, offset_us: i64, duration: Option<Duration>) -> Duration {
-    let offset = Duration::from_micros(offset_us.unsigned_abs());
-    let target = if offset_us >= 0 {
-        position.saturating_add(offset)
-    } else {
-        position.saturating_sub(offset)
-    };
-    duration.map_or(target, |limit| target.min(limit))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -90,7 +91,7 @@ mod tests {
 
     #[test]
     fn track_paths_are_opaque_valid_and_server_specific() {
-        let a = track_id("https://one", "../一首歌?token=secret");
+        let a = track_id("https://one", "../一首歌?token=secret", None);
         assert!(a
             .rsplit('/')
             .next()
@@ -98,21 +99,6 @@ mod tests {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric()));
         assert!(!a.contains("secret"));
-        assert_ne!(a, track_id("https://two", "../一首歌?token=secret"));
-    }
-
-    #[test]
-    fn relative_seeking_handles_negative_and_extreme_offsets() {
-        let position = Duration::from_secs(10);
-        let duration = Some(Duration::from_secs(20));
-        assert_eq!(
-            seek_offset(position, -5_000_000, duration),
-            Duration::from_secs(5)
-        );
-        assert_eq!(seek_offset(position, i64::MIN, duration), Duration::ZERO);
-        assert_eq!(
-            seek_offset(position, i64::MAX, duration),
-            Duration::from_secs(20)
-        );
+        assert_ne!(a, track_id("https://two", "../一首歌?token=secret", None));
     }
 }

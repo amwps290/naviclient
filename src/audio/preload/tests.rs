@@ -1,5 +1,10 @@
 use super::*;
+use crate::audio::stream_cache::cache_paths;
+use std::fs;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime};
 
 pub(in crate::audio) struct TestCache(pub(in crate::audio) PathBuf);
 
@@ -95,7 +100,7 @@ pub(in crate::audio) fn client() -> Client {
         .unwrap()
 }
 
-fn wait_ready(preloader: &mut Preloader) {
+pub(in crate::audio) fn wait_ready(preloader: &mut Preloader) {
     wait_for(|| {
         preloader.poll();
         preloader
@@ -130,28 +135,15 @@ fn ready_stream_sleeps_then_plays_all_samples_without_a_second_request() {
     wait_ready(&mut preloader);
     let entry = preloader.entry.as_ref().unwrap();
     let stream = entry.ready.as_ref().unwrap();
-    assert_eq!(stream.source.queued.len(), STARTUP_BUFFER_CHUNKS);
-    assert!(matches!(
-        stream.source.receiver.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
-    assert!(!entry.control.fully_decoded.load(Ordering::Acquire));
-    let bytes = stream.buffer_progress.cached_bytes.load(Ordering::Relaxed);
+    crate::audio::buffered_stream::tests::assert_sleeping_startup(&stream.source);
+    assert!(!entry.control.fully_decoded());
+    let bytes = stream.buffer_progress.cached_bytes();
     assert!(bytes < wav().len() as u64);
     // Holding longer than the HTTP timeout must not expire an idle preparation.
     thread::sleep(Duration::from_millis(350));
-    assert_eq!(
-        stream.buffer_progress.cached_bytes.load(Ordering::Relaxed),
-        bytes
-    );
+    assert_eq!(stream.buffer_progress.cached_bytes(), bytes);
     let prepared = preloader.take(Some(7), "song:128", Duration::ZERO).unwrap();
-    wait_for(|| {
-        prepared
-            .source
-            .control
-            .fully_decoded
-            .load(Ordering::Acquire)
-    });
+    wait_for(|| prepared.source.control().fully_decoded());
     let error = prepared.error.clone();
     let samples: Vec<_> = prepared.source.collect();
     assert_eq!(samples.len(), 12 * 48_000 * 2);
@@ -247,13 +239,7 @@ fn failed_preload_allows_ordinary_playback_to_retry() {
         StreamControl::new(false),
     )
     .unwrap();
-    wait_for(|| {
-        prepared
-            .source
-            .control
-            .fully_decoded
-            .load(Ordering::Acquire)
-    });
+    wait_for(|| prepared.source.control().fully_decoded());
     assert_eq!(prepared.source.count(), 12 * 48_000 * 2);
     server.join().unwrap();
 }
@@ -314,13 +300,7 @@ fn truncated_preload_does_not_poison_cache_and_falls_back_to_fresh_audio() {
         StreamControl::new(false),
     )
     .unwrap();
-    wait_for(|| {
-        prepared
-            .source
-            .control
-            .fully_decoded
-            .load(Ordering::Acquire)
-    });
+    wait_for(|| prepared.source.control().fully_decoded());
     assert_eq!(prepared.source.count(), 12 * 48_000 * 2);
     server.join().unwrap();
 }
@@ -370,20 +350,27 @@ fn cancelled_decoder_read_cannot_accumulate_speculative_workers() {
         drop(listener);
         send_audio(&mut last);
     });
-    let mut preloader = Preloader::new(client()).unwrap();
+    // The release channel controls this stalled response. A short request
+    // timeout could expire before the test observes the decoder running.
+    let controlled_client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut preloader = Preloader::new(controlled_client).unwrap();
     preloader.request(1, url.clone(), "song".into(), None, cache.0.clone());
     let old = preloader.entry.as_ref().unwrap().control.clone();
-    wait_for(|| old.state.lock().unwrap().running);
+    wait_for(|| old.decoder_running());
     for id in 2..=100 {
         preloader.request(id, url.clone(), "song".into(), None, cache.0.clone());
     }
     let latest = preloader.entry.as_ref().unwrap().control.clone();
     // Until the first read returns, the replacement decoder cannot start.
-    assert!(!latest.state.lock().unwrap().running);
+    assert!(!latest.decoder_running());
     release_tx.send(()).unwrap();
     wait_ready(&mut preloader);
     assert_eq!(preloader.entry.as_ref().unwrap().id, 100);
-    assert!(!old.state.lock().unwrap().running);
+    assert!(!old.decoder_running());
     preloader.cancel();
     wait_for(|| Arc::strong_count(&latest) == 1);
     server.join().unwrap();

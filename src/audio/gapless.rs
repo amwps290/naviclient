@@ -1,124 +1,15 @@
-use super::*;
+//! Continuous sample output and handoff to the prepared track at its boundary.
 
-type OutputSource = Box<dyn Source<Item = Sample> + Send>;
-pub(super) type Loudness = Arc<Mutex<Option<(f32, f32)>>>;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use rodio::{ChannelCount, Sample, SampleRate, Source};
+
+use super::decoder::decoded_duration;
+use super::output_track::{OutputTrack, TrackInfo};
+use super::track_transition::Transition;
+
 pub(super) type Slot = Arc<Mutex<Option<ArmedTrack>>>;
-
-#[derive(Clone, Copy, Debug)]
-pub struct TrackTransition {
-    pub id: u64,
-    pub loudness_db: f32,
-    pub loudness_peak: f32,
-    pub(super) boundary: Duration,
-}
-
-#[derive(Debug, Default)]
-enum Phase {
-    #[default]
-    Pending,
-    Cancelled,
-    Started(TrackTransition),
-}
-
-/// Created when the UI reserves a song, before either worker sees the request.
-/// Cancellation and the first sample share this lock, so exactly one wins.
-#[derive(Debug)]
-pub(super) struct Transition {
-    pub(super) id: u64,
-    pub(super) duration: Option<Duration>,
-    phase: Mutex<Phase>,
-    reported: std::sync::atomic::AtomicBool,
-}
-
-impl Transition {
-    pub(super) fn new(id: u64, duration: Option<Duration>) -> Arc<Self> {
-        Arc::new(Self {
-            id,
-            duration,
-            phase: Mutex::new(Phase::Pending),
-            reported: false.into(),
-        })
-    }
-
-    pub(super) fn cancel(&self) {
-        let mut phase = self.phase.lock().unwrap();
-        if matches!(*phase, Phase::Pending) {
-            *phase = Phase::Cancelled;
-        }
-    }
-
-    pub(super) fn pending(&self) -> bool {
-        matches!(*self.phase.lock().unwrap(), Phase::Pending)
-    }
-
-    pub(super) fn event(&self) -> Option<TrackTransition> {
-        match *self.phase.lock().unwrap() {
-            Phase::Started(event) => Some(event),
-            _ => None,
-        }
-    }
-
-    pub(super) fn take_event(&self) -> Option<TrackTransition> {
-        self.event()
-            .filter(|_| !self.reported.swap(true, Ordering::AcqRel))
-    }
-
-    fn start(&self, boundary: Duration, previous: &Loudness) -> bool {
-        let mut phase = self.phase.lock().unwrap();
-        if !matches!(*phase, Phase::Pending) {
-            return false;
-        }
-        let (loudness_db, loudness_peak) =
-            previous.lock().ok().and_then(|v| *v).unwrap_or_default();
-        *phase = Phase::Started(TrackTransition {
-            id: self.id,
-            boundary,
-            loudness_db,
-            loudness_peak,
-        });
-        true
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct TrackInfo {
-    pub(super) duration: Option<Duration>,
-    pub(super) error: SharedStreamError,
-    pub(super) buffer: Arc<BufferProgress>,
-    pub(super) control: Arc<StreamControl>,
-    pub(super) loudness: Loudness,
-}
-
-pub(super) struct OutputTrack {
-    source: OutputSource,
-    pub(super) info: TrackInfo,
-}
-
-impl OutputTrack {
-    pub(super) fn new(
-        stream: PreparedStream,
-        gain: f32,
-        channels: ChannelCount,
-        rate: SampleRate,
-        eq: crate::audio::eq::EqHandle,
-    ) -> Self {
-        let info = TrackInfo {
-            duration: stream.duration,
-            error: stream.error,
-            buffer: stream.buffer_progress,
-            control: stream.source.control.clone(),
-            loudness: Arc::new(Mutex::new(None)),
-        };
-        let metered = LoudnessMeter::new(stream.source, info.loudness.clone());
-        // 均衡插在 ReplayGain 增益之后、输出归一化之前：
-        // 音轨原生采样率下滤波，且不影响响度测量。
-        let equalized = crate::audio::eq::Equalizer::new(metered.amplify(gain.clamp(0.1, 4.0)), eq);
-        Self {
-            source: Box::new(normalize_for_output(equalized, channels, rate)),
-            info,
-        }
-    }
-}
 
 pub(super) struct ArmedTrack {
     pub(super) transition: Arc<Transition>,
@@ -169,7 +60,7 @@ impl Iterator for GaplessSource {
         if self.finished {
             return None;
         }
-        if let Some(sample) = self.current.source.next() {
+        if let Some(sample) = self.current.next_sample() {
             self.samples += 1;
             return Some(sample);
         }
@@ -217,4 +108,4 @@ impl Source for GaplessSource {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

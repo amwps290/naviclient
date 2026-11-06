@@ -3,10 +3,9 @@ use std::path::PathBuf;
 use super::listening::LISTENING_HISTORY_LIMIT;
 use super::preferences::locale_from_os_tag;
 use super::{
-    normalize_queue_origins, AlbumSort, ArtistSort, CapabilitySupport, Config, LanguagePreference,
-    ListeningHistory, OpenSubsonicExtension, PlayModes, PlaybackMode, PlaybackSession, QueueOrigin,
-    RepeatMode, ServerCapabilities, ServerInfo, ServerProfile, ShortcutAction, Song,
-    ThemePreference, TranscodingQuality, VolumeNormalization,
+    AlbumSort, ArtistSort, CapabilitySupport, Config, LanguagePreference, ListeningHistory,
+    OpenSubsonicExtension, PlayModes, PlaybackMode, RepeatMode, ServerCapabilities, ServerInfo,
+    ServerProfile, ShortcutAction, Song, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
 
 #[test]
@@ -462,65 +461,6 @@ fn playback_modes_round_trip_through_config_json() {
     assert!(restored.playback_modes.shuffle);
     assert_eq!(restored.playback_modes.repeat, RepeatMode::One);
     assert!(json.contains(r#""playback_modes":{"shuffle":true,"repeat":"one"}"#));
-}
-
-#[test]
-fn playback_session_round_trips_through_json() {
-    let session = PlaybackSession {
-        server_url: "http://localhost:4533".to_string(),
-        queue: vec![Song::default()],
-        queue_origins: vec![QueueOrigin::DailyMix],
-        queue_index: Some(2),
-        position_secs: 61.5,
-        playback_modes: PlayModes {
-            shuffle: true,
-            repeat: RepeatMode::All,
-        },
-        shuffle_played: vec![0, 3, 1],
-        shuffle_forward: vec![2],
-    };
-
-    let json = serde_json::to_string(&session).expect("session should serialize");
-    let restored: PlaybackSession =
-        serde_json::from_str(&json).expect("session should deserialize");
-
-    assert_eq!(restored.server_url, session.server_url);
-    assert_eq!(restored.queue_origins, vec![QueueOrigin::DailyMix]);
-    assert_eq!(restored.queue.len(), 1);
-    assert_eq!(restored.queue_index, Some(2));
-    assert!((restored.position_secs - 61.5).abs() < 1e-9);
-    assert!(restored.playback_modes.shuffle);
-    assert_eq!(restored.playback_modes.repeat, RepeatMode::All);
-    assert_eq!(restored.shuffle_played, vec![0, 3, 1]);
-    assert_eq!(restored.shuffle_forward, vec![2]);
-}
-
-#[test]
-fn legacy_queue_origins_default_to_manual_and_length_is_normalized() {
-    let legacy = r#"{
-            "server_url":"http://localhost:4533",
-            "queue":[{"id":"a","title":"A"},{"id":"b","title":"B"}],
-            "queue_index":0,
-            "position_secs":0,
-            "playback_modes":{"shuffle":false,"repeat":"off"},
-            "shuffle_played":[],
-            "shuffle_forward":[]
-        }"#;
-    let session: PlaybackSession = serde_json::from_str(legacy).unwrap();
-    assert!(session.queue_origins.is_empty());
-    assert_eq!(
-        normalize_queue_origins(session.queue_origins, session.queue.len()),
-        vec![QueueOrigin::Manual, QueueOrigin::Manual]
-    );
-    assert_eq!(
-        normalize_queue_origins(vec![QueueOrigin::SongRadio, QueueOrigin::DailyMix], 1),
-        vec![QueueOrigin::SongRadio]
-    );
-}
-
-#[test]
-fn corrupted_session_json_fails_cleanly() {
-    assert!(serde_json::from_str::<PlaybackSession>("not json at all").is_err());
 }
 
 #[test]

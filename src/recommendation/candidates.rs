@@ -70,20 +70,7 @@ pub(super) async fn collect_genre_tracks(
     seeds: &[Song],
     errors: &mut Vec<String>,
 ) -> Vec<Song> {
-    let mut genres = Vec::<String>::new();
-    for genre in seeds
-        .iter()
-        .filter_map(|song| song.genre.as_deref())
-        .map(str::trim)
-        .filter(|genre| !genre.is_empty())
-    {
-        if !genres.iter().any(|known| known.eq_ignore_ascii_case(genre)) {
-            genres.push(genre.to_string());
-            if genres.len() == MAX_GENRE_SEEDS {
-                break;
-            }
-        }
-    }
+    let genres = genre_seeds(seeds, MAX_GENRE_SEEDS);
     let mut tasks = JoinSet::new();
     for genre in genres {
         let api = api.clone();
@@ -103,6 +90,26 @@ pub(super) async fn collect_genre_tracks(
     songs
 }
 
+/// Preserve the first spelling for provider requests, skipping blank genres
+/// and duplicate ASCII case variants within the requested seed limit.
+pub(super) fn genre_seeds(seeds: &[Song], limit: usize) -> Vec<String> {
+    let mut genres = Vec::<String>::new();
+    for genre in seeds
+        .iter()
+        .filter_map(|song| song.genre.as_deref())
+        .map(str::trim)
+        .filter(|genre| !genre.is_empty())
+    {
+        if genres.len() == limit {
+            break;
+        }
+        if !genres.iter().any(|known| known.eq_ignore_ascii_case(genre)) {
+            genres.push(genre.to_string());
+        }
+    }
+    genres
+}
+
 pub(super) fn stable_generation_seed(server_id: &str, key: &str) -> u64 {
     let mut hasher = Md5::new();
     hasher.update(server_id.as_bytes());
@@ -116,6 +123,28 @@ pub(super) fn stable_generation_seed(server_id: &str, key: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn genre_seeds_preserve_request_spelling_and_bound_unique_nonblank_genres() {
+        let seeds = [
+            None,
+            Some(" "),
+            Some(" Jazz & Soul "),
+            Some("jazz & soul"),
+            Some("Ambient"),
+            Some("Metal"),
+        ]
+        .into_iter()
+        .map(|genre| Song {
+            genre: genre.map(str::to_string),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+        assert!(genre_seeds(&seeds, 0).is_empty());
+        assert_eq!(genre_seeds(&seeds, 1), ["Jazz & Soul"]);
+        assert_eq!(genre_seeds(&seeds, 2), ["Jazz & Soul", "Ambient"]);
+        assert_eq!(genre_seeds(&seeds, 10), ["Jazz & Soul", "Ambient", "Metal"]);
+    }
 
     #[test]
     fn generation_seed_is_stable_and_source_scoped() {
