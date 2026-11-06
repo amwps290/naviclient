@@ -116,7 +116,7 @@ pub enum Msg {
         request: CoverRequest,
         result: Result<DecodedCover, String>,
     },
-    /// 外部歌单链接解析 + 拉取完成（app/import.rs 的第一阶段）。
+    /// 外部歌单链接解析 + 拉取完成（app/import/orchestration.rs 的第一阶段）。
     ImportResolved {
         request: LibraryRequest,
         result: Result<ImportedPlaylist, String>,

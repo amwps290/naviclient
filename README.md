@@ -350,55 +350,55 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/audio/gapless.rs` - continuous output and sample-accurate prepared-track handoff, using the separate transition state machine
 - `src/playback_timeline.rs` - shared song duration selection and bounded, saturating relative seeks for UI and system media controls
 - `src/app.rs` and `src/app/` - GPUI orchestration, views, and isolated feature state
-- `src/app/titlebar_view.rs`, `src/app/sidebar_view.rs`, `src/app/navigation.rs` and `src/app/view_state.rs` - window navigation, shared section presentation, isolated navigation/overlay transitions and detail-page relationships
-- `src/app/home_view.rs`, `src/app/home_feature_view.rs`, `src/app/home_section_view.rs` and `src/app/daily_mix_view.rs` - Home composition, listening feature, lazy album sections and Daily Mix controls
-- `src/app/player_controls_view.rs` and `src/app/favorite_button_view.rs` - shared player styles, shuffle/repeat controls and favorite buttons
-- `src/app/player_view.rs` - responsive player bar layout, current-track artwork, metadata, navigation and accessory controls
-- `src/app/player_progress_view.rs` - playback progress, buffering feedback and playback retry
-- `src/app/volume_view.rs` and `src/app/volume.rs` - volume panel rendering and shared wheel-volume dispatch for the player bar and mini player
-- `src/app/library_view.rs` and `src/app/library_skeleton_view.rs` - shared page controls and loading placeholders
-- `src/app/browse_view.rs` - library browse pages, local sort menus and genre grids
-- `src/app/album_grid_view.rs` and `src/app/artist_grid_view.rs` - reusable library artwork cards
-- `src/app/metadata_links.rs` and `src/app/library_navigation.rs` - artist and album links sharing small navigation projections with song menus
-- `src/app/equalizer_view.rs` - player equalizer popover, presets and band controls
-- `src/app/scrolling_text_view.rs` and `src/app/scrolling_text_state.rs` - scrolling labels, bounded font-aware measurement cache and animation timing
-- `src/app/settings_view.rs`, `src/app/settings_overlay.rs` and `src/app/settings_navigation_view.rs` - settings composition, overlay and shared section presentation
-- `src/app/playback_settings_view.rs`, `src/app/desktop_settings_view.rs` and `src/app/appearance_settings_view.rs` - section-specific preference controls
-- `src/app/shortcuts.rs`, `src/app/shortcut_edit.rs` and `src/app/shortcut_config.rs` - key dispatch, recording/conflict workflows and shortcut-only save-failure rollback
+- `src/app/shell/titlebar.rs`, `src/app/shell/sidebar.rs`, `src/app/shell/navigation.rs` and `src/app/shell/view_state.rs` - window navigation, shared section presentation, isolated navigation/overlay transitions and detail-page relationships
+- `src/app/home/view.rs`, `src/app/home/feature_view.rs`, `src/app/home/section_view.rs` and `src/app/recommendations/daily_mix_view.rs` - Home composition, listening feature, lazy album sections and Daily Mix controls
+- `src/app/player/controls.rs` and `src/app/widgets/favorite_button.rs` - shared player styles, shuffle/repeat controls and favorite buttons
+- `src/app/player/bar.rs` - responsive player bar layout, current-track artwork, metadata, navigation and accessory controls
+- `src/app/player/progress.rs` - playback progress, buffering feedback and playback retry
+- `src/app/sound/volume_view.rs` and `src/app/sound/volume.rs` - volume panel rendering and shared wheel-volume dispatch for the player bar and mini player
+- `src/app/widgets/page_controls.rs` and `src/app/widgets/skeleton.rs` - shared page controls and loading placeholders
+- `src/app/library/browse_view.rs` - library browse pages, local sort menus and genre grids
+- `src/app/library/album_grid.rs` and `src/app/library/artist_grid.rs` - reusable library artwork cards
+- `src/app/widgets/metadata_links.rs` and `src/app/library/navigation.rs` - artist and album links sharing small navigation projections with song menus
+- `src/app/sound/equalizer_view.rs` - player equalizer popover, presets and band controls
+- `src/app/widgets/scrolling_text.rs` and `src/app/widgets/scrolling_text_state.rs` - scrolling labels, bounded font-aware measurement cache and animation timing
+- `src/app/settings/view.rs`, `src/app/settings/overlay.rs` and `src/app/settings/navigation_view.rs` - settings composition, overlay and shared section presentation
+- `src/app/settings/playback_view.rs`, `src/app/settings/desktop_view.rs` and `src/app/settings/appearance_view.rs` - section-specific preference controls
+- `src/app/shortcuts/dispatch.rs`, `src/app/shortcuts/edit.rs` and `src/app/shortcuts/config.rs` - key dispatch, recording/conflict workflows and shortcut-only save-failure rollback
 - `src/global_shortcuts.rs` and `src/global_shortcuts/` - shared binding validation and parsed registration keys, owned registration replacement and cleanup, and a separate Windows API/message-loop adapter
-- `src/app/shortcut_repeat.rs` - matched-key repeat suppression with a shared 250ms clock, preserving selection-movement exemptions across library resets
-- `src/app/shortcut_settings_view.rs` and `src/app/shortcut_row_view.rs` - shortcut section composition and shared app/global binding rows, preserving platform restrictions and feedback
-- `src/app/server_settings_view.rs`, `src/app/server_list_view.rs` and `src/app/server_form_view.rs` - connection status, server rows and edit form
-- `src/app/server_profiles.rs`, `src/app/server_lifecycle.rs` and `src/app/server_cache.rs` - profile changes, outgoing-server persistence, reconnect resets and restoration of server-scoped caches
-- `src/app/server_profile_edit.rs`, `src/app/server_remove_dialog.rs` and `src/app/server_removal_state.rs` - server form workflows, removal dialog rendering and events, and single-use removal targets independent of reconnecting library state
-- `src/app/queue_edits.rs` - owned queue additions, selected-index corrections, shuffle-history remapping and removal outcomes
-- `src/app/queue_navigation.rs` - borrowed queue progression, controllable shuffle choices and prepared forward/backward history shared with preload targeting
-- `src/app/playback_modes.rs` - shared shuffle/repeat edits and mode-only persistence, retaining requested runtime modes on save failure and avoiding unchanged radio saves
-- `src/app/song_selection.rs` - scoped cursor, multi-selection, fixed range anchors and bounded remapping after list changes
-- `src/app/song_scope.rs` - seven typed list scopes shared by rendering, selection, scrolling, playback and menus, with stable IDs, page/drawer routing and layout rules
-- `src/app/song_playback.rs` - shared row, detail-page and multi-selection queue actions, validated playback plans and existing queue targeting; full-list appends retain scope origins while selected appends remain manual
-- `src/app/song_view.rs` and `src/app/song_row_view.rs` - virtualized list layout with its multi-selection toolbar, and individual song rows with their playing/hover indicators
-- `src/app/song_row_actions.rs` - shared row event dispatch with queue occurrence resolution for delayed clicks, moves, removals and menu opening
-- `src/app/song_info_view.rs` - read-only track metadata dialog
-- `src/app/playback_occurrence.rs` - playback identity, terminal handling and reporting once per occurrence
-- `src/app/playback_start.rs` - prepared stream requests and accepted queue, selection, shuffle-history and resume-position updates
-- `src/app/preload_state.rs` and `src/app/playback_preload.rs` - accepted next-track reservations, occurrence/quality reuse checks and one-time gapless event application
-- `src/app/session_state.rs` - prepared session restoration, server identity checks, bounded resume/display/save timelines and save throttling
+- `src/app/shortcuts/repeat.rs` - matched-key repeat suppression with a shared 250ms clock, preserving selection-movement exemptions across library resets
+- `src/app/shortcuts/settings_view.rs` and `src/app/shortcuts/row_view.rs` - shortcut section composition and shared app/global binding rows, preserving platform restrictions and feedback
+- `src/app/server/settings_view.rs`, `src/app/server/list_view.rs` and `src/app/server/form_view.rs` - connection status, server rows and edit form
+- `src/app/server/profiles.rs`, `src/app/server/lifecycle.rs` and `src/app/server/cache.rs` - profile changes, outgoing-server persistence, reconnect resets and restoration of server-scoped caches
+- `src/app/server/profile_edit.rs`, `src/app/server/remove_dialog.rs` and `src/app/server/removal_state.rs` - server form workflows, removal dialog rendering and events, and single-use removal targets independent of reconnecting library state
+- `src/app/queue/edits.rs` - owned queue additions, selected-index corrections, shuffle-history remapping and removal outcomes
+- `src/app/queue/navigation.rs` - borrowed queue progression, controllable shuffle choices and prepared forward/backward history shared with preload targeting
+- `src/app/playback/modes.rs` - shared shuffle/repeat edits and mode-only persistence, retaining requested runtime modes on save failure and avoiding unchanged radio saves
+- `src/app/songs/selection.rs` - scoped cursor, multi-selection, fixed range anchors and bounded remapping after list changes
+- `src/app/songs/scope.rs` - seven typed list scopes shared by rendering, selection, scrolling, playback and menus, with stable IDs, page/drawer routing and layout rules
+- `src/app/songs/playback.rs` - shared row, detail-page and multi-selection queue actions, validated playback plans and existing queue targeting; full-list appends retain scope origins while selected appends remain manual
+- `src/app/songs/view.rs` and `src/app/songs/row_view.rs` - virtualized list layout with its multi-selection toolbar, and individual song rows with their playing/hover indicators
+- `src/app/songs/row_actions.rs` - shared row event dispatch with queue occurrence resolution for delayed clicks, moves, removals and menu opening
+- `src/app/songs/info_view.rs` - read-only track metadata dialog
+- `src/app/playback/occurrence.rs` - playback identity, terminal handling and reporting once per occurrence
+- `src/app/playback/start.rs` - prepared stream requests and accepted queue, selection, shuffle-history and resume-position updates
+- `src/app/playback/preload_state.rs` and `src/app/playback/preload.rs` - accepted next-track reservations, occurrence/quality reuse checks and one-time gapless event application
+- `src/app/playback/session_state.rs` - prepared session restoration, server identity checks, bounded resume/display/save timelines and save throttling
 - `src/config/server_writer.rs` - serial background server-cache writes, one pending snapshot per server and data kind, retry ownership, flushes and cancellation before cache deletion
 - `src/config/server_writer/mailbox.rs` - private synchronization, retry deadlines and fresh-attempt receipts; immutable write tasks carry their own revision through completion, preserving newer pending snapshots
-- `src/app/polling.rs` and `src/app/redraw_state.rs` - background polling, playback redraw cadence, visibility recovery and shared cover animation eligibility
+- `src/app/shell/polling.rs` and `src/app/shell/redraw.rs` - background polling, playback redraw cadence, visibility recovery and shared cover animation eligibility
 - `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
 - `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, progressive frame delivery and cancellation, and bounded background raster generation
 - `src/vinyl/rotation.rs` - texture-independent rotation timing and adjacent-frame selection, advancing only when both frames are drawable
 - `src/media_session.rs` and `src/media_session/` - shared media commands and snapshots, Linux MPRIS and Windows SMTC integration
 - `src/media_session/linux/interfaces.rs` and `src/media_session/linux/artwork.rs` - MPRIS interface contracts and connection-owned local artwork, with separate file preparation, publication, replacement and directory cleanup
 - `src/tray.rs` and `src/tray/` - shared commands and platform routing, backend-owned Linux SNI handles and Windows message loops, centralized Linux menu callbacks and isolated ARGB conversion
-- `src/app/playback_transport.rs` - shared playback controls for UI, shortcuts, tray and media commands, plus manual stream retry
-- `src/app/media_commands.rs` and `src/app/media_command_state.rs` - media command dispatch, queue capabilities, playback and seek decisions from the audio handle's current state
+- `src/app/playback/transport.rs` - shared playback controls for UI, shortcuts, tray and media commands, plus manual stream retry
+- `src/app/desktop/media_commands.rs` and `src/app/desktop/media_command_state.rs` - media command dispatch, queue capabilities, playback and seek decisions from the audio handle's current state
 - `src/playlist.rs` - playlist edit validation and ordered song occurrences
-- `src/app/playlists.rs` and `src/app/playlist_edit_state.rs` - serial playlist writes with request identity and initiating workflow
-- `src/app/playlist_dialog.rs` and `src/app/playlist_dialog_view.rs` - playlist dialog inputs, focus, rendering and actions
-- `src/app/song_menu.rs` - song menus with library snapshots and queue occurrence identity
+- `src/app/playlists/edits.rs` and `src/app/playlists/edit_state.rs` - serial playlist writes with request identity and initiating workflow
+- `src/app/playlists/dialog.rs` and `src/app/playlists/dialog_view.rs` - playlist dialog inputs, focus, rendering and actions
+- `src/app/songs/menu.rs` - song menus with library snapshots and queue occurrence identity
 - `src/import/matcher.rs` and `src/import/scoring.rs` - bounded library searches, retry and ordered matching orchestration, separate from pure metadata normalization, scoring and automatic acceptance
 - `src/import/http.rs` - shared metadata request sending, HTTP status checks and JSON errors; each source retains its request format and API status rules
 - `src/import/netease.rs`, `src/import/netease/hydration.rs` and `src/import/netease/response.rs` - ordered 500-track detail batches and one missing-track retry pass, separate from metadata decoding and complete-playlist validation

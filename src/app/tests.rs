@@ -2,7 +2,7 @@
 
 use gpui_kit::{hsla, px};
 
-use super::artwork_helpers::contrast_ratio;
+use crate::app::covers::artwork::contrast_ratio;
 
 #[gpui_pre::test]
 fn light_theme_hint_contrast_is_darkened_for_readability(cx: &mut gpui_kit::TestAppContext) {

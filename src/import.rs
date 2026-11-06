@@ -2,7 +2,7 @@
 //!
 //! 设计为“数据源 trait 化”的增量结构：`PlaylistSource` 枚举每个平台一个
 //! 变体，链接识别（`resolve`）与拉取（`fetch`）都收口在这里；上层
-//! （`src/app/import.rs`）只面对统一的 `ImportedPlaylist`。
+//! （`src/app/import/orchestration.rs`）只面对统一的 `ImportedPlaylist`。
 //!
 //! 支持网易云音乐与 QQ 音乐公开歌单。两个来源都只读取匹配所需元数据，
 //! 不获取音源，也不要求用户提供第三方平台账号。

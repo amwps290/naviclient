@@ -1,246 +1,38 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::ops::Range;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
-use std::time::Duration;
-
-use gpui_kit::assets::IconName as KitIcon;
-use gpui_kit::component::{
-    box_shadow,
-    button::{Button, ButtonCustomVariant, ButtonVariants},
-    h_flex,
-    input::{Input, InputEvent, InputState},
-    menu::{ContextMenuExt, DropdownMenu},
-    notification::{Notification, NotificationType},
-    scroll::{ScrollableElement, Scrollbar},
-    slider::{Slider, SliderEvent, SliderState, SliderValue},
-    switch::Switch,
-    tooltip::Tooltip,
-    v_flex, window_paddings, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, Theme,
-    ThemeMode, TitleBar, WindowExt,
-};
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{
-    div, ease_out_quint, hsla, img, linear_color_stop, linear_gradient, percentage, point, px,
-    relative, rems, uniform_list, Animation, AnimationExt, App, AppContext, Context, Entity,
-    FontWeight, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat, InteractiveElement,
-    IntoElement, Keystroke, MouseButton, ObjectFit, ParentElement, PathPromptOptions, Pixels,
-    Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled,
-    StyledImage, Subscription, Transformation, UniformListScrollHandle, Window, WindowControlArea,
-};
-use rust_i18n::t;
-use smol::Timer;
-use tokio::runtime::Runtime;
-
-use crate::api::{format_duration, OpenSubsonicProvider};
-use crate::assets::{AppIcon, PlayerIcon};
-use crate::audio::{
-    format_playback, AudioHandle, PlaybackState, StreamFailure, TrackTransition,
-    PLAYBACK_RECONNECT_ATTEMPTS,
-};
-use crate::config;
-use crate::global_shortcuts::{
-    GlobalShortcutEvent, GlobalShortcutManager, ValidationError as GlobalShortcutValidationError,
-};
-use crate::media_session::{self, MediaCommand, MediaSession, MediaUpdate};
-use crate::models::{
-    Album, AlbumSort, Artist, ArtistSort, Config, EqSettings, FavoriteKey, FavoriteKind, Favorites,
-    Genre, LanguagePreference, PlayModes, PlaybackQueue, PlaybackSession, Playlist, QueueEntry,
-    QueueOrigin, RepeatMode, SearchResults, ServerInfo, ServerProfile, ShortcutAction, Song,
-    ThemePreference, TranscodingQuality, VolumeNormalization,
-};
-use crate::msg::{error_message, Msg};
-use crate::notify;
-use crate::secrets;
-use crate::single_instance;
-use crate::tray::{self, TrayCommand};
-use crate::vinyl::VinylCover;
+use prelude::*;
 
 #[cfg(test)]
 mod tests;
 
-mod album_details;
-mod album_grid_view;
-mod album_paging;
-mod appearance_settings_view;
-mod artist_details;
-mod artist_grid_view;
-mod artist_library;
-mod artwork_helpers;
-mod artwork_view;
-mod audio_output;
-mod auto_continue;
-mod auto_continue_state;
-mod browse_view;
-mod connection;
-mod content_view;
-mod cover_state;
-mod cover_texture_state;
-mod cover_textures;
-mod covers;
-mod daily_mix;
-mod daily_mix_state;
-mod daily_mix_view;
-mod desktop;
-mod desktop_settings_view;
-mod desktop_state;
-mod detail_view;
-mod equalizer;
-mod equalizer_state;
-mod equalizer_view;
-mod favorite_button_view;
-mod favorites;
-mod genre_library;
-mod home_feature_view;
-mod home_library;
-mod home_section_view;
-mod home_view;
-mod import;
-mod import_flow;
-mod import_view;
-mod library;
-mod library_helpers;
-mod library_navigation;
-mod library_playback;
-mod library_requests;
-mod library_skeleton_view;
-mod library_view;
-mod listening;
-mod listening_state;
-mod loudness;
-mod loudness_state;
-mod lyrics;
-mod lyrics_state;
-mod media_command_state;
-mod media_commands;
-mod media_controls;
-mod message_polling;
-mod metadata_links;
-mod mini_player_view;
-mod mini_window;
-mod mini_window_state;
-mod navigation;
-mod now_playing_view;
-mod paged_collection;
-mod platform_window;
-mod playback;
-mod playback_display;
-mod playback_lifecycle;
-mod playback_logic;
-mod playback_modes;
-mod playback_occurrence;
-mod playback_preload;
-mod playback_reconnect;
-mod playback_session;
-mod playback_settings_view;
-mod playback_start;
-mod playback_transport;
-mod player_controls_view;
-mod player_progress_view;
-mod player_view;
-mod playlist_dialog;
-mod playlist_dialog_view;
-mod playlist_edit_state;
-mod playlist_library;
-mod playlist_list_view;
-mod playlist_loading;
-mod playlists;
-mod polling;
-mod preferences;
-mod preload_state;
-mod queue;
-mod queue_edits;
-mod queue_logic;
-mod queue_navigation;
-mod queue_view;
-mod radio;
-mod radio_state;
-mod recommendations;
-mod redraw_state;
-mod render;
-mod scrolling_text_state;
-mod scrolling_text_view;
-mod search;
-mod search_state;
-mod search_view;
-mod server_cache;
-mod server_connection;
-mod server_edit;
-mod server_form_view;
-mod server_lifecycle;
-mod server_list_view;
-mod server_profile_edit;
-mod server_profiles;
-mod server_removal_state;
-mod server_remove_dialog;
-mod server_settings_view;
-mod session_state;
-mod settings_navigation_view;
-mod settings_overlay;
-mod settings_state;
-mod settings_view;
-mod shortcut_bindings;
-mod shortcut_config;
-mod shortcut_edit;
-mod shortcut_repeat;
-mod shortcut_row_view;
-mod shortcut_settings_view;
-mod shortcuts;
-mod sidebar_view;
-mod song_info_view;
-mod song_list;
-mod song_menu;
-mod song_playback;
-mod song_row_actions;
-mod song_row_view;
-mod song_scope;
-mod song_selection;
-mod song_view;
-mod startup;
-mod state;
-mod titlebar_view;
-mod view_helpers;
-mod view_state;
-mod volume;
-mod volume_state;
-mod volume_view;
+pub(in crate::app) mod prelude;
 
-use self::import::ImportUi;
-pub(crate) use auto_continue_state::AutoContinueRequest;
-pub(crate) use cover_state::CoverRequest;
-use cover_texture_state::CoverTextures;
-pub(crate) use daily_mix_state::DailyMixRequest;
-use desktop_state::DesktopState;
-use equalizer_state::EqualizerState;
-pub(crate) use favorites::FavoriteChange;
-pub(crate) use home_library::HomeAlbumSection;
-use import_flow::ImportStage;
-pub(crate) use library_playback::LibraryPlaybackRequest;
-pub(crate) use library_requests::LibraryRequest;
-use library_requests::LibraryRequests;
-use mini_window_state::MiniWindowState;
-pub(crate) use paged_collection::PageRequest;
-use paged_collection::PageRequests;
-use platform_window::*;
-use playback_reconnect::PlaybackReconnect;
-use playlist_dialog::PlaylistUi;
-use playlist_edit_state::PlaylistEditOrigin;
-use preload_state::PreloadState;
-pub(crate) use radio_state::RadioRequest;
-use scrolling_text_state::TextWidthCache;
-use search_state::SearchFilter;
-use server_removal_state::ServerRemovalState;
-use session_state::SessionState;
-use settings_state::{SettingsSection, ShortcutRecording};
-use shortcut_repeat::ShortcutRepeatGuard;
-use song_scope::SongScope;
-use state::AppState;
-use view_state::{QueueDrawerTab, View};
-use volume_state::VolumeState;
+mod covers;
+mod desktop;
+mod home;
+mod import;
+mod library;
+mod playback;
+mod player;
+mod playlists;
+mod queue;
+mod recommendations;
+mod search;
+mod server;
+mod settings;
+mod shell;
+mod shortcuts;
+mod songs;
+mod sound;
+mod widgets;
+
+pub(crate) use covers::state::CoverRequest;
+pub(crate) use home::albums::HomeAlbumSection;
+pub(crate) use library::favorites::FavoriteChange;
+pub(crate) use library::paged_collection::PageRequest;
+pub(crate) use library::playback::LibraryPlaybackRequest;
+pub(crate) use library::requests::LibraryRequest;
+pub(crate) use recommendations::auto_continue_state::AutoContinueRequest;
+pub(crate) use recommendations::daily_mix_state::DailyMixRequest;
+pub(crate) use recommendations::radio_state::RadioRequest;
 
 /// 全局视觉 token 修正：普通控件统一 8px，卡片/弹窗统一 12px；
 /// 同时提高亮色主题的小号次要文字对比度。
@@ -365,29 +157,4 @@ impl NavidromeApp {
             cx.notify();
         }
     }
-}
-
-fn technical_info_chip(
-    id: &'static str,
-    label: String,
-    color: Hsla,
-    cx: &Context<NavidromeApp>,
-) -> gpui_kit::AnyElement {
-    div()
-        .id(id)
-        .h(px(20.0))
-        .max_w(px(64.0))
-        .px_1p5()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.0))
-        .border_1()
-        .border_color(color.opacity(0.12))
-        .bg(color.opacity(0.045))
-        .text_size(px(12.0))
-        .text_color(cx.theme().foreground.opacity(0.74))
-        .truncate()
-        .child(label)
-        .into_any_element()
 }
