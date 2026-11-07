@@ -52,7 +52,7 @@ impl NavidromeApp {
                 this.child(self.render_queue_action_bar(compact, cx)).child(
                     v_flex()
                         .flex_1()
-                        .min_h_0()
+                        .min_h(px(200.0))
                         .child(self.render_song_list(SongScope::Queue, cx)),
                 )
             },
@@ -67,7 +67,7 @@ impl NavidromeApp {
                 this.child(
                     v_flex()
                         .flex_1()
-                        .min_h_0()
+                        .min_h(px(200.0))
                         .child(self.render_song_list(SongScope::History, cx)),
                 )
             },
