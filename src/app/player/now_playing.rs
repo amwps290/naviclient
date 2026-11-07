@@ -139,9 +139,7 @@ impl NavidromeApp {
                                 SharedString::from(format!("active-lyric-{}-{index}", song.id)),
                                 Animation::new(Duration::from_millis(280))
                                     .with_easing(ease_out_quint()),
-                                |this, delta| {
-                                    this.opacity(0.70 + delta * 0.30)
-                                },
+                                |this, delta| this.opacity(0.70 + delta * 0.30),
                             )
                             .into_any_element()
                     } else if synced {

@@ -27,9 +27,7 @@ fn skeleton_bar(
         .h(height)
         .rounded(rounded)
         .bg(sunken)
-        .with_animation(id, shimmer, move |this, opacity| {
-            this.opacity(opacity)
-        })
+        .with_animation(id, shimmer, move |this, opacity| this.opacity(opacity))
         .into_any_element()
 }
 

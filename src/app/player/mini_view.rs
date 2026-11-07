@@ -62,20 +62,8 @@ impl NavidromeApp {
             // 播放中封面外发光随封面调色板同步，静止时保留一层柔和阴影。
             .when(is_playing, |this| {
                 this.shadow(vec![
-                    box_shadow(
-                        px(0.0),
-                        px(0.0),
-                        px(8.0),
-                        px(0.0),
-                        accent.opacity(0.4),
-                    ),
-                    box_shadow(
-                        px(0.0),
-                        px(0.0),
-                        px(16.0),
-                        px(0.0),
-                        accent.opacity(0.2),
-                    ),
+                    box_shadow(px(0.0), px(0.0), px(8.0), px(0.0), accent.opacity(0.4)),
+                    box_shadow(px(0.0), px(0.0), px(16.0), px(0.0), accent.opacity(0.2)),
                 ])
             })
             .when(!is_playing, |this| this.shadow(cover_shadow(false, cx)))

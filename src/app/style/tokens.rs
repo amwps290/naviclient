@@ -135,6 +135,9 @@ pub(in crate::app) const HERO_COVER: f32 = 128.0;
 pub(in crate::app) const HERO_COVER_COMPACT: f32 = 96.0;
 pub(in crate::app) const HOVER_PLAY_BUTTON: f32 = 40.0;
 
+// Search.
+pub(in crate::app) const SEARCH_CONTROL_HEIGHT: f32 = 44.0;
+
 // Detail pages.
 pub(in crate::app) const DETAIL_TITLE: f32 = 40.0;
 pub(in crate::app) const DETAIL_TITLE_COMPACT: f32 = 28.0;

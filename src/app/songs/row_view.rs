@@ -81,9 +81,7 @@ impl NavidromeApp {
             .when(highlighted, |this| this.bg(p.brand_soft))
             .when(!highlighted, |this| this.hover(|style| style.bg(p.sunken)))
             // 当前播放歌曲添加左侧品牌色强调条
-            .when(current, |this| {
-                this.border_l_4().border_color(p.brand)
-            })
+            .when(current, |this| this.border_l_4().border_color(p.brand))
             .cursor_pointer();
         let position_indicator = if multi_selected {
             div()
