@@ -168,22 +168,42 @@ impl NavidromeApp {
                 linear_color_stop(hsla(0.0, 0.0, 0.115, 1.0), 0.0),
                 linear_color_stop(hsla(0.0, 0.0, 0.025, 1.0), 1.0),
             ))
-            .shadow(vec![
-                box_shadow(
-                    px(0.0),
-                    px(size * 0.008),
-                    px(size * 0.015),
-                    px(0.0),
-                    hsla(0.0, 0.0, 0.0, 0.32),
-                ),
-                box_shadow(
-                    px(0.0),
-                    px(size * 0.035),
-                    px(size * 0.08),
-                    px(-size * 0.015),
-                    hsla(0.0, 0.0, 0.0, 0.2),
-                ),
-            ])
+            .when(tonearm_engaged, |this| {
+                this.shadow(vec![
+                    box_shadow(
+                        px(0.0),
+                        px(size * 0.012),
+                        px(size * 0.024),
+                        px(0.0),
+                        hsla(0.0, 0.0, 0.0, 0.36),
+                    ),
+                    box_shadow(
+                        px(0.0),
+                        px(size * 0.045),
+                        px(size * 0.1),
+                        px(-size * 0.02),
+                        hsla(0.0, 0.0, 0.0, 0.24),
+                    ),
+                ])
+            })
+            .when(!tonearm_engaged, |this| {
+                this.shadow(vec![
+                    box_shadow(
+                        px(0.0),
+                        px(size * 0.008),
+                        px(size * 0.015),
+                        px(0.0),
+                        hsla(0.0, 0.0, 0.0, 0.32),
+                    ),
+                    box_shadow(
+                        px(0.0),
+                        px(size * 0.035),
+                        px(size * 0.08),
+                        px(-size * 0.015),
+                        hsla(0.0, 0.0, 0.0, 0.2),
+                    ),
+                ])
+            })
             .child(
                 div()
                     .absolute()

@@ -131,11 +131,17 @@ impl NavidromeApp {
                         line.text_size(px(tokens::LYRIC_ACTIVE))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.brand)
+                            .rounded(px(tokens::radius::LARGE))
+                            .bg(p.brand_soft)
+                            .px_6()
+                            .py_3()
                             .with_animation(
                                 SharedString::from(format!("active-lyric-{}-{index}", song.id)),
-                                Animation::new(Duration::from_millis(220))
+                                Animation::new(Duration::from_millis(280))
                                     .with_easing(ease_out_quint()),
-                                |this, delta| this.opacity(0.64 + delta * 0.36),
+                                |this, delta| {
+                                    this.opacity(0.70 + delta * 0.30)
+                                },
                             )
                             .into_any_element()
                     } else if synced {
