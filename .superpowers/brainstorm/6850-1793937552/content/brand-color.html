@@ -1,0 +1,120 @@
+<style>
+  .bc-wrap { display: flex; flex-direction: column; gap: 0; border-radius: 10px; overflow: hidden; font-family: system-ui, "Noto Sans CJK SC", sans-serif; }
+  .bc-pane { display: flex; gap: 12px; padding: 14px; }
+  .bc-nav { width: 74px; font-size: 11px; }
+  .bc-nav div { padding: 4px 8px; border-radius: 6px; margin-bottom: 2px; }
+  .bc-main { flex: 1; min-width: 0; font-size: 11px; }
+  .bc-title { font-family: Georgia, "Noto Serif CJK SC", serif; font-weight: 700; font-size: 17px; margin-bottom: 2px; }
+  .bc-btn { display: inline-block; padding: 5px 12px; border-radius: 20px; font-weight: 600; font-size: 11px; margin: 6px 0 8px; }
+  .bc-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+  .bc-cv { width: 20px; height: 20px; border-radius: 4px; background: linear-gradient(135deg,#a8a29e,#57534e); flex: none; }
+  .bc-prog { height: 3px; border-radius: 2px; margin-top: 10px; position: relative; }
+  .bc-prog i { position: absolute; left: 0; top: 0; bottom: 0; width: 42%; border-radius: 2px; }
+</style>
+
+<h2>品牌主色选哪个？</h2>
+<p class="subtitle">每张卡上半是浅色、下半是深色。演示了导航选中、主按钮、链接、当前播放行和进度条。封面故意用灰色，只看主色本身。四个颜色在两种模式下都达到 WCAG AA 对比度。</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="rose" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="bc-wrap">
+      <div class="bc-pane" style="background:#F7F3EE;color:#1C1917">
+        <div class="bc-nav"><div style="background:#BE3A6314;color:#BE3A63;font-weight:700">首页</div><div style="color:#78716C">专辑</div><div style="color:#78716C">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#BE3A63;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#BE3A63;color:#fff">▶ 播放全部</div>
+          <div class="bc-row" style="background:#BE3A6312"><div class="bc-cv"></div><span style="color:#BE3A63;font-weight:600">晴天</span></div>
+          <div class="bc-row"><div class="bc-cv"></div><span>以父之名</span></div>
+          <div class="bc-prog" style="background:#E7E5E4"><i style="background:#BE3A63"></i></div>
+        </div>
+      </div>
+      <div class="bc-pane" style="background:#1C1917;color:#F5F5F4">
+        <div class="bc-nav"><div style="background:#F28AA81F;color:#F28AA8;font-weight:700">首页</div><div style="color:#A8A29E">专辑</div><div style="color:#A8A29E">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#F28AA8;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#F28AA8;color:#1C1917">▶ 播放全部</div>
+          <div class="bc-row" style="background:#F28AA81A"><div class="bc-cv"></div><span style="color:#F28AA8;font-weight:600">晴天</span></div>
+          <div class="bc-prog" style="background:#44403C"><i style="background:#F28AA8"></i></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>玫瑰红</h3><p>草图 C 里用的那个。温暖、有情绪，和暖白底最搭，辨识度高，在国内音乐软件里也不常见。</p></div>
+  </div>
+
+  <div class="card" data-choice="coral" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="bc-wrap">
+      <div class="bc-pane" style="background:#F7F3EE;color:#1C1917">
+        <div class="bc-nav"><div style="background:#C2410C14;color:#C2410C;font-weight:700">首页</div><div style="color:#78716C">专辑</div><div style="color:#78716C">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#C2410C;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#C2410C;color:#fff">▶ 播放全部</div>
+          <div class="bc-row" style="background:#C2410C12"><div class="bc-cv"></div><span style="color:#C2410C;font-weight:600">晴天</span></div>
+          <div class="bc-row"><div class="bc-cv"></div><span>以父之名</span></div>
+          <div class="bc-prog" style="background:#E7E5E4"><i style="background:#C2410C"></i></div>
+        </div>
+      </div>
+      <div class="bc-pane" style="background:#1C1917;color:#F5F5F4">
+        <div class="bc-nav"><div style="background:#FB923C1F;color:#FB923C;font-weight:700">首页</div><div style="color:#A8A29E">专辑</div><div style="color:#A8A29E">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#FB923C;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#FB923C;color:#1C1917">▶ 播放全部</div>
+          <div class="bc-row" style="background:#FB923C1A"><div class="bc-cv"></div><span style="color:#FB923C;font-weight:600">晴天</span></div>
+          <div class="bc-prog" style="background:#44403C"><i style="background:#FB923C"></i></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>珊瑚橙</h3><p>更活泼、更有阳光感，偏年轻、偏娱乐，和暖底同色系，整体最“暖”。</p></div>
+  </div>
+
+  <div class="card" data-choice="green" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="bc-wrap">
+      <div class="bc-pane" style="background:#F7F3EE;color:#1C1917">
+        <div class="bc-nav"><div style="background:#2F6B4F14;color:#2F6B4F;font-weight:700">首页</div><div style="color:#78716C">专辑</div><div style="color:#78716C">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#2F6B4F;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#2F6B4F;color:#fff">▶ 播放全部</div>
+          <div class="bc-row" style="background:#2F6B4F12"><div class="bc-cv"></div><span style="color:#2F6B4F;font-weight:600">晴天</span></div>
+          <div class="bc-row"><div class="bc-cv"></div><span>以父之名</span></div>
+          <div class="bc-prog" style="background:#E7E5E4"><i style="background:#2F6B4F"></i></div>
+        </div>
+      </div>
+      <div class="bc-pane" style="background:#1C1917;color:#F5F5F4">
+        <div class="bc-nav"><div style="background:#6FCF9F1F;color:#6FCF9F;font-weight:700">首页</div><div style="color:#A8A29E">专辑</div><div style="color:#A8A29E">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#6FCF9F;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#6FCF9F;color:#1C1917">▶ 播放全部</div>
+          <div class="bc-row" style="background:#6FCF9F1A"><div class="bc-cv"></div><span style="color:#6FCF9F;font-weight:600">晴天</span></div>
+          <div class="bc-prog" style="background:#44403C"><i style="background:#6FCF9F"></i></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>墨绿</h3><p>沉静、文艺，像纸质杂志和黑胶唱片店，最“有品位”，但娱乐感弱一些。</p></div>
+  </div>
+
+  <div class="card" data-choice="indigo" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="bc-wrap">
+      <div class="bc-pane" style="background:#F7F3EE;color:#1C1917">
+        <div class="bc-nav"><div style="background:#4338CA14;color:#4338CA;font-weight:700">首页</div><div style="color:#78716C">专辑</div><div style="color:#78716C">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#4338CA;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#4338CA;color:#fff">▶ 播放全部</div>
+          <div class="bc-row" style="background:#4338CA12"><div class="bc-cv"></div><span style="color:#4338CA;font-weight:600">晴天</span></div>
+          <div class="bc-row"><div class="bc-cv"></div><span>以父之名</span></div>
+          <div class="bc-prog" style="background:#E7E5E4"><i style="background:#4338CA"></i></div>
+        </div>
+      </div>
+      <div class="bc-pane" style="background:#1C1917;color:#F5F5F4">
+        <div class="bc-nav"><div style="background:#A5B4FC1F;color:#A5B4FC;font-weight:700">首页</div><div style="color:#A8A29E">专辑</div><div style="color:#A8A29E">艺术家</div></div>
+        <div class="bc-main">
+          <div class="bc-title">叶惠美</div><div>by <span style="color:#A5B4FC;font-weight:600">周杰伦</span> · 2003</div>
+          <div class="bc-btn" style="background:#A5B4FC;color:#1C1917">▶ 播放全部</div>
+          <div class="bc-row" style="background:#A5B4FC1A"><div class="bc-cv"></div><span style="color:#A5B4FC;font-weight:600">晴天</span></div>
+          <div class="bc-prog" style="background:#44403C"><i style="background:#A5B4FC"></i></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>靛蓝</h3><p>冷静、清爽，对比度最高，和暖底形成冷暖对比。科技感稍强，最接近“现在”的感觉。</p></div>
+  </div>
+
+</div>

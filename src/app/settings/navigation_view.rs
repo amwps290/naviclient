@@ -84,8 +84,9 @@ impl NavidromeApp {
                     )
                     .child(div().min_w_0().text_sm().truncate().child(label)),
             )
-            .ghost()
+            .custom(soft_toggle_style(selected, cx))
             .selected(selected)
+            .rounded(px(tokens::radius::CONTROL))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.cancel_shortcut_recording();
                 this.state.settings.section = section;
@@ -116,9 +117,6 @@ impl NavidromeApp {
                 .flex_none()
                 .gap_1()
                 .p_2()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().secondary.opacity(0.25))
                 .children(buttons)
                 .into_any_element()
         } else {
@@ -127,9 +125,6 @@ impl NavidromeApp {
                 .flex_none()
                 .gap_1()
                 .p_3()
-                .border_r_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().secondary.opacity(0.25))
                 .children(buttons)
                 .into_any_element()
         }

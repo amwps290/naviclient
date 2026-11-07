@@ -1,8 +1,8 @@
 //! Window layout thresholds, stable element keys, and song row selection.
 
 use gpui_kit::Modifiers;
-/// 歌曲行高：60px 内容 + 1px 顶部边框。uniform_list 限高模式和封面预取都依赖它。
-pub(in crate::app) const SONG_ROW_HEIGHT: f32 = 61.0;
+/// 歌曲行高。uniform_list 限高模式和封面预取都依赖它。
+pub(in crate::app) const SONG_ROW_HEIGHT: f32 = 56.0;
 
 pub(in crate::app) fn compact_window_layout(viewport_width: f32) -> bool {
     viewport_width < 1_040.0

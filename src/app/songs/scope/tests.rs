@@ -135,3 +135,18 @@ fn switching_between_every_scope_pair_starts_a_new_selection_and_anchor() {
         }
     }
 }
+
+#[test]
+fn only_album_detail_hides_the_repeated_row_cover() {
+    assert!(!SongScope::AlbumDetail.shows_row_cover());
+    for scope in [
+        SongScope::Queue,
+        SongScope::History,
+        SongScope::PlaylistDetail,
+        SongScope::Favorites,
+        SongScope::Search,
+        SongScope::ArtistTop,
+    ] {
+        assert!(scope.shows_row_cover(), "{scope}");
+    }
+}

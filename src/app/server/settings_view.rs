@@ -147,16 +147,12 @@ impl NavidromeApp {
 
         let mut card = v_flex()
             .w_full()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().border.opacity(0.72))
-            .bg(cx.theme().secondary.opacity(0.18))
+            .gap_6()
             // ---- 上：服务器列表 ----
             .child(
                 v_flex()
                     .w_full()
                     .gap_2()
-                    .p_4()
                     .child(self.render_server_list(cx))
                     .child(
                         v_flex()
@@ -214,9 +210,7 @@ impl NavidromeApp {
             );
         // ---- 下：编辑表单（仅在行内铅笔点开或条目未配置时存在） ----
         if let Some(target) = form_target {
-            card = card
-                .child(div().h(px(1.0)).bg(cx.theme().border))
-                .child(self.render_server_edit_form(target, cx));
+            card = card.child(self.render_server_edit_form(target, cx));
         }
         card.into_any_element()
     }

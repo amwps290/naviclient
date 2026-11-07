@@ -11,14 +11,10 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         v_flex()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().border.opacity(0.72))
-            .overflow_hidden()
             .children(
-                actions.iter().enumerate().map(|(index, action)| {
-                    self.render_shortcut_row(*action, global, index > 0, cx)
-                }),
+                actions
+                    .iter()
+                    .map(|action| self.render_shortcut_row(*action, global, cx)),
             )
             .into_any_element()
     }
@@ -27,7 +23,6 @@ impl NavidromeApp {
         &self,
         action: ShortcutAction,
         global: bool,
-        separated: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let recording = self.state.settings.is_recording(action, global);
@@ -66,12 +61,8 @@ impl NavidromeApp {
         let unsupported = global && !cfg!(target_os = "windows");
 
         v_flex()
-            .px_4()
             .py_3()
             .gap_1()
-            .when(separated, |row| {
-                row.border_t_1().border_color(cx.theme().border)
-            })
             .child(
                 h_flex()
                     .justify_between()

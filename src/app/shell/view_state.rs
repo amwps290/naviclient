@@ -34,6 +34,14 @@ impl View {
         self == current || current.detail_parent() == Some(self)
     }
 
+    /// These pages open with a full-bleed header and pad their own content.
+    pub(in crate::app) fn has_detail_hero(self) -> bool {
+        matches!(
+            self,
+            Self::ArtistDetail | Self::AlbumDetail | Self::PlaylistDetail
+        )
+    }
+
     /// 侧边栏入口的稳定元素 ID 前缀。与显示文案解耦，切换界面语言时
     /// 元素 ID 不变（否则 GPUI 会把整行当作新元素、丢掉悬停/焦点状态）。
     pub(in crate::app) fn nav_id(self) -> &'static str {

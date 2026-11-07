@@ -19,7 +19,10 @@ impl NavidromeApp {
             window.defer(cx, move |window, cx| {
                 window.open_dialog(cx, move |dialog, _, cx| {
                     render_app
-                        .update(cx, |this, cx| this.render_song_info_dialog(dialog, cx))
+                        .update(cx, |this, cx| {
+                            let dialog = this.render_song_info_dialog(dialog, cx);
+                            crate::app::style::surface::raised_dialog(dialog, cx)
+                        })
                         .expect("app owns song info dialog")
                 });
             });

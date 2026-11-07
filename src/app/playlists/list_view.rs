@@ -1,78 +1,69 @@
 //! 播放列表集合页、空状态及创建和导入入口渲染。
 
 use crate::app::prelude::*;
+use crate::app::widgets::shelf::cover_grid;
 
 impl NavidromeApp {
-    pub(in crate::app) fn render_playlists(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        let playlist_list = v_flex()
-            .w_full()
-            .border_t_1()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.72))
-            .children(self.state.playlists.visible_items().iter().enumerate().map(
-                |(index, playlist)| {
+    pub(in crate::app) fn render_playlists(
+        &self,
+        window: &mut Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let columns = self.content_columns(window);
+        let p = palette(cx);
+        let playlist_list = cover_grid(
+            columns,
+            self.state
+                .playlists
+                .visible_items()
+                .iter()
+                .map(|playlist| {
                     let playlist_for_click = playlist.clone();
-                    let track_count = playlist.song_count.unwrap_or_default();
-                    let details = playlist
-                        .owner
-                        .as_deref()
-                        .filter(|owner| !owner.trim().is_empty())
-                        .map(|owner| {
-                            t!(
-                                "%{track_count} tracks | %{owner}",
-                                track_count = track_count,
-                                owner = owner
-                            )
-                        })
-                        .unwrap_or_else(|| t!("%{track_count} tracks", track_count = track_count));
-
-                    h_flex()
+                    let shared_owner =
+                        (!crate::playlist::can_edit(playlist, &self.config.username))
+                            .then_some(playlist.owner.as_deref())
+                            .flatten();
+                    let details = playlist_card_subtitle(
+                        playlist.song_count.unwrap_or_default(),
+                        playlist.duration,
+                        shared_owner,
+                    );
+                    v_flex()
                         .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
-                        .h(px(68.0))
-                        .px_3()
-                        .gap_3()
-                        .items_center()
+                        .min_w_0()
+                        .gap_1()
                         .cursor_pointer()
-                        .when(index > 0, |this| {
-                            this.border_t_1()
-                                .border_color(cx.theme().border.opacity(0.52))
-                        })
-                        .hover(|style| style.bg(cx.theme().list_hover))
-                        .child(self.render_cover(playlist.cover_art.as_deref(), 48.0, cx))
+                        .child(div().mb_1().child(self.render_cover_styled(
+                            playlist.cover_art.as_deref(),
+                            columns.width,
+                            tokens::radius::COVER,
+                            cover_shadow(false, cx),
+                        )))
                         .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .truncate()
-                                        .child(playlist.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .truncate()
-                                        .child(details),
-                                ),
+                            div()
+                                .text_size(px(tokens::BODY))
+                                .font_weight(FontWeight::MEDIUM)
+                                .truncate()
+                                .child(playlist.name.clone()),
                         )
                         .child(
-                            Icon::new(AppIcon::ChevronRight)
-                                .small()
-                                .text_color(cx.theme().muted_foreground),
+                            div()
+                                .text_size(px(tokens::META))
+                                .text_color(p.text_secondary)
+                                .truncate()
+                                .child(details),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_playlist(playlist_for_click.clone());
                             cx.notify();
                         }))
-                },
-            ));
+                        .into_any_element()
+                })
+                .collect::<Vec<_>>(),
+        );
 
         v_flex()
-            .gap_5()
+            .gap_6()
             .child(
                 h_flex()
                     .w_full()
@@ -122,7 +113,7 @@ impl NavidromeApp {
             )
             .when(
                 self.state.playlists.items().is_empty() && self.state.playlists.list_loading(),
-                |this| this.child(self.render_list_skeleton(8, cx)),
+                |this| this.child(self.render_album_skeleton_grid(window, cx)),
             )
             .when(
                 self.state.playlists.items().is_empty() && !self.state.playlists.list_loading(),
@@ -165,3 +156,22 @@ impl NavidromeApp {
             .into_any_element()
     }
 }
+
+fn playlist_card_subtitle(
+    track_count: i32,
+    duration: Option<i32>,
+    shared_owner: Option<&str>,
+) -> String {
+    let mut parts = vec![t!("%{track_count} tracks", track_count = track_count).to_string()];
+    if duration.is_some() {
+        parts.push(format_duration(duration));
+    }
+    if let Some(owner) = shared_owner {
+        parts.push(t!("Shared").to_string());
+        parts.push(owner.to_string());
+    }
+    parts.join(" · ")
+}
+
+#[cfg(test)]
+mod tests;

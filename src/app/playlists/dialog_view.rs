@@ -25,7 +25,12 @@ impl NavidromeApp {
                         count = songs.len()
                     ));
                 }
-                content = content.child(Input::new(input).disabled(busy).w_full());
+                content = content.child(
+                    Input::new(input)
+                        .disabled(busy)
+                        .w_full()
+                        .bg(palette(cx).sunken),
+                );
                 (
                     if playlist.is_some() {
                         t!("Rename playlist")

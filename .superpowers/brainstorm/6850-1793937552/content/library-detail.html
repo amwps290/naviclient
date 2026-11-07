@@ -1,0 +1,119 @@
+<style>
+  .lb { font-family: system-ui, "Noto Sans CJK SC", sans-serif; background:#F7F3EE; color:#1C1917; border-radius:12px; overflow:hidden; box-shadow:0 0 0 1px rgba(0,0,0,.08); }
+  .lb-serif { font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif; font-weight:700; }
+  .lb-cv { border-radius:12px; flex:none; }
+  .g1 { background:linear-gradient(135deg,#f6a35c,#c2416b); } .g2 { background:linear-gradient(135deg,#3b82c4,#0f2a4a); }
+  .g3 { background:linear-gradient(135deg,#9bd28a,#2f6b4f); } .g4 { background:linear-gradient(135deg,#e9d6a8,#8a6a3a); }
+  .g5 { background:linear-gradient(135deg,#b48ce0,#3a2a6b); } .g6 { background:linear-gradient(135deg,#f0b4c8,#8c2f55); }
+  .g7 { background:linear-gradient(135deg,#7dd3c8,#1f5f63); }
+  .lb-play { border-radius:50%; background:#B53660; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(181,54,96,.3); flex:none; }
+  .lb-btn { display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 16px; border-radius:999px; font-size:13px; font-weight:600; background:rgba(255,255,255,.7); }
+  .lb-ib { width:36px; height:36px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; color:#57534E; background:rgba(255,255,255,.7); }
+  .lb-head { display:flex; align-items:center; height:32px; padding:0 12px; gap:12px; font-size:12px; color:#6F6863; }
+  .lb-row { display:flex; align-items:center; height:56px; padding:0 12px; gap:12px; border-radius:10px; font-size:14px; }
+  .lb-row .n { width:28px; text-align:center; font-size:13px; color:#6F6863; }
+  .lb-row .tt { flex:3; min-width:0; }
+  .lb-row .tt div:nth-child(2) { font-size:12px; color:#57534E; margin-top:2px; }
+  .lb-row .ar { flex:2; font-size:13px; color:#57534E; }
+  .lb-row .d { width:56px; text-align:right; font-size:13px; color:#6F6863; }
+  .lb-row .ac { width:96px; display:flex; justify-content:flex-end; gap:10px; color:#6F6863; font-size:13px; }
+  .lb-ann { font-size:12px; color:#B53660; }
+  .lb-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:20px; }
+  .lb-grid .t { font-size:14px; font-weight:500; margin-top:10px; }
+  .lb-grid .s { font-size:12px; color:#57534E; margin-top:2px; }
+</style>
+
+<h2>第 4 段：详情页、歌曲列表、媒体库网格</h2>
+<p class="subtitle">专辑详情页是主角，艺术家和播放列表详情用同一种头部。玫瑰红小字是标注。</p>
+
+<div class="mockup">
+  <div class="mockup-header">专辑详情页（正在播放第 1 首，鼠标悬停在第 3 首）</div>
+  <div class="mockup-body" style="padding:12px">
+    <div class="lb">
+      <div style="padding:32px 32px 28px;display:flex;gap:28px;align-items:flex-end;background:linear-gradient(180deg,#F6D9D2 0%,#F7F3EE 100%)">
+        <div class="lb-cv g1" style="width:220px;height:220px;box-shadow:0 16px 36px rgba(120,40,70,.28)"></div>
+        <div style="min-width:0;padding-bottom:4px">
+          <div style="font-size:13px;font-weight:600;color:#8C3A55">专辑</div>
+          <div class="lb-serif" style="font-size:40px;line-height:1.15;margin:6px 0 8px">叶惠美</div>
+          <div style="font-size:14px;color:#57534E"><span style="color:#B53660;font-weight:600">周杰伦</span> · 2003 · 11 首 · 47 分钟</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:20px">
+            <div class="lb-play" style="width:48px;height:48px;font-size:16px">▶</div>
+            <span class="lb-btn">＋ 全部加入队列</span>
+            <span class="lb-ib" style="color:#B53660">♥</span>
+            <span class="lb-ib">☰＋</span>
+          </div>
+        </div>
+      </div>
+      <div class="lb-ann" style="padding:0 32px 8px">头部背景：封面主色的淡色，从上往下渐隐到页面底色；没有边框和分割线</div>
+      <div style="padding:0 20px 24px">
+        <div class="lb-head"><span style="width:28px;text-align:center">#</span><span style="flex:3">标题</span><span style="flex:2">艺术家</span><span style="width:56px;text-align:right">时长</span><span style="width:96px"></span></div>
+        <div class="lb-row" style="background:#F2E4E3">
+          <span class="n" style="color:#B53660">▮▮▮</span>
+          <div class="tt"><div style="color:#B53660;font-weight:600">晴天</div><div>叶惠美</div></div>
+          <span class="ar">周杰伦</span><span class="d">4:29</span><span class="ac"><span style="color:#B53660">♥</span><span>⋯</span></span>
+        </div>
+        <div class="lb-row"><span class="n">2</span><div class="tt"><div>以父之名</div><div>叶惠美</div></div><span class="ar">周杰伦</span><span class="d">5:41</span><span class="ac"><span>⋯</span></span></div>
+        <div class="lb-row" style="background:#EFE9E2"><span class="n" style="color:#1C1917">▶</span><div class="tt"><div>懦夫</div><div>叶惠美</div></div><span class="ar">周杰伦</span><span class="d">3:30</span><span class="ac"><span>♡</span><span>▶</span><span>⋯</span></span></div>
+        <div class="lb-row"><span class="n">4</span><div class="tt"><div>东风破</div><div>叶惠美</div></div><span class="ar">周杰伦</span><span class="d">5:13</span><span class="ac"><span>⋯</span></span></div>
+        <div class="lb-row"><span class="n">5</span><div class="tt"><div>三年二班</div><div>叶惠美</div></div><span class="ar">周杰伦</span><span class="d">4:40</span><span class="ac"><span>⋯</span></span></div>
+        <div class="lb-ann" style="padding:8px 12px 0">行与行之间没有横线；悬停是凹陷底色；正在播放是淡玫瑰底加跳动的音柱。专辑页里的行不再重复显示专辑封面。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:16px">
+  <div class="mockup">
+    <div class="mockup-header">艺术家详情头部</div>
+    <div class="mockup-body" style="padding:12px">
+      <div class="lb">
+        <div style="padding:28px;display:flex;gap:22px;align-items:center;background:linear-gradient(180deg,#DCE6EF 0%,#F7F3EE 100%)">
+          <div class="g2" style="width:150px;height:150px;border-radius:50%;flex:none;box-shadow:0 14px 30px rgba(15,42,74,.25)"></div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#3A5A7A">艺术家</div>
+            <div class="lb-serif" style="font-size:36px;margin:4px 0 6px">周杰伦</div>
+            <div style="font-size:13px;color:#57534E">15 张专辑</div>
+            <div style="display:flex;gap:8px;margin-top:16px"><div class="lb-play" style="width:44px;height:44px">▶</div><span class="lb-btn">播放热门</span><span class="lb-btn">艺术家电台</span></div>
+          </div>
+        </div>
+        <div style="padding:8px 28px 24px">
+          <div class="lb-serif" style="font-size:18px;margin:8px 0 10px">热门歌曲</div>
+          <div style="font-size:12px;color:#6F6863">（歌曲列表，同上）</div>
+          <div class="lb-serif" style="font-size:18px;margin:24px 0 10px">专辑</div>
+          <div style="font-size:12px;color:#6F6863">（专辑网格，统一列网格）</div>
+        </div>
+      </div>
+      <div class="lb-ann" style="margin-top:8px">艺术家图片改为圆形，网格里的艺术家卡片也一样，一眼区分“人”和“专辑”。</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">播放列表页：从列表改成封面网格</div>
+    <div class="mockup-body" style="padding:12px">
+      <div class="lb" style="padding:28px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div><div class="lb-serif" style="font-size:32px">播放列表</div><div style="font-size:13px;color:#57534E;margin-top:4px">6 个播放列表</div></div>
+          <div style="display:flex;gap:8px"><span class="lb-btn" style="background:#B53660;color:#fff">＋ 新建</span><span class="lb-btn" style="background:#EFE9E2">导入</span><span class="lb-ib" style="background:transparent">↻</span></div>
+        </div>
+        <div class="lb-grid" style="grid-template-columns:repeat(3,1fr);margin-top:24px">
+          <div><div class="lb-cv g6" style="aspect-ratio:1"></div><div class="t">夜跑</div><div class="s">42 首 · 2 小时 51 分</div></div>
+          <div><div class="lb-cv g3" style="aspect-ratio:1"></div><div class="t">周末早晨</div><div class="s">18 首</div></div>
+          <div><div class="lb-cv g4" style="aspect-ratio:1"></div><div class="t">老歌</div><div class="s">105 首 · 共享</div></div>
+        </div>
+      </div>
+      <div class="lb-ann" style="margin-top:8px">播放列表本来就有封面，换成和专辑一样的网格；点击、右键、重命名、删除都不变。</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px;font-size:14px;line-height:1.7">
+  <h3>要点</h3>
+  <ul>
+    <li><b>详情页头部统一：</b>大封面（专辑 220、艺术家 150 圆形），类型小标签，40 号衬线标题，元信息一行，再下面是一个玫瑰红圆形主按钮加几个胶囊次要按钮。按钮的种类和功能和现在一一对应。</li>
+    <li><b>头部背景用封面主色的淡色，从上往下渐隐到页面底色。</b>这是封面色出现在内容上的又一处，标题栏和侧栏不受影响。</li>
+    <li><b>歌曲列表：</b>行高 56，行间不画横线；悬停是凹陷底色，正在播放是淡玫瑰底，多选沿用现在的勾选方块，改为品牌色。列头是 12 号弱化小字，去掉下边线。单击播放、双击、右键、多选、快捷键全部不变。</li>
+    <li><b>行内封面按场景显示：</b>专辑详情页里所有行的封面都一样，就不重复显示了；收藏、搜索、播放列表、队列这些混合列表照旧显示小封面。</li>
+    <li><b>媒体库网格页</b>（艺术家、专辑、流派、收藏）用统一列网格，页头是衬线大标题加数量，排序和刷新放在右侧。流派卡片做成纯色块，颜色由名字决定，上面写流派名。</li>
+    <li><b>搜索页：</b>搜索框放大成胶囊形，结果仍按艺术家、专辑、歌曲三组显示，样式套用上面这些规则。</li>
+  </ul>
+</div>

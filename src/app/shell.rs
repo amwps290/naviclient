@@ -1,6 +1,7 @@
 //! Application construction, global state, top-level layout, navigation and polling.
 
 pub(in crate::app) mod content;
+pub(in crate::app) mod layout;
 pub(in crate::app) mod messages;
 pub(in crate::app) mod navigation;
 pub(in crate::app) mod polling;

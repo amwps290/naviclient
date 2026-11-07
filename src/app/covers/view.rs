@@ -9,6 +9,16 @@ impl NavidromeApp {
         size: f32,
         _cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        self.render_cover_styled(cover_id, size, tokens::radius::COVER, Vec::new())
+    }
+
+    pub(in crate::app) fn render_cover_styled(
+        &self,
+        cover_id: Option<&str>,
+        size: f32,
+        radius: f32,
+        shadows: Vec<gpui_kit::BoxShadow>,
+    ) -> gpui_kit::AnyElement {
         let cover = cover_id
             .and_then(|id| self.state.covers.image(id))
             .cloned()
@@ -20,7 +30,8 @@ impl NavidromeApp {
             .aspect_square()
             .object_fit(ObjectFit::Cover)
             .flex_none()
-            .rounded(px(12.0))
+            .rounded(px(radius))
+            .shadow(shadows)
             .into_any_element()
     }
 
@@ -49,7 +60,9 @@ impl NavidromeApp {
         let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
         let tonearm_base_size = size * 0.105;
         let tonearm_engaged_turns = 28.0 / 360.0;
-        let metal_tint = self.now_playing_accent(cx);
+        let metal_tint = self
+            .now_playing_cover_palette()
+            .map_or(palette(cx).text_muted, |(_, accent)| accent);
         let metal_body = hsla(0.1, 0.025, 0.78, 1.0).blend(metal_tint.opacity(0.06));
         let cover_key = cover_id.unwrap_or("default");
         let tonearm_layer =

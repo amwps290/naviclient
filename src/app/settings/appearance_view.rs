@@ -17,39 +17,28 @@ impl NavidromeApp {
     fn render_theme_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
+            .child(section_title(t!("Theme"), cx))
             .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Theme")),
-            )
-            .child(
-                v_flex()
-                    .gap_3()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
-                    .child(
-                        h_flex().gap_2().children(
-                            [
-                                ThemePreference::Light,
-                                ThemePreference::Dark,
-                                ThemePreference::System,
-                            ]
-                            .into_iter()
-                            .map(|preference| {
-                                // ID 用 Debug 名（Light/Dark/System），
-                                // 不随界面语言变化。
-                                Button::new(SharedString::from(format!("theme-{preference:?}")))
-                                    .label(preference.label())
-                                    .selected(self.config.theme == preference)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.set_theme(preference, window, cx);
-                                    }))
-                            }),
-                        ),
+                v_flex().gap_3().child(
+                    h_flex().gap_2().children(
+                        [
+                            ThemePreference::Light,
+                            ThemePreference::Dark,
+                            ThemePreference::System,
+                        ]
+                        .into_iter()
+                        .map(|preference| {
+                            // ID 用 Debug 名（Light/Dark/System），
+                            // 不随界面语言变化。
+                            Button::new(SharedString::from(format!("theme-{preference:?}")))
+                                .label(preference.label())
+                                .selected(self.config.theme == preference)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.set_theme(preference, window, cx);
+                                }))
+                        }),
                     ),
+                ),
             )
             .into_any_element()
     }
@@ -57,21 +46,12 @@ impl NavidromeApp {
     fn render_language_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Language")),
-            )
+            .child(section_title(t!("Language"), cx))
             .child(
                 h_flex()
                     .justify_between()
                     .items_center()
                     .gap_4()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
                     .child(
                         v_flex().flex_1().min_w_0().child(
                             div()

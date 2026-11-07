@@ -43,8 +43,11 @@ impl NavidromeApp {
             // 与歌单弹窗同因：先等菜单层收尾，再安装弹窗的焦点域。
             window.defer(cx, move |window, cx| {
                 window.open_dialog(cx, move |dialog, _, cx| {
-                    app.update(cx, |this, cx| this.render_remove_server_dialog(dialog, cx))
-                        .expect("app owns dialog")
+                    app.update(cx, |this, cx| {
+                        let dialog = this.render_remove_server_dialog(dialog, cx);
+                        crate::app::style::surface::raised_dialog(dialog, cx)
+                    })
+                    .expect("app owns dialog")
                 });
             });
         }

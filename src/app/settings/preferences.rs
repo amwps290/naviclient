@@ -120,6 +120,7 @@ impl NavidromeApp {
         let locale = preference.resolve();
         rust_i18n::set_locale(locale);
         crate::typography::configure_ui_font(cx, locale);
+        crate::typography::configure_serif_font(cx, locale);
         // 托盘菜单是原生控件：重建一次让它也换成新语言。
         tray::refresh_labels();
         if let Err(error) = config::save(&self.config) {

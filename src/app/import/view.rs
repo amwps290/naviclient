@@ -1,6 +1,5 @@
 //! Playlist import dialog rendering and review summaries.
 
-use crate::app::covers::artwork::readable_accent;
 use crate::app::prelude::*;
 use crate::import;
 use gpui_kit::component::dialog::Dialog;
@@ -32,7 +31,7 @@ impl NavidromeApp {
                                     "Paste a NetEase Cloud Music or QQ Music playlist link."
                                 )),
                         )
-                        .child(Input::new(input).w_full())
+                        .child(Input::new(input).w_full().bg(palette(cx).sunken))
                         .child(
                             div()
                                 .text_xs()
@@ -60,7 +59,7 @@ impl NavidromeApp {
                 } else {
                     t!("Fetching playlist…")
                 };
-                let bar = readable_accent(cx.theme().accent, cx.theme().background);
+                let bar = palette(cx).brand;
                 if let Some(playlist) = self.import_ui.flow.matching_playlist() {
                     content = content.child(
                         div()
@@ -102,6 +101,7 @@ impl NavidromeApp {
                         .child(
                             Input::new(input)
                                 .w_full()
+                                .bg(palette(cx).sunken)
                                 .disabled(self.state.playlists.editing()),
                         );
                 }
@@ -217,8 +217,6 @@ impl NavidromeApp {
                         v_flex()
                             .gap_1()
                             .p_3()
-                            .border_b_1()
-                            .border_color(cx.theme().border.opacity(0.7))
                             .child(
                                 h_flex()
                                     .gap_2()

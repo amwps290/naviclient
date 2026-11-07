@@ -1,23 +1,6 @@
 use super::*;
 
 #[test]
-fn cover_accent_remains_readable_on_light_and_dark_backgrounds() {
-    let source = hsla(0.15, 0.9, 0.62, 1.0);
-    let light = hsla(0.0, 0.0, 0.96, 1.0);
-    let dark = hsla(0.0, 0.0, 0.08, 1.0);
-
-    assert!(contrast_ratio(readable_accent(source, light), light) >= 4.5);
-    assert!(contrast_ratio(readable_accent(source, dark), dark) >= 4.5);
-}
-
-#[test]
-fn accent_button_foreground_prefers_the_stronger_contrast() {
-    let accent = hsla(0.12, 0.7, 0.72, 1.0);
-    let foreground = accent_foreground(accent);
-    assert!(contrast_ratio(foreground, accent) >= 4.5);
-}
-
-#[test]
 fn extracts_palette_from_default_cover() {
     let palette = extract_cover_palette(include_bytes!("../../../../assets/default-cover.png"));
     assert!(palette.is_some());

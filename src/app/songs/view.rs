@@ -63,7 +63,7 @@ impl NavidromeApp {
         // 模式不套用 min/max），Infer+max_h 会让列表按全部内容高度参与布局。
         let viewport = self.content_scroll_handle.bounds().size.height;
         let cap = if viewport > px(0.0) {
-            (viewport - px(36.0)).max(px(300.0))
+            (viewport - px(32.0)).max(px(300.0))
         } else {
             px(600.0)
         };
@@ -90,18 +90,17 @@ impl NavidromeApp {
             .when(!queue_drawer, |this| {
                 this.child(
                     h_flex()
-                        .h(px(36.0))
+                        .h(px(32.0))
                         .flex_none()
                         .px_3()
                         .gap_3()
-                        .border_b_1()
-                        .border_color(cx.theme().border.opacity(0.72))
-                        .bg(cx.theme().secondary.opacity(0.14))
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(cx.theme().muted_foreground)
+                        .items_center()
+                        .text_size(px(tokens::CAPTION))
+                        .text_color(palette(cx).text_muted)
                         .child(div().w(px(28.0)))
-                        .child(div().w(px(42.0)))
+                        .when(scope.shows_row_cover(), |this| {
+                            this.child(div().w(px(42.0)))
+                        })
                         .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
                         .when(!compact_columns, |this| {
                             this.child(
@@ -149,90 +148,91 @@ impl NavidromeApp {
             t!("Favorite selected")
         };
         let add_disabled = self.state.playlists.editing() || self.api.is_none();
-        h_flex()
-            .h(px(44.0))
-            .flex_none()
-            .w_full()
-            .px_3()
-            .gap_2()
-            .items_center()
-            .bg(cx.theme().list_active)
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(cx.theme().primary)
-                    .child(t!("%{count} selected", count = summary.count)),
-            )
-            .child(div().flex_1())
-            .child(
-                Button::new(SharedString::from(format!("multi-play-{scope}")))
-                    .icon(PlayerIcon::Play)
-                    .tooltip(t!("Play selected (Enter)"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.play_selected_songs(scope);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("multi-next-{scope}")))
-                    .icon(PlayerIcon::Next)
-                    .tooltip(t!("Play selected next"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.selected_play_next(scope);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("multi-queue-{scope}")))
-                    .icon(AppIcon::Queue)
-                    .tooltip(t!("Add selected to queue"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.selected_to_queue(scope);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("multi-playlist-{scope}")))
-                    .label(t!("Add to playlist…"))
-                    .disabled(add_disabled)
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        let ids = this.state.selected_song_ids(scope);
-                        this.choose_playlist(ids, window, cx);
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("multi-favorite-{scope}")))
-                    .icon(favorite_icon)
-                    .tooltip(favorite_label)
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.favorite_selected(scope);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("multi-clear-{scope}")))
-                    .icon(AppIcon::Close)
-                    .tooltip(t!("Clear selection (Esc)"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.clear_song_multi();
-                        cx.notify();
-                    })),
-            )
-            .into_any_element()
+        raised_surface(
+            h_flex()
+                .h(px(44.0))
+                .flex_none()
+                .m_2()
+                .px_3()
+                .gap_2()
+                .items_center(),
+            tokens::radius::LARGE,
+            cx,
+        )
+        .child(
+            div()
+                .text_size(px(tokens::BODY))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(palette(cx).brand)
+                .child(t!("%{count} selected", count = summary.count)),
+        )
+        .child(div().flex_1())
+        .child(
+            Button::new(SharedString::from(format!("multi-play-{scope}")))
+                .icon(PlayerIcon::Play)
+                .tooltip(t!("Play selected (Enter)"))
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.play_selected_songs(scope);
+                    cx.notify();
+                })),
+        )
+        .child(
+            Button::new(SharedString::from(format!("multi-next-{scope}")))
+                .icon(PlayerIcon::Next)
+                .tooltip(t!("Play selected next"))
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.selected_play_next(scope);
+                    cx.notify();
+                })),
+        )
+        .child(
+            Button::new(SharedString::from(format!("multi-queue-{scope}")))
+                .icon(AppIcon::Queue)
+                .tooltip(t!("Add selected to queue"))
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.selected_to_queue(scope);
+                    cx.notify();
+                })),
+        )
+        .child(
+            Button::new(SharedString::from(format!("multi-playlist-{scope}")))
+                .label(t!("Add to playlist…"))
+                .disabled(add_disabled)
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let ids = this.state.selected_song_ids(scope);
+                    this.choose_playlist(ids, window, cx);
+                })),
+        )
+        .child(
+            Button::new(SharedString::from(format!("multi-favorite-{scope}")))
+                .icon(favorite_icon)
+                .tooltip(favorite_label)
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.favorite_selected(scope);
+                    cx.notify();
+                })),
+        )
+        .child(
+            Button::new(SharedString::from(format!("multi-clear-{scope}")))
+                .icon(AppIcon::Close)
+                .tooltip(t!("Clear selection (Esc)"))
+                .ghost()
+                .small()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.clear_song_multi();
+                    cx.notify();
+                })),
+        )
+        .into_any_element()
     }
 }

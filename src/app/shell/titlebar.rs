@@ -44,64 +44,33 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    /// 主窗口标题栏：左侧呈现页面上下文，右侧保留窗口级工具；
-    /// 详情页提供返回其所属媒体库分区的明确入口。
+    /// 主窗口标题栏：页面名称由内容区标题承担，这里只留详情页的返回入口
+    /// 和窗口级工具。
     pub(in crate::app) fn render_main_titlebar(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let detail_parent = self.state.view.detail_parent();
-        let (section_label, section_icon) = self.state.view.navigation_presentation();
 
         h_flex()
             .h_full()
             .w_full()
             .items_center()
+            .justify_between()
             .pr_2()
-            .child(
-                h_flex()
-                    .h_full()
-                    .flex_1()
-                    .min_w_0()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .items_center()
-                            .gap_1()
-                            .when_some(detail_parent, |this, parent| {
-                                this.child(
-                                    div().occlude().child(
-                                        Button::new("titlebar-back")
-                                            .icon(AppIcon::ArrowLeft)
-                                            .tooltip(t!("Back to library"))
-                                            .ghost()
-                                            .small()
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.state.navigate_to(parent);
-                                                cx.notify();
-                                            })),
-                                    ),
-                                )
-                            })
-                            .child(
-                                section_icon
-                                    .with_size(px(14.0))
-                                    .text_color(cx.theme().muted_foreground.opacity(0.86)),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(section_label),
-                            ),
-                    )
-                    .child(div().flex_none().flex().justify_end().child(
-                        self.render_titlebar_actions("toggle-mini-player", "title-settings", cx),
-                    )),
-            )
+            .child(div().min_w_0().when_some(detail_parent, |this, parent| {
+                this.child(
+                    div().occlude().child(
+                        Button::new("titlebar-back")
+                            .icon(AppIcon::ArrowLeft)
+                            .tooltip(t!("Back to library"))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.state.navigate_to(parent);
+                                cx.notify();
+                            })),
+                    ),
+                )
+            }))
+            .child(self.render_titlebar_actions("toggle-mini-player", "title-settings", cx))
             .into_any_element()
     }
 
@@ -158,9 +127,8 @@ impl NavidromeApp {
                     .min_w_0()
                     .px_4()
                     .text_center()
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(cx.theme().muted_foreground)
+                    .text_size(px(tokens::CAPTION))
+                    .text_color(palette(cx).text_secondary)
                     .truncate()
                     .child(track_label),
             )

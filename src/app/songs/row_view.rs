@@ -2,10 +2,9 @@
 
 use super::list::SongList;
 use super::row_actions::SongRowTarget;
-use crate::app::covers::artwork::accent_foreground;
 use crate::app::prelude::*;
 use crate::app::shell::view_helpers::{
-    item_instance_key, song_row_click_action, SongRowClickAction,
+    item_instance_key, song_row_click_action, SongRowClickAction, SONG_ROW_HEIGHT,
 };
 
 impl NavidromeApp {
@@ -51,8 +50,7 @@ impl NavidromeApp {
             current_song && (!editable || self.state.queue_index == Some(index))
         };
         let animated = current && playback.active && !playback.paused;
-        let row_accent = self.now_playing_accent(cx);
-        let row_accent_foreground = accent_foreground(row_accent);
+        let p = palette(cx);
         let album = if song.album.trim().is_empty() {
             t!("Unknown album").to_string()
         } else {
@@ -66,57 +64,35 @@ impl NavidromeApp {
                     selected_scope == scope && selected_index == index
                 });
         let multi_selected = self.state.song_selection.contains(scope, index);
-        // 普通悬浮只使用主题的中性列表表面；主题色保留给多选、键盘
-        // 光标和正在播放等有明确含义的状态。已带状态的行悬浮时只略微
-        // 加深原有底色，避免鼠标经过反而削弱选中反馈。
-        let hover_background = if multi_selected {
-            row_accent.opacity(0.2)
-        } else if keyboard_selected {
-            row_accent.opacity(0.13)
-        } else if current {
-            row_accent.opacity(0.1)
-        } else {
-            cx.theme().list_hover
-        };
+        // 高亮优先级：多选 > 列表光标 > 正在播放，三者都用品牌淡底；
+        // 已带状态的行悬浮时不再变色，文字对比度始终有保证。
+        let highlighted = multi_selected || keyboard_selected || current;
         // uniform_list 把每行当作独立根元素布局（Definite 可用宽度），
         // 不会像普通容器那样横向拉伸，必须显式 w_full：否则行宽收缩为
         // 内容宽度，行尾按钮、悬停/正在播放高亮都无法纵向对齐。
         let row = h_flex()
             .id(SharedString::from(key.clone()))
             .w_full()
-            .h(px(if queue_drawer { 64.0 } else { 60.0 }))
+            .h(px(SONG_ROW_HEIGHT))
             .px_3()
             .gap(if queue_drawer { px(8.0) } else { px(12.0) })
             .relative()
-            .when(index > 0, |this| {
-                this.border_t_1()
-                    .border_color(cx.theme().border.opacity(0.52))
-            })
-            .hover(move |style| style.bg(hover_background))
+            .rounded(px(tokens::radius::ROW))
+            .when(highlighted, |this| this.bg(p.brand_soft))
+            .when(!highlighted, |this| this.hover(|style| style.bg(p.sunken)))
             .cursor_pointer();
-        // 高亮优先级：多选 > 列表光标 > 正在播放。列表选择继承当前
-        // 封面强调色，让媒体库与正在播放页使用同一种音乐氛围。
-        let row = if multi_selected {
-            row.bg(row_accent.opacity(0.16))
-        } else if keyboard_selected {
-            row.bg(row_accent.opacity(0.1))
-        } else if current {
-            row.bg(row_accent.opacity(0.07))
-        } else {
-            row
-        };
         let position_indicator = if multi_selected {
             div()
                 .size(px(22.0))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded_md()
-                .bg(row_accent)
+                .rounded(px(tokens::radius::CONTROL))
+                .bg(p.brand)
                 .child(
                     Icon::new(KitIcon::Check)
                         .with_size(px(13.0))
-                        .text_color(row_accent_foreground),
+                        .text_color(p.on_brand),
                 )
                 .into_any_element()
         } else if queue_drawer && current {
@@ -124,7 +100,7 @@ impl NavidromeApp {
         } else {
             div()
                 .w_full()
-                .text_xs()
+                .text_size(px(tokens::CAPTION))
                 .text_center()
                 .font_weight(if keyboard_selected {
                     FontWeight::SEMIBOLD
@@ -132,9 +108,9 @@ impl NavidromeApp {
                     FontWeight::NORMAL
                 })
                 .text_color(if keyboard_selected || current {
-                    row_accent
+                    p.brand
                 } else {
-                    cx.theme().muted_foreground
+                    p.text_muted
                 })
                 .child((index + 1).to_string())
                 .into_any_element()
@@ -149,27 +125,30 @@ impl NavidromeApp {
                 .justify_center()
                 .child(position_indicator),
         )
-        .child(
-            div()
-                .w(px(42.0))
-                .h(px(42.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(self.render_cover(song.cover_art.as_deref(), 40.0, cx)),
-        )
+        .when(scope.shows_row_cover(), |row| {
+            row.child(
+                div()
+                    .w(px(42.0))
+                    .h(px(42.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(self.render_cover_styled(
+                        song.cover_art.as_deref(),
+                        40.0,
+                        tokens::radius::CONTROL,
+                        Vec::new(),
+                    )),
+            )
+        })
         .child(
             h_flex()
                 .flex_1()
                 .flex_grow(3.0)
                 .min_w_0()
                 .gap_2()
-                .text_color(if current {
-                    row_accent
-                } else {
-                    cx.theme().foreground
-                })
+                .text_color(if current { p.brand } else { p.text })
                 .when(!queue_drawer, |this| {
                     this.child(self.render_playing_indicator(&key, current, animated, cx))
                 })
@@ -186,7 +165,7 @@ impl NavidromeApp {
                                     div()
                                         .flex_1()
                                         .min_w_0()
-                                        .text_sm()
+                                        .text_size(px(tokens::BODY))
                                         .font_weight(FontWeight::MEDIUM)
                                         .line_height(rems(1.25))
                                         .truncate()
@@ -199,17 +178,17 @@ impl NavidromeApp {
                                             .px_1p5()
                                             .py_0p5()
                                             .rounded_full()
-                                            .bg(row_accent.opacity(0.1))
-                                            .text_xs()
-                                            .text_color(row_accent)
+                                            .bg(p.brand_soft)
+                                            .text_size(px(tokens::CAPTION))
+                                            .text_color(p.brand)
                                             .child(label),
                                     )
                                 }),
                         )
                         .child(
                             div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_size(px(tokens::META))
+                                .text_color(p.text_secondary)
                                 .line_height(rems(1.2))
                                 .when(queue_drawer, |this| {
                                     this.child(self.song_artist_link(
@@ -236,8 +215,8 @@ impl NavidromeApp {
                     .flex_grow(2.0)
                     .max_w(px(180.0))
                     .min_w_0()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_size(px(tokens::META))
+                    .text_color(p.text_secondary)
                     .child(self.song_artist_link(
                         SharedString::from(format!("song-row-artist-{key}")),
                         song,
@@ -254,9 +233,9 @@ impl NavidromeApp {
                 } else {
                     64.0
                 }))
-                .text_sm()
+                .text_size(px(tokens::META))
                 .text_right()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(p.text_secondary)
                 .child(format_duration(song.duration)),
         )
         .child(
@@ -308,7 +287,7 @@ impl NavidromeApp {
                             .tooltip(t!("Remove from queue"))
                             .ghost()
                             .small()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(p.text_secondary)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove_queue_row(target);
@@ -326,7 +305,7 @@ impl NavidromeApp {
                             .tooltip(t!("Play"))
                             .ghost()
                             .small()
-                            .text_color(row_accent)
+                            .text_color(p.brand)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.click_song_row(target, SongRowClickAction::Play);
@@ -401,7 +380,7 @@ impl NavidromeApp {
             if self.state.hovered_item.as_deref() == Some(song_id) {
                 return Icon::new(PlayerIcon::Play)
                     .size(px(15.0))
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette(cx).text_muted)
                     .into_any_element();
             }
             return div().w(px(16.0)).h(px(16.0)).flex_none().into_any_element();
@@ -420,7 +399,7 @@ impl NavidromeApp {
                     .w(px(3.0))
                     .h(px(height))
                     .rounded_full()
-                    .bg(cx.theme().info);
+                    .bg(palette(cx).brand);
 
                 if animated {
                     let phase = index as f32 * 0.23;

@@ -54,6 +54,11 @@ impl SongScope {
         matches!(self, Self::Queue | Self::History)
     }
 
+    /// Every row on an album page has the same cover, so showing it repeats noise.
+    pub(in crate::app) fn shows_row_cover(self) -> bool {
+        self != Self::AlbumDetail
+    }
+
     pub(in crate::app) fn fills_viewport(self) -> bool {
         matches!(
             self,

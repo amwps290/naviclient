@@ -20,19 +20,10 @@ impl NavidromeApp {
         let cache_dir = config::audio_cache_dir(&self.config);
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Streaming & cache")),
-            )
+            .child(section_title(t!("Streaming & cache"), cx))
             .child(
                 v_flex()
                     .gap_4()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
                     .child(
                         v_flex()
                             .gap_2()
@@ -119,19 +110,10 @@ impl NavidromeApp {
     fn render_output_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Audio output")),
-            )
+            .child(section_title(t!("Audio output"), cx))
             .child(
                 v_flex()
                     .gap_4()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
                     .child({
                         let playback = self.audio.state();
                         let active = match playback.output_name.as_deref() {
@@ -225,21 +207,12 @@ impl NavidromeApp {
     fn render_normalization_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Volume normalization")),
-            )
+            .child(section_title(t!("Volume normalization"), cx))
             .child(
                 h_flex()
                     .justify_between()
                     .items_center()
                     .gap_4()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
                     .child(
                         v_flex()
                             .flex_1()
@@ -294,21 +267,12 @@ impl NavidromeApp {
     fn render_lyrics_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(t!("Lyrics")),
-            )
+            .child(section_title(t!("Lyrics"), cx))
             .child(
                 h_flex()
                     .justify_between()
                     .items_center()
                     .gap_4()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
                     .child(
                         v_flex()
                             .flex_1()

@@ -18,8 +18,8 @@ impl NavidromeApp {
             .overflow_y_scroll()
             .track_scroll(&self.settings_scroll)
             .vertical_scrollbar(&self.settings_scroll)
-            .when(compact, |this| this.px_5().py_4())
-            .when(!compact, |this| this.px_6().py_5())
+            .when(compact, |this| this.px_4().py_4())
+            .when(!compact, |this| this.px_6().py_6())
             .child(self.render_settings(cx));
         let settings_body = if compact {
             v_flex()
@@ -50,7 +50,7 @@ impl NavidromeApp {
             .justify_center()
             .items_start()
             // 固定黑色半透明背景：亮/暗主题下都是压暗效果。
-            .bg(hsla(0.0, 0.0, 0.0, 0.35))
+            .bg(tokens::scrim())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -60,50 +60,44 @@ impl NavidromeApp {
                 }),
             )
             .child(
-                v_flex()
-                    .id("settings-card")
-                    .w(px(960.0))
-                    .h(px(650.0))
-                    .max_w(relative(if compact { 0.96 } else { 0.94 }))
-                    .max_h(relative(if compact { 0.94 } else { 0.88 }))
-                    .mt(px(if compact { 16.0 } else { 48.0 }))
-                    .bg(cx.theme().background)
-                    .rounded_xl()
-                    .shadow_xl()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        // 点击卡片内部不触发背景关闭。
-                        cx.stop_propagation()
-                    })
-                    .child(
-                        h_flex()
-                            .flex_none()
-                            .when(compact, |this| this.px_4().py_2())
-                            .when(!compact, |this| this.px_5().py_3())
-                            .justify_between()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(t!("Settings")),
-                            )
-                            .child(
-                                Button::new("close-settings")
-                                    .icon(AppIcon::Close)
-                                    .tooltip(t!("Close settings"))
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.state.settings.open = false;
-                                        this.cancel_shortcut_recording();
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(settings_body),
+                raised_surface(
+                    v_flex()
+                        .id("settings-card")
+                        .w(px(960.0))
+                        .h(px(650.0))
+                        .max_w(relative(if compact { 0.96 } else { 0.94 }))
+                        .max_h(relative(if compact { 0.94 } else { 0.88 }))
+                        .mt(px(if compact { 16.0 } else { 48.0 }))
+                        .overflow_hidden(),
+                    tokens::radius::LARGE,
+                    cx,
+                )
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    // 点击卡片内部不触发背景关闭。
+                    cx.stop_propagation()
+                })
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .when(compact, |this| this.px_4().py_2())
+                        .when(!compact, |this| this.px_6().py_4())
+                        .justify_between()
+                        .items_center()
+                        .child(section_title(t!("Settings"), cx))
+                        .child(
+                            Button::new("close-settings")
+                                .icon(AppIcon::Close)
+                                .tooltip(t!("Close settings"))
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.state.settings.open = false;
+                                    this.cancel_shortcut_recording();
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(settings_body),
             )
             .into_any_element()
     }

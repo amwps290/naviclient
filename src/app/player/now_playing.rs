@@ -24,7 +24,7 @@ impl NavidromeApp {
                 .child(
                     div()
                         .text_sm()
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(palette(cx).text_secondary)
                         .child(t!("Choose a song from your library.")),
                 )
                 .into_any_element();
@@ -39,7 +39,8 @@ impl NavidromeApp {
         };
         let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
         let playback = self.playback_for_display();
-        let accent = self.now_playing_accent(cx);
+        let p = palette(cx);
+        let serif = crate::typography::serif_font_family(cx);
         let radio_seed = song.clone();
         let radio_loading = self.song_radio_loading(&song.id);
         let active_line = self
@@ -54,7 +55,7 @@ impl NavidromeApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(p.text_secondary)
                 .child(t!("Loading lyrics..."))
                 .into_any_element()
         } else if let Some(error) = self.state.lyrics.error() {
@@ -63,7 +64,7 @@ impl NavidromeApp {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(p.text_secondary)
                 .child(t!("Lyrics are unavailable for this track."))
                 .child(div().text_xs().child(error.to_string()))
                 .into_any_element()
@@ -119,16 +120,17 @@ impl NavidromeApp {
                                 this.child(
                                     div()
                                         .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_color(p.text_secondary)
                                         .child(translation),
                                 )
                             },
                         ));
 
+                    let line = line.font_family(serif.clone());
                     if current {
-                        line.text_2xl()
+                        line.text_size(px(tokens::LYRIC_ACTIVE))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(accent)
+                            .text_color(p.brand)
                             .with_animation(
                                 SharedString::from(format!("active-lyric-{}-{index}", song.id)),
                                 Animation::new(Duration::from_millis(220))
@@ -137,19 +139,13 @@ impl NavidromeApp {
                             )
                             .into_any_element()
                     } else if synced {
-                        let opacity = match distance {
-                            1 => 0.68,
-                            2 => 0.52,
-                            3 => 0.4,
-                            _ => 0.28,
-                        };
-                        line.text_lg()
+                        line.text_size(px(tokens::LYRIC))
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(cx.theme().foreground.opacity(opacity))
+                            .text_color(p.text.opacity(lyric_opacity(distance)))
                             .into_any_element()
                     } else {
-                        line.text_lg()
-                            .text_color(cx.theme().foreground.opacity(0.72))
+                        line.text_size(px(tokens::LYRIC))
+                            .text_color(p.text.opacity(0.72))
                             .into_any_element()
                     }
                 }))
@@ -161,7 +157,7 @@ impl NavidromeApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(p.text_secondary)
                 .child(t!("No lyrics are available for this track."))
                 .into_any_element()
         };
@@ -171,7 +167,7 @@ impl NavidromeApp {
             .size_full()
             .min_h_0()
             .px_8()
-            .py_5()
+            .py_6()
             .gap_8()
             .items_center()
             .child(
@@ -191,16 +187,16 @@ impl NavidromeApp {
                         v_flex()
                             .items_center()
                             .gap_1()
+                            .child(serif_heading(
+                                song.title.clone(),
+                                tokens::NOW_PLAYING_TITLE,
+                                cx,
+                            ))
                             .child(
                                 div()
-                                    .text_xl()
+                                    .text_size(px(tokens::BODY))
+                                    .text_color(p.brand)
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(song.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
                                     .child(self.song_artist_link(
                                         SharedString::from(format!(
                                             "now-playing-artist-{}",
@@ -213,8 +209,8 @@ impl NavidromeApp {
                             .when(!song.album.is_empty(), |this| {
                                 this.child(
                                     div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_size(px(tokens::META))
+                                        .text_color(p.text_secondary)
                                         .child(self.song_album_link(
                                             SharedString::from(format!(
                                                 "now-playing-album-{}",
@@ -227,14 +223,13 @@ impl NavidromeApp {
                                 )
                             })
                             .child(
-                                Button::new("now-playing-song-radio")
+                                capsule_button("now-playing-song-radio")
                                     .icon(PlayerIcon::Play)
                                     .label(if radio_loading {
                                         t!("Building song radio…")
                                     } else {
                                         t!("Start song radio")
                                     })
-                                    .outline()
                                     .disabled(self.api.is_none() || radio_loading)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.start_song_radio(radio_seed.clone());
@@ -260,19 +255,26 @@ impl NavidromeApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(t!("Lyrics")),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground.opacity(0.82))
-                                    .child(t!(
-                                        "%{title} - %{artist}",
-                                        title = song.title,
-                                        artist = song.artist
-                                    )),
-                            ),
+                            .child(div().text_xs().text_color(p.text_secondary).child(t!(
+                                "%{title} - %{artist}",
+                                title = song.title,
+                                artist = song.artist
+                            ))),
                     )
                     .child(lyrics_body),
             )
             .into_any_element()
     }
 }
+
+fn lyric_opacity(distance: usize) -> f32 {
+    match distance {
+        1 => 0.78,
+        2 => 0.68,
+        3 => 0.6,
+        _ => 0.55,
+    }
+}
+
+#[cfg(test)]
+mod tests;

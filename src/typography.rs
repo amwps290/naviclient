@@ -8,7 +8,7 @@
 //! English, so the choice cannot be tied only to translated UI strings.
 
 use gpui_kit::component::Theme;
-use gpui_kit::{App, SharedString};
+use gpui_kit::{App, Global, SharedString};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Platform {
@@ -107,6 +107,26 @@ const PORTABLE_TC_FONTS: &[&str] = &[
     "Source Han Sans TC",
 ];
 
+const LINUX_SC_SERIF: &[&str] = &[
+    "Noto Serif CJK SC",
+    "Noto Serif SC",
+    "Source Han Serif SC",
+    "Source Han Serif CN",
+    "Noto Serif CJK TC",
+];
+
+const LINUX_TC_SERIF: &[&str] = &[
+    "Noto Serif CJK TC",
+    "Noto Serif TC",
+    "Source Han Serif TC",
+    "Source Han Serif TW",
+    "Noto Serif CJK SC",
+];
+
+const MACOS_SC_SERIF: &[&str] = &["Songti SC", "STSong", "Songti TC"];
+
+const MACOS_TC_SERIF: &[&str] = &["Songti TC", "Songti SC", "STSong"];
+
 fn prefers_traditional_chinese(locale: &str) -> bool {
     let locale = locale.trim().to_ascii_lowercase();
     locale.starts_with("zh-tw")
@@ -128,13 +148,17 @@ fn candidates(platform: Platform, locale: &str) -> &'static [&'static str] {
     }
 }
 
-fn select_ui_font(platform: Platform, locale: &str, installed: &[String]) -> Option<String> {
-    candidates(platform, locale).iter().find_map(|candidate| {
+fn first_installed(candidates: &[&str], installed: &[String]) -> Option<String> {
+    candidates.iter().find_map(|candidate| {
         installed
             .iter()
             .find(|family| family.eq_ignore_ascii_case(candidate))
             .cloned()
     })
+}
+
+fn select_ui_font(platform: Platform, locale: &str, installed: &[String]) -> Option<String> {
+    first_installed(candidates(platform, locale), installed)
 }
 
 /// Select an installed CJK-capable UI family and apply it to the global theme.
@@ -161,6 +185,44 @@ pub fn configure_ui_font(cx: &mut App, locale: &str) -> Option<SharedString> {
         platform.name()
     );
     Some(family)
+}
+
+fn serif_candidates(platform: Platform, locale: &str) -> &'static [&'static str] {
+    match (platform, prefers_traditional_chinese(locale)) {
+        // Windows ships no CJK serif worth using; headings stay bold sans.
+        (Platform::Windows, _) => &[],
+        (Platform::Macos, false) => MACOS_SC_SERIF,
+        (Platform::Macos, true) => MACOS_TC_SERIF,
+        (Platform::Linux | Platform::Other, false) => LINUX_SC_SERIF,
+        (Platform::Linux | Platform::Other, true) => LINUX_TC_SERIF,
+    }
+}
+
+fn select_serif_font(platform: Platform, locale: &str, installed: &[String]) -> Option<String> {
+    first_installed(serif_candidates(platform, locale), installed)
+}
+
+struct SerifFont(Option<SharedString>);
+
+impl Global for SerifFont {}
+
+fn apply_serif_font(cx: &mut App, family: Option<SharedString>) {
+    cx.set_global(SerifFont(family));
+}
+
+/// Select the heading family for this platform and language.
+pub fn configure_serif_font(cx: &mut App, locale: &str) {
+    let installed = cx.text_system().all_font_names();
+    let family = select_serif_font(Platform::current(), locale, &installed);
+    log::info!("selected serif font family={family:?}; locale={locale}");
+    apply_serif_font(cx, family.map(SharedString::from));
+}
+
+/// Falls back to the UI family so headings always name an installed font.
+pub fn serif_font_family(cx: &App) -> SharedString {
+    cx.try_global::<SerifFont>()
+        .and_then(|font| font.0.clone())
+        .unwrap_or_else(|| Theme::global(cx).font_family.clone())
 }
 
 #[cfg(test)]
@@ -220,6 +282,60 @@ mod tests {
     fn missing_candidates_keep_the_gpui_system_font() {
         let fonts = installed(&["DejaVu Sans", "Segoe UI"]);
         assert_eq!(select_ui_font(Platform::Linux, "zh-CN", &fonts), None);
+    }
+
+    #[test]
+    fn linux_serif_prefers_the_matching_script() {
+        let fonts = installed(&["Noto Serif CJK TC", "Noto Serif CJK SC"]);
+        assert_eq!(
+            select_serif_font(Platform::Linux, "zh-CN", &fonts).as_deref(),
+            Some("Noto Serif CJK SC")
+        );
+        assert_eq!(
+            select_serif_font(Platform::Linux, "zh-TW", &fonts).as_deref(),
+            Some("Noto Serif CJK TC")
+        );
+    }
+
+    #[test]
+    fn macos_serif_uses_songti() {
+        let fonts = installed(&["STSong", "Songti SC", "Songti TC"]);
+        assert_eq!(
+            select_serif_font(Platform::Macos, "zh-CN", &fonts).as_deref(),
+            Some("Songti SC")
+        );
+        assert_eq!(
+            select_serif_font(Platform::Macos, "zh-Hant", &fonts).as_deref(),
+            Some("Songti TC")
+        );
+    }
+
+    #[test]
+    fn windows_has_no_serif_candidates() {
+        let fonts = installed(&["Noto Serif CJK SC", "SimSun"]);
+        assert_eq!(select_serif_font(Platform::Windows, "zh-CN", &fonts), None);
+    }
+
+    #[test]
+    fn missing_serif_returns_none() {
+        let fonts = installed(&["DejaVu Sans"]);
+        assert_eq!(select_serif_font(Platform::Linux, "en", &fonts), None);
+    }
+
+    #[gpui_pre::test]
+    fn serif_family_falls_back_to_the_ui_font(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            Theme::update(cx, |theme| theme.font_family = "Noto Sans CJK SC".into());
+            assert_eq!(serif_font_family(cx), "Noto Sans CJK SC");
+
+            apply_serif_font(cx, Some("Noto Serif CJK SC".into()));
+            assert_eq!(serif_font_family(cx), "Noto Serif CJK SC");
+
+            // A later language without a candidate must not keep the old family.
+            apply_serif_font(cx, None);
+            assert_eq!(serif_font_family(cx), "Noto Sans CJK SC");
+        });
     }
 
     #[gpui_pre::test]

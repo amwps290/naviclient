@@ -79,3 +79,14 @@ fn navigation_ids_keep_each_section_distinct() {
         assert_eq!(view.nav_id(), id);
     }
 }
+
+#[test]
+fn only_album_artist_and_playlist_details_have_a_hero() {
+    for view in VIEWS {
+        let expected = matches!(
+            view,
+            View::ArtistDetail | View::AlbumDetail | View::PlaylistDetail
+        );
+        assert_eq!(view.has_detail_hero(), expected, "{view:?}");
+    }
+}

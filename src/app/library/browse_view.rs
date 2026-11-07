@@ -3,6 +3,8 @@
 use gpui_kit::component::menu::PopupMenuItem;
 
 use crate::app::prelude::*;
+use crate::app::style::genre_color::genre_swatch;
+use crate::app::widgets::shelf::{cover_grid, shelf_section};
 
 impl NavidromeApp {
     pub(in crate::app) fn render_library_browse(
@@ -15,7 +17,7 @@ impl NavidromeApp {
             View::Favorites => {
                 let favorites = self.state.favorites.items();
                 let total = self.state.favorites.total();
-                let mut content = v_flex().gap_5().child(
+                let mut content = v_flex().gap(px(tokens::SECTION_GAP)).child(
                     h_flex()
                         .w_full()
                         .items_end()
@@ -46,40 +48,28 @@ impl NavidromeApp {
                         ));
                 }
                 if !favorites.artists.is_empty() {
-                    content = content
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(t!("Artists")),
-                        )
-                        .child(self.render_artist_grid(&favorites.artists, cx, window));
+                    content = content.child(shelf_section(
+                        section_title(t!("Artists"), cx).into_any_element(),
+                        self.render_artist_grid(&favorites.artists, cx, window),
+                    ));
                 }
                 if !favorites.albums.is_empty() {
-                    content = content
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(t!("Albums")),
-                        )
-                        .child(self.render_album_grid("favorites", &favorites.albums, cx, window));
+                    content = content.child(shelf_section(
+                        section_title(t!("Albums"), cx).into_any_element(),
+                        self.render_album_grid("favorites", &favorites.albums, cx, window),
+                    ));
                 }
                 if !favorites.songs.is_empty() {
-                    content = content
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(t!("Songs")),
-                        )
-                        .child(self.render_song_list(SongScope::Favorites, cx));
+                    content = content.child(shelf_section(
+                        section_title(t!("Songs"), cx).into_any_element(),
+                        self.render_song_list(SongScope::Favorites, cx),
+                    ));
                 }
 
                 content.into_any_element()
             }
             View::Artists => v_flex()
-                .gap_5()
+                .gap_6()
                 .child(
                     h_flex()
                         .w_full()
@@ -104,7 +94,7 @@ impl NavidromeApp {
                 )
                 .child(
                     if self.state.artists.is_empty() && self.state.artists.loading() {
-                        self.render_artist_skeleton_grid(cx)
+                        self.render_artist_skeleton_grid(window, cx)
                     } else {
                         self.render_artist_grid(self.state.artists.visible_items(), cx, window)
                     },
@@ -112,7 +102,7 @@ impl NavidromeApp {
                 .into_any_element(),
             View::Albums => {
                 v_flex()
-                    .gap_5()
+                    .gap_6()
                     .child(
                         h_flex()
                             .w_full()
@@ -137,7 +127,7 @@ impl NavidromeApp {
                     )
                     .child(
                         if self.state.albums.is_empty() && self.state.albums.loading() {
-                            self.render_album_skeleton_grid(cx)
+                            self.render_album_skeleton_grid(window, cx)
                         } else {
                             self.render_album_grid("albums", self.state.albums.items(), cx, window)
                         },
@@ -164,7 +154,7 @@ impl NavidromeApp {
                     )
                 };
                 v_flex()
-                    .gap_5()
+                    .gap_6()
                     .child(
                         h_flex()
                             .w_full()
@@ -185,7 +175,7 @@ impl NavidromeApp {
                     )
                     .child(
                         if self.state.genres.is_empty() && self.state.genres.loading() {
-                            self.render_album_skeleton_grid(cx)
+                            self.render_album_skeleton_grid(window, cx)
                         } else if self.state.genres.is_empty() {
                             div()
                                 .text_sm()
@@ -193,7 +183,7 @@ impl NavidromeApp {
                                 .child(t!("No genres in your library yet."))
                                 .into_any_element()
                         } else {
-                            self.render_genre_grid(cx)
+                            self.render_genre_grid(window, cx)
                         },
                     )
                     .into_any_element()
@@ -203,14 +193,14 @@ impl NavidromeApp {
                     return div().child(t!("Genre not found")).into_any_element();
                 };
                 v_flex()
-                    .gap_5()
+                    .gap_6()
                     .child(self.page_header(
                         detail.name().to_string(),
                         t!("%{count} albums", count = detail.albums().len()),
                         cx,
                     ))
                     .child(if detail.albums().is_empty() && detail.albums().loading() {
-                        self.render_album_skeleton_grid(cx)
+                        self.render_album_skeleton_grid(window, cx)
                     } else if detail.albums().is_empty() {
                         div()
                             .text_sm()
@@ -292,52 +282,63 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    /// 流派卡片网格：卡片显示流派名与专辑/歌曲数，点击进入流派详情。
-    fn render_genre_grid(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+    /// 流派色块网格：同名流派永远同色，显示流派名与专辑/歌曲数，点击进入详情。
+    fn render_genre_grid(&self, window: &Window, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let columns = self.content_columns(window);
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let genres = self.state.genres.items();
-        h_flex()
-            .items_start()
-            .flex_wrap()
-            .gap_4()
-            .children(genres.iter().enumerate().map(|(index, genre)| {
-                let genre_for_click = genre.value.clone();
-                let counts = match (genre.album_count, genre.song_count) {
-                    (Some(albums), Some(songs)) => t!(
-                        "%{albums} albums · %{songs} songs",
-                        albums = albums,
-                        songs = songs
-                    ),
-                    (Some(albums), None) => t!("%{albums} albums", albums = albums),
-                    (None, Some(songs)) => t!("%{songs} songs", songs = songs),
-                    (None, None) => t!("—"),
-                };
-                div()
-                    .id(SharedString::from(format!("genre-card-{index}")))
-                    .w(px(232.0))
-                    .p_4()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .cursor_pointer()
-                    .hover(|style| style.bg(cx.theme().accent.opacity(0.1)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_genre(genre_for_click.clone());
-                        cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .truncate()
-                            .child(genre.value.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(counts),
-                    )
-            }))
-            .into_any_element()
+        cover_grid(
+            columns,
+            genres
+                .iter()
+                .enumerate()
+                .map(|(index, genre)| {
+                    let genre_for_click = genre.value.clone();
+                    let counts = match (genre.album_count, genre.song_count) {
+                        (Some(albums), Some(songs)) => t!(
+                            "%{albums} albums · %{songs} songs",
+                            albums = albums,
+                            songs = songs
+                        ),
+                        (Some(albums), None) => t!("%{albums} albums", albums = albums),
+                        (None, Some(songs)) => t!("%{songs} songs", songs = songs),
+                        (None, None) => t!("—"),
+                    };
+                    v_flex()
+                        .id(SharedString::from(format!("genre-card-{index}")))
+                        .h(px(96.0))
+                        .min_w_0()
+                        .p_4()
+                        .justify_end()
+                        .gap_1()
+                        .rounded(px(tokens::radius::COVER))
+                        .bg(genre_swatch(&genre.value, dark))
+                        .cursor_pointer()
+                        .hover(|style| style.shadow(cover_shadow(true, cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_genre(genre_for_click.clone());
+                            cx.notify();
+                        }))
+                        .child(
+                            div()
+                                .text_size(px(tokens::BODY))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(p.text)
+                                .truncate()
+                                .child(genre.value.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(tokens::CAPTION))
+                                .text_color(p.text_secondary)
+                                .truncate()
+                                .child(counts),
+                        )
+                        .into_any_element()
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_any_element()
     }
 }

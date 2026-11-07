@@ -1,7 +1,7 @@
 //! 迷你播放器窗口的封面、歌曲信息和播放控制渲染。
 
-use super::controls::play_button_style;
 use crate::app::prelude::*;
+use crate::app::style::cover_tint::{cover_tint, tint_background, TintSurface};
 
 impl NavidromeApp {
     pub(in crate::app) fn render_mini(
@@ -28,14 +28,17 @@ impl NavidromeApp {
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
 
-        let (base, raw_accent) = self.now_playing_palette(cx);
-        let accent = self.now_playing_accent(cx);
-        let light = theme.background.l >= 0.5;
-        let base_strength = if light { 0.36 } else { 0.3 };
-        let accent_strength = if light { 0.28 } else { 0.24 };
-        let bg_start = theme.background.blend(base.opacity(base_strength));
-        let bg_end = theme.background.blend(raw_accent.opacity(accent_strength));
-        let bg_animation = Animation::new(Duration::from_secs(20)).repeat();
+        let accent = palette(cx).brand;
+        let background = tint_background(
+            cover_tint(
+                TintSurface::MiniPlayer,
+                self.now_playing_cover_palette(),
+                theme.background,
+                theme.is_dark(),
+            ),
+            theme.background,
+            120.0,
+        );
 
         let title = song
             .as_ref()
@@ -66,15 +69,7 @@ impl NavidromeApp {
                     accent.opacity(0.5),
                 )])
             })
-            .when(!is_playing, |this| {
-                this.shadow(vec![box_shadow(
-                    px(0.0),
-                    px(1.0),
-                    px(3.0),
-                    px(0.0),
-                    hsla(0.0, 0.0, 0.0, 0.28),
-                )])
-            })
+            .when(!is_playing, |this| this.shadow(cover_shadow(false, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| {
                 this.exit_mini_mode(window, cx);
@@ -174,7 +169,7 @@ impl NavidromeApp {
                         PlayerIcon::Play
                     })
                     .tooltip(if is_playing { t!("Pause") } else { t!("Play") })
-                    .custom(play_button_style(accent, cx))
+                    .primary()
                     .with_size(px(26.0))
                     .rounded_full()
                     .disabled(!has_track)
@@ -245,6 +240,7 @@ impl NavidromeApp {
         v_flex()
             .relative()
             .size_full()
+            .bg(background)
             .border_1()
             .border_color(theme.border.opacity(0.5))
             .text_color(theme.foreground)
@@ -272,17 +268,6 @@ impl NavidromeApp {
                     .child(expand_button),
             )
             .child(progress_line)
-            .with_animation(
-                "mini-player-background",
-                bg_animation,
-                move |this, delta| {
-                    this.bg(linear_gradient(
-                        120.0 + delta * 360.0,
-                        linear_color_stop(bg_start, 0.0),
-                        linear_color_stop(bg_end, 1.0),
-                    ))
-                },
-            )
             .into_any_element()
     }
 }

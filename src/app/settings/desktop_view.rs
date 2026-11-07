@@ -9,19 +9,10 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         v_flex()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                            .child(t!("System integration")),
-            )
+            .child(section_title(t!("System integration"), cx))
             .child(
                 v_flex()
-                    .gap_5()
-                    .p_4()
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.72))
+                    .gap_4()
                     .child(
                         h_flex()
                             .justify_between()

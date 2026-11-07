@@ -34,9 +34,9 @@ impl NavidromeApp {
             .opacity(if pending { 0.6 } else { 1.0 })
             .rounded_full()
             .text_color(if starred {
-                cx.theme().red
+                palette(cx).brand
             } else {
-                cx.theme().muted_foreground
+                palette(cx).text_secondary
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.toggle_favorite(key.clone());

@@ -79,7 +79,10 @@ impl NavidromeApp {
                 let render_app = app.clone();
                 window.open_dialog(cx, move |dialog, _, cx| {
                     render_app
-                        .update(cx, |this, cx| this.render_import_dialog(dialog, cx))
+                        .update(cx, |this, cx| {
+                            let dialog = this.render_import_dialog(dialog, cx);
+                            crate::app::style::surface::raised_dialog(dialog, cx)
+                        })
                         .expect("app owns dialog")
                 });
                 let _ = app.update(cx, |this, cx| {

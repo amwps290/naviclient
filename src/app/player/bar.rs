@@ -2,7 +2,6 @@
 
 use crate::app::playback::display::playback_technical_info;
 use crate::app::prelude::*;
-use crate::app::shell::view_helpers::compact_window_layout;
 use crate::app::shortcuts::bindings::shortcut_display;
 
 impl NavidromeApp {
@@ -12,36 +11,43 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let playback = self.playback_for_display();
-        let accent = self.now_playing_accent(cx);
+        let brand = palette(cx).brand;
         let viewport_width = f32::from(window.viewport_size().width);
-        let compact_player = compact_window_layout(viewport_width);
+        let layout = self.shell_layout(window);
+        let compact_player = layout.compact;
         // Keep the technical chip on wider windows; details are also available
         // on the now-playing page.
         let show_technical_chip = viewport_width >= 1080.0;
-        h_flex()
-            .h(px(if compact_player { 82.0 } else { 88.0 }))
-            .when(compact_player, |this| this.px_3())
-            .when(!compact_player, |this| this.px_4())
-            .py_2()
-            .gap(if compact_player { px(8.0) } else { px(16.0) })
-            .items_center()
-            .justify_between()
-            .border_t_1()
-            .border_color(cx.theme().border.opacity(0.8))
-            .bg(cx.theme().secondary.opacity(0.22))
-            .child(self.render_player_track(compact_player, cx))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .gap_1()
-                    .items_center()
-                    .child(self.render_player_transport(&playback, accent, cx))
-                    .child(self.render_player_progress(&playback, accent, cx)),
-            )
-            .child(self.render_player_actions(compact_player, show_technical_chip, accent, cx))
-            .into_any_element()
+        raised_surface(
+            h_flex()
+                .flex_none()
+                .h(px(if compact_player {
+                    tokens::PLAYER_COMPACT_HEIGHT
+                } else {
+                    tokens::PLAYER_HEIGHT
+                }))
+                .mx(px(layout.player_margin))
+                .mb(px(layout.player_margin))
+                .when(compact_player, |this| this.px_2())
+                .when(!compact_player, |this| this.px_3())
+                .gap(if compact_player { px(8.0) } else { px(16.0) })
+                .items_center()
+                .justify_between(),
+            tokens::radius::LARGE,
+            cx,
+        )
+        .child(self.render_player_track(compact_player, cx))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .items_center()
+                .child(self.render_player_transport(&playback, compact_player, cx))
+                .child(self.render_player_progress(&playback, brand, cx)),
+        )
+        .child(self.render_player_actions(compact_player, show_technical_chip, brand, cx))
+        .into_any_element()
     }
 
     fn render_player_track(
@@ -50,7 +56,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let song_info_width = if compact_player { 200.0 } else { 260.0 };
-        let player_cover_size = if compact_player { 48.0 } else { 60.0 };
+        let player_cover_size = if compact_player { 40.0 } else { 48.0 };
         if let Some(song) = &self.state.now_playing {
             // 悬停提示显示完整标题/艺人（长标题被截断时也能看全文），
             // 并说明点击可打开正在播放页。
@@ -74,8 +80,8 @@ impl NavidromeApp {
                 .p_1()
                 .items_center()
                 .cursor_pointer()
-                .rounded(px(12.0))
-                .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
+                .rounded(px(tokens::radius::COVER))
+                .hover(|style| style.bg(palette(cx).sunken))
                 .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
                 .child(self.render_cover(song.cover_art.as_deref(), player_cover_size, cx))
                 .child(
@@ -85,8 +91,7 @@ impl NavidromeApp {
                         .gap_1()
                         .child(
                             div()
-                                .when(compact_player, |this| this.text_sm())
-                                .when(!compact_player, |this| this.text_base())
+                                .text_size(px(tokens::BODY))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(song.title.clone()),
@@ -126,8 +131,7 @@ impl NavidromeApp {
                         .gap_1()
                         .child(
                             div()
-                                .when(compact_player, |this| this.text_sm())
-                                .when(!compact_player, |this| this.text_base())
+                                .text_size(px(tokens::BODY))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .truncate()
                                 .child(t!("No track playing")),
@@ -169,8 +173,6 @@ impl NavidromeApp {
             .gap(if compact_player { px(4.0) } else { px(8.0) })
             .when(compact_player, |this| this.pl_2())
             .when(!compact_player, |this| this.pl_3())
-            .border_l_1()
-            .border_color(cx.theme().border.opacity(0.8))
             .when_some(
                 technical_info.filter(|_| show_technical_chip),
                 |this, info| {
@@ -183,18 +185,7 @@ impl NavidromeApp {
                             .tooltip(move |window, cx| {
                                 Tooltip::new(tooltip.clone()).build(window, cx)
                             })
-                            .child(technical_info_chip(
-                                "player-format",
-                                info.format,
-                                accent,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .h(px(24.0))
-                            .border_l_1()
-                            .border_color(cx.theme().border.opacity(0.6)),
+                            .child(technical_info_chip("player-format", info.format, cx)),
                     )
                 },
             )
@@ -215,6 +206,7 @@ impl NavidromeApp {
                         )
                     ))
                     .custom(self.player_toggle_style(queue_open, cx))
+                    .selected(queue_open)
                     .with_size(px(30.0))
                     .rounded_full()
                     .toggled(queue_open)
@@ -227,12 +219,6 @@ impl NavidromeApp {
                         cx.notify();
                     })),
             )
-            .child(
-                div()
-                    .h(px(24.0))
-                    .border_l_1()
-                    .border_color(cx.theme().border.opacity(0.6)),
-            )
             .child(self.render_volume_control(accent, cx))
             .into_any_element()
     }
@@ -241,9 +227,9 @@ impl NavidromeApp {
 fn technical_info_chip(
     id: &'static str,
     label: String,
-    color: Hsla,
     cx: &Context<NavidromeApp>,
 ) -> gpui_kit::AnyElement {
+    let p = palette(cx);
     div()
         .id(id)
         .h(px(20.0))
@@ -252,12 +238,10 @@ fn technical_info_chip(
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.0))
-        .border_1()
-        .border_color(color.opacity(0.12))
-        .bg(color.opacity(0.045))
-        .text_size(px(12.0))
-        .text_color(cx.theme().foreground.opacity(0.74))
+        .rounded(px(tokens::radius::CONTROL))
+        .bg(p.sunken)
+        .text_size(px(tokens::CAPTION))
+        .text_color(p.text_secondary)
         .truncate()
         .child(label)
         .into_any_element()

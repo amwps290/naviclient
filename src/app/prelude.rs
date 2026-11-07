@@ -91,5 +91,11 @@ pub(in crate::app) use crate::app::shortcuts::repeat::ShortcutRepeatGuard;
 pub(in crate::app) use crate::app::songs::scope::SongScope;
 pub(in crate::app) use crate::app::sound::equalizer_state::EqualizerState;
 pub(in crate::app) use crate::app::sound::volume_state::VolumeState;
+pub(in crate::app) use crate::app::style::buttons::{
+    capsule_button, round_play_button, soft_toggle_style,
+};
+pub(in crate::app) use crate::app::style::surface::{cover_shadow, raised_surface};
+pub(in crate::app) use crate::app::style::text::{section_title, serif_heading};
+pub(in crate::app) use crate::app::style::tokens::{self, palette};
 pub(in crate::app) use crate::app::widgets::scrolling_text_state::TextWidthCache;
 pub(in crate::app) use crate::app::NavidromeApp;

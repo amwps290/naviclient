@@ -112,7 +112,12 @@ impl NavidromeApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(label),
             )
-            .child(div().flex_1().min_w_0().child(Input::new(input).w_full()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(input).w_full().bg(palette(cx).sunken)),
+            )
             .into_any_element()
     }
 }

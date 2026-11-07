@@ -1,0 +1,132 @@
+<style>
+  .fr { font-family: system-ui, "Noto Sans CJK SC", sans-serif; background:#F7F3EE; color:#1C1917; border-radius: 12px; overflow:hidden; display:flex; flex-direction:column; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+  .fr-serif { font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif; font-weight:700; }
+  .fr-title { height: 34px; display:flex; align-items:center; padding: 0 10px 0 14px; gap:8px; font-size:12px; color:#57534E; }
+  .fr-dots { display:flex; gap:6px; margin-left:auto; }
+  .fr-ib { width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; color:#57534E; }
+  .fr-body { flex:1; display:flex; min-height:0; }
+  .fr-side { display:flex; flex-direction:column; padding: 6px 12px 12px; font-size:13px; }
+  .fr-item { height:34px; display:flex; align-items:center; gap:10px; padding:0 10px; border-radius:8px; color:#57534E; }
+  .fr-item .ic { width:16px; text-align:center; }
+  .fr-item .ct { margin-left:auto; font-size:11px; color:#6F6863; }
+  .fr-sel { background:#F2E4E3; color:#B53660; font-weight:600; }
+  .fr-group { font-size:11px; color:#6F6863; padding: 14px 10px 6px; }
+  .fr-main { flex:1; min-width:0; padding: 8px 32px 0 20px; overflow:hidden; }
+  .fr-cv { border-radius:12px; flex:none; }
+  .g1 { background:linear-gradient(135deg,#f6a35c,#c2416b); } .g2 { background:linear-gradient(135deg,#3b82c4,#0f2a4a); }
+  .g3 { background:linear-gradient(135deg,#9bd28a,#2f6b4f); } .g4 { background:linear-gradient(135deg,#e9d6a8,#8a6a3a); }
+  .g5 { background:linear-gradient(135deg,#b48ce0,#3a2a6b); } .g6 { background:linear-gradient(135deg,#f0b4c8,#8c2f55); }
+  .fr-player { margin: 0 12px 12px; height:72px; border-radius:20px; background:#fff; box-shadow:0 1px 2px rgba(28,25,23,.06),0 8px 24px rgba(28,25,23,.10); display:flex; align-items:center; padding: 0 16px 0 12px; gap:16px; font-size:12px; }
+  .fr-tr { display:flex; align-items:center; gap:14px; color:#57534E; font-size:13px; }
+  .fr-play { width:38px; height:38px; border-radius:50%; background:#B53660; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(181,54,96,.3); }
+  .fr-pg { display:flex; align-items:center; gap:8px; font-size:10px; color:#6F6863; width:100%; }
+  .fr-pg .bar { flex:1; height:4px; border-radius:2px; background:#E7E0D8; position:relative; }
+  .fr-pg .bar i { position:absolute; left:0; top:0; bottom:0; width:38%; background:#B53660; border-radius:2px; }
+  .fr-chip { font-size:10px; padding:2px 6px; border-radius:6px; background:#EFE9E2; color:#57534E; }
+  .fr-on { color:#B53660; background:#F2E4E3; }
+  .fr-note { font-size:13px; line-height:1.7; }
+  .fr-queue { width: 300px; margin: 0 12px 12px 0; border-radius:20px; background:#fff; box-shadow:0 1px 2px rgba(28,25,23,.06),0 8px 24px rgba(28,25,23,.10); padding: 14px; display:flex; flex-direction:column; gap:4px; font-size:12px; }
+  .fr-qrow { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:8px; }
+</style>
+
+<h2>第 2 段：窗口框架</h2>
+<p class="subtitle">侧栏、标题栏、播放条、队列抽屉的版式。内容区这里只放了占位，首页的具体设计在第 3 段。上图是常规宽度（1280），下图是窄窗口（900 左右）同时打开队列。</p>
+
+<div class="mockup">
+  <div class="mockup-header">常规宽度 · 1280 × 820（缩小显示）</div>
+  <div class="mockup-body" style="padding:12px">
+    <div class="fr" style="height:560px">
+      <div class="fr-title">
+        <span style="font-size:11px;color:#6F6863">（详情页时这里出现 ← 返回）</span>
+        <div class="fr-dots"><div class="fr-ib">▭</div><div class="fr-ib">⚙</div><div class="fr-ib">—</div><div class="fr-ib">☐</div><div class="fr-ib">✕</div></div>
+      </div>
+      <div class="fr-body">
+        <div class="fr-side" style="width:200px">
+          <div class="fr-item fr-sel"><span class="ic">⌂</span>首页</div>
+          <div class="fr-item"><span class="ic">♡</span>收藏<span class="ct">248</span></div>
+          <div class="fr-group">音乐库</div>
+          <div class="fr-item"><span class="ic">☺</span>艺术家<span class="ct">128</span></div>
+          <div class="fr-item"><span class="ic">◎</span>专辑<span class="ct">512</span></div>
+          <div class="fr-item"><span class="ic">≋</span>流派<span class="ct">36</span></div>
+          <div class="fr-item"><span class="ic">☰</span>播放列表<span class="ct">6</span></div>
+          <div class="fr-item"><span class="ic">⌕</span>搜索</div>
+          <div style="margin-top:auto; display:flex; align-items:center; gap:8px; padding: 8px 10px; border-radius:8px; font-size:12px; color:#57534E">
+            <span style="width:7px;height:7px;border-radius:50%;background:#3F8F5F"></span>家里的 Navidrome<span style="margin-left:auto;color:#6F6863">⇤</span>
+          </div>
+        </div>
+        <div class="fr-main">
+          <div class="fr-serif" style="font-size:32px;margin-bottom:4px">首页</div>
+          <div style="font-size:13px;color:#57534E;margin-bottom:20px">周四下午好</div>
+          <div style="height:150px;border-radius:20px;background:linear-gradient(120deg,#FBE3D6,#F4D3DD);display:flex;align-items:center;justify-content:center;color:#9F3A5A;font-size:12px">首页主卡（第 3 段）</div>
+          <div class="fr-serif" style="font-size:18px;margin:28px 0 12px">最近播放</div>
+          <div style="display:flex;gap:20px">
+            <div class="fr-cv g2" style="width:104px;height:104px"></div><div class="fr-cv g3" style="width:104px;height:104px"></div><div class="fr-cv g4" style="width:104px;height:104px"></div><div class="fr-cv g5" style="width:104px;height:104px"></div><div class="fr-cv g6" style="width:104px;height:104px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fr-player">
+        <div style="display:flex;align-items:center;gap:12px;width:230px">
+          <div class="fr-cv g1" style="width:48px;height:48px;border-radius:10px;box-shadow:0 3px 8px rgba(28,25,23,.15)"></div>
+          <div style="min-width:0"><div style="font-size:14px;font-weight:600">晴天</div><div style="font-size:12px;color:#57534E">周杰伦</div></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div class="fr-tr"><span class="fr-ib fr-on" style="width:28px;height:28px;border-radius:50%">⇄</span><span>⏮</span><div class="fr-play">▶</div><span>⏭</span><span class="fr-ib" style="width:28px;height:28px">↻</span></div>
+          <div class="fr-pg"><span>1:42</span><div class="bar"><i></i></div><span>4:29</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;width:230px;justify-content:flex-end;color:#57534E;font-size:14px">
+          <span class="fr-chip">FLAC</span><span style="color:#B53660">♥</span><span>≡̲</span><span>☰</span><span>🔈</span><span style="width:60px;height:4px;border-radius:2px;background:#E7E0D8;position:relative"><i style="position:absolute;left:0;top:0;bottom:0;width:70%;background:#57534E;border-radius:2px"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:20px">
+  <div class="mockup-header">窄窗口 · 约 900 宽，队列打开</div>
+  <div class="mockup-body" style="padding:12px">
+    <div class="fr" style="height:520px;max-width:760px">
+      <div class="fr-title"><span style="color:#57534E">←</span><div class="fr-dots"><div class="fr-ib">▭</div><div class="fr-ib">⚙</div><div class="fr-ib">✕</div></div></div>
+      <div class="fr-body">
+        <div class="fr-side" style="width:44px;padding:6px 8px 12px">
+          <div class="fr-item fr-sel" style="padding:0;justify-content:center">◎</div>
+          <div class="fr-item" style="padding:0;justify-content:center">♡</div>
+          <div class="fr-item" style="padding:0;justify-content:center">☺</div>
+          <div class="fr-item" style="padding:0;justify-content:center">≋</div>
+          <div class="fr-item" style="padding:0;justify-content:center">☰</div>
+          <div class="fr-item" style="padding:0;justify-content:center">⌕</div>
+          <div style="margin-top:auto;display:flex;justify-content:center"><span style="width:7px;height:7px;border-radius:50%;background:#3F8F5F"></span></div>
+        </div>
+        <div class="fr-main" style="padding:8px 16px 0 8px">
+          <div style="display:flex;gap:14px;align-items:flex-end">
+            <div class="fr-cv g1" style="width:96px;height:96px;box-shadow:0 6px 16px rgba(28,25,23,.14)"></div>
+            <div><div class="fr-serif" style="font-size:24px">叶惠美</div><div style="font-size:12px;color:#57534E">周杰伦 · 2003</div></div>
+          </div>
+          <div style="margin-top:16px;font-size:12px;color:#6F6863">（专辑详情内容，第 4 段）</div>
+        </div>
+        <div class="fr-queue">
+          <div class="fr-serif" style="font-size:16px;margin-bottom:6px">接下来播放</div>
+          <div class="fr-qrow" style="background:#F2E4E3"><div class="fr-cv g1" style="width:30px;height:30px;border-radius:6px"></div><div><div style="color:#B53660;font-weight:600">晴天</div><div style="font-size:11px;color:#57534E">周杰伦</div></div></div>
+          <div class="fr-qrow"><div class="fr-cv g2" style="width:30px;height:30px;border-radius:6px"></div><div><div>以父之名</div><div style="font-size:11px;color:#57534E">周杰伦</div></div></div>
+          <div class="fr-qrow"><div class="fr-cv g3" style="width:30px;height:30px;border-radius:6px"></div><div><div>东风破</div><div style="font-size:11px;color:#57534E">周杰伦</div></div></div>
+        </div>
+      </div>
+      <div class="fr-player" style="margin:0 8px 8px;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;width:150px"><div class="fr-cv g1" style="width:40px;height:40px;border-radius:8px"></div><div><div style="font-weight:600">晴天</div><div style="font-size:11px;color:#57534E">周杰伦</div></div></div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><div class="fr-tr" style="gap:10px"><span>⇄</span><span>⏮</span><div class="fr-play" style="width:34px;height:34px">▶</div><span>⏭</span><span>↻</span></div><div class="fr-pg"><span>1:42</span><div class="bar"><i></i></div><span>4:29</span></div></div>
+        <div style="display:flex;gap:8px;color:#57534E;width:110px;justify-content:flex-end"><span style="color:#B53660">♥</span><span>≡̲</span><span class="fr-on" style="padding:2px 4px;border-radius:6px">☰</span><span>🔈</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section fr-note" style="margin-top:18px">
+  <h3>和现在相比的变化</h3>
+  <ul>
+    <li><b>整个窗口一个底色。</b>标题栏、侧栏、内容区都是暖白，去掉侧栏右边线、播放条上边线和播放条里的竖分隔线。</li>
+    <li><b>标题栏几乎清空。</b>页面名字改由内容区的衬线大标题承担；标题栏只留详情页的返回按钮，以及右侧的迷你播放器、设置和窗口按钮。</li>
+    <li><b>侧栏变安静。</b>选中项是淡玫瑰底加玫瑰红字。原来的大写“LIBRARY”标签改成“音乐库”分组，“首页”和“收藏”放在分组上方。服务器状态从顶部那颗填色胶囊，改成底部一行小字加状态圆点，点击仍然打开服务器设置。折叠按钮放在它旁边。</li>
+    <li><b>播放条变成悬浮卡片。</b>离窗口边缘 12 像素，白底、20 圆角、柔和阴影，高度 72。它仍然占据自己的位置，不覆盖内容，所以列表最后一行永远不会被挡住。播放按钮是玫瑰红圆钮，随机、循环、队列等开关打开时显示淡玫瑰底。按钮的位置和功能都不变。</li>
+    <li><b>队列抽屉也是悬浮卡片。</b>和播放条同一种白底圆角阴影，仍然和内容区并排、不遮挡内容，标题用衬线体“接下来播放”。</li>
+    <li><b>窄窗口（小于 1040）的规则不变。</b>侧栏只显示图标，播放条两侧缩窄；边距从 12 收到 8，页面边距从 32 收到 20。</li>
+  </ul>
+</div>

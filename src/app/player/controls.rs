@@ -1,14 +1,14 @@
 //! Transport controls, mode buttons and artwork-based player styles.
 
-use crate::app::covers::artwork::{accent_foreground, adjust_lightness, readable_accent};
 use crate::app::prelude::*;
 use crate::app::shortcuts::bindings::shortcut_display;
+use crate::app::style::cover_tint::{cover_tint, TintSurface};
 
 impl NavidromeApp {
     pub(in crate::app) fn render_player_transport(
         &self,
         playback: &PlaybackState,
-        accent: Hsla,
+        compact: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         h_flex()
@@ -58,8 +58,12 @@ impl NavidromeApp {
                             )
                         )
                     })
-                    .custom(play_button_style(accent, cx))
-                    .with_size(px(40.0))
+                    .primary()
+                    .with_size(px(if compact {
+                        tokens::PLAY_BUTTON_COMPACT
+                    } else {
+                        tokens::PLAY_BUTTON
+                    }))
                     .rounded_full()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_playback();
@@ -94,20 +98,7 @@ impl NavidromeApp {
         active: bool,
         cx: &Context<Self>,
     ) -> ButtonCustomVariant {
-        let accent = self.now_playing_accent(cx);
-        if active {
-            ButtonCustomVariant::new(cx)
-                .color(accent.opacity(0.12))
-                .foreground(accent)
-                .hover(accent.opacity(0.18))
-                .active(accent.opacity(0.24))
-        } else {
-            ButtonCustomVariant::new(cx)
-                .color(cx.theme().transparent)
-                .foreground(cx.theme().muted_foreground)
-                .hover(accent.opacity(0.08))
-                .active(accent.opacity(0.14))
-        }
+        soft_toggle_style(active, cx)
     }
 
     /// 随机开关按钮：开启时高亮；与循环模式相互独立。
@@ -121,6 +112,7 @@ impl NavidromeApp {
                 t!("Shuffle off")
             })
             .custom(self.player_toggle_style(active, cx))
+            .selected(active)
             .with_size(px(30.0))
             .rounded_full()
             .toggled(active)
@@ -141,6 +133,7 @@ impl NavidromeApp {
             })
             .tooltip(repeat.tooltip())
             .custom(self.player_toggle_style(repeat != RepeatMode::Off, cx))
+            .selected(repeat != RepeatMode::Off)
             .with_size(px(30.0))
             .rounded_full()
             .toggled(repeat != RepeatMode::Off)
@@ -149,34 +142,27 @@ impl NavidromeApp {
             }))
     }
 
-    pub(in crate::app) fn now_playing_palette(&self, cx: &Context<Self>) -> (Hsla, Hsla) {
+    /// Cover color for a content surface; `None` until the palette has loaded.
+    pub(in crate::app) fn tint_for_cover(
+        &self,
+        surface: TintSurface,
+        cover_id: Option<&str>,
+        cx: &Context<Self>,
+    ) -> Option<(Hsla, Hsla)> {
+        let palette = cover_id.and_then(|id| self.state.covers.palette(id));
+        cover_tint(
+            surface,
+            palette,
+            cx.theme().background,
+            cx.theme().is_dark(),
+        )
+    }
+
+    pub(in crate::app) fn now_playing_cover_palette(&self) -> Option<(Hsla, Hsla)> {
         self.state
             .now_playing
             .as_ref()
             .and_then(|song| song.cover_art.as_deref())
             .and_then(|cover_id| self.state.covers.palette(cover_id))
-            .unwrap_or((cx.theme().info, cx.theme().chart_2))
     }
-
-    pub(in crate::app) fn now_playing_accent(&self, cx: &Context<Self>) -> Hsla {
-        let (_, accent) = self.now_playing_palette(cx);
-        let accent = if accent.s < 0.16 {
-            cx.theme().info
-        } else {
-            accent
-        };
-        readable_accent(accent, cx.theme().background)
-    }
-}
-
-pub(in crate::app) fn play_button_style(
-    accent: Hsla,
-    cx: &Context<NavidromeApp>,
-) -> ButtonCustomVariant {
-    ButtonCustomVariant::new(cx)
-        .color(accent)
-        .foreground(accent_foreground(accent))
-        .hover(adjust_lightness(accent, 0.05))
-        .active(adjust_lightness(accent, -0.05))
-        .shadow(true)
 }

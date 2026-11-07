@@ -2,5 +2,6 @@
 
 pub(in crate::app) mod albums;
 pub(in crate::app) mod feature_view;
+pub(in crate::app) mod greeting;
 pub(in crate::app) mod section_view;
 pub(in crate::app) mod view;

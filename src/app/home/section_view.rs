@@ -1,6 +1,7 @@
 //! Home album-section headers, previews and collapse interaction.
 
 use crate::app::prelude::*;
+use crate::app::widgets::shelf::shelf_section;
 
 impl NavidromeApp {
     /// Build album content only while expanded; hidden grids must not create
@@ -19,23 +20,15 @@ impl NavidromeApp {
             .child(
                 h_flex()
                     .w_full()
-                    .h(px(38.0))
                     .items_center()
-                    .justify_between()
+                    .gap_2()
                     .cursor_pointer()
                     .id(SharedString::from(format!("home-section-{id}")))
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(0.68))
                     .hover(|style| style.text_color(cx.theme().primary))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_home_section(id, cx);
                     }))
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(title.clone()),
-                    )
+                    .child(section_title(title.clone(), cx))
                     .child(
                         Icon::new(if collapsed {
                             AppIcon::ChevronRight
@@ -43,7 +36,7 @@ impl NavidromeApp {
                             AppIcon::ChevronDown
                         })
                         .size(px(15.0))
-                        .text_color(cx.theme().muted_foreground),
+                        .text_color(palette(cx).text_muted),
                     ),
             )
             .when(!collapsed, |this| this.child(render_content()))
@@ -54,17 +47,9 @@ impl NavidromeApp {
         &self,
         title: impl Into<SharedString>,
         content: gpui_kit::AnyElement,
+        cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        v_flex()
-            .gap_3()
-            .child(
-                div()
-                    .text_xl()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title.into()),
-            )
-            .child(content)
-            .into_any_element()
+        shelf_section(section_title(title, cx).into_any_element(), content)
     }
 
     /// Home 页专辑区块的通用内容：加载骨架 / 空状态提示 / 专辑网格。
@@ -79,7 +64,7 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let empty_text: SharedString = empty_text.into();
         if albums.is_empty() && loading {
-            self.render_album_skeleton_grid(cx)
+            self.render_album_skeleton_grid(window, cx)
         } else if albums.is_empty() {
             v_flex()
                 .w_full()

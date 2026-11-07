@@ -1,47 +1,56 @@
 //! Application integration tests for navigation and global theme adjustments.
 
-use gpui_kit::{hsla, px};
+use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
+use gpui_kit::{px, Hsla};
 
-use crate::app::covers::artwork::contrast_ratio;
+use crate::app::style::tokens::{palette, DARK, LIGHT};
+
+fn close(a: Hsla, b: Hsla) -> bool {
+    let (a, b) = (a.to_rgb(), b.to_rgb());
+    (a.r - b.r).abs() < 0.01 && (a.g - b.g).abs() < 0.01 && (a.b - b.b).abs() < 0.01
+}
 
 #[gpui_pre::test]
-fn light_theme_hint_contrast_is_darkened_for_readability(cx: &mut gpui_kit::TestAppContext) {
+fn theme_overrides_follow_runtime_mode_changes(cx: &mut gpui_kit::TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(|cx| {
-        use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
-
-        // 基线：框架默认亮色主题的提示灰（neutral-500）在小字号下不足。
         Theme::change(ThemeMode::Light, None, cx);
-        let white = hsla(0.0, 0.0, 1.0, 1.0);
-        let before = contrast_ratio(cx.theme().colors.muted_foreground, white);
-        assert!(
-            (4.0..5.0).contains(&before),
-            "基线应为 neutral-500（约 4.7:1），实际 {before}"
-        );
+        crate::app::apply_app_theme(cx);
 
-        // 修正后：亮色提示灰加深到 neutral-600（约 7.4:1），小字号也清晰。
-        crate::app::adjust_light_theme_contrast(cx);
-        let after = contrast_ratio(cx.theme().colors.muted_foreground, white);
-        assert!(
-            (7.0..8.0).contains(&after),
-            "修正后应为 neutral-600（约 7.4:1），实际 {after}"
-        );
-        assert!(after > before);
+        let light = LIGHT.resolve();
+        assert!(close(cx.theme().background, light.page));
+        assert!(close(cx.theme().primary, light.brand));
+        assert!(close(cx.theme().muted_foreground, light.text_secondary));
+        // Capsule buttons use the kit's solid secondary variant.
+        assert!(close(cx.theme().button_secondary, light.sunken));
+        assert!(close(cx.theme().button_secondary_foreground, light.text));
+        assert!(close(cx.theme().button_primary, light.brand));
+        assert!(close(cx.theme().button_primary_foreground, light.on_brand));
+        assert!(close(palette(cx).page, light.page));
         assert_eq!(cx.theme().radius, px(8.0));
+        assert_eq!(cx.theme().radius_lg, px(20.0));
 
-        // 幂等：重复调用（如后续启动路径复用）不改变结果。
-        crate::app::adjust_light_theme_contrast(cx);
-        assert_eq!(
-            contrast_ratio(cx.theme().colors.muted_foreground, white),
-            after
-        );
-
-        // 深色主题不受影响：切换到 Dark 后提示灰是另一套值。
         Theme::change(ThemeMode::Dark, None, cx);
+        let dark = DARK.resolve();
+        assert!(close(cx.theme().background, dark.page));
+        assert!(close(cx.theme().primary, dark.brand));
+        assert!(close(palette(cx).page, dark.page));
         assert_eq!(cx.theme().radius, px(8.0));
-        assert_ne!(
-            contrast_ratio(cx.theme().colors.muted_foreground, white),
-            after
-        );
+
+        Theme::change(ThemeMode::Light, None, cx);
+        assert!(close(cx.theme().background, light.page));
+        assert!(close(palette(cx).brand, light.brand));
+    });
+}
+
+#[gpui_pre::test]
+fn applying_theme_twice_changes_nothing(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        Theme::change(ThemeMode::Light, None, cx);
+        crate::app::apply_app_theme(cx);
+        let first = cx.theme().primary;
+        crate::app::apply_app_theme(cx);
+        assert_eq!(cx.theme().primary, first);
     });
 }

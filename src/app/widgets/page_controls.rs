@@ -11,16 +11,11 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         v_flex()
             .gap_1()
+            .child(serif_heading(title, tokens::PAGE_TITLE, cx))
             .child(
                 div()
-                    .text_2xl()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title.into()),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_size(px(tokens::META))
+                    .text_color(palette(cx).text_secondary)
                     .child(subtitle.into()),
             )
             .into_any_element()

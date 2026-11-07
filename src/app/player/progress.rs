@@ -87,7 +87,7 @@ fn render_stall_chip(stall: Duration, accent: Hsla) -> gpui_kit::AnyElement {
         .px_1p5()
         .gap_1()
         .items_center()
-        .rounded(px(4.0))
+        .rounded(px(tokens::radius::CONTROL))
         .bg(accent.opacity(0.10))
         .text_size(px(12.0))
         .text_color(accent)

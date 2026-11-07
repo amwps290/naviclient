@@ -1,0 +1,100 @@
+<style>
+  .hl { font-family: system-ui, "Noto Sans CJK SC", sans-serif; background:#F7F3EE; color:#1C1917; border-radius:10px; padding:14px 16px; height:520px; overflow:hidden; box-shadow:0 0 0 1px rgba(0,0,0,.08); font-size:10px; }
+  .hl-serif { font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif; font-weight:700; }
+  .hl-h { font-size:12px; margin:12px 0 6px; display:flex; align-items:baseline; gap:6px; }
+  .hl-h small { font-family:system-ui; font-weight:400; color:#6F6863; font-size:9px; }
+  .hl-row { display:flex; gap:8px; }
+  .hl-cv { border-radius:7px; flex:none; }
+  .g1 { background:linear-gradient(135deg,#f6a35c,#c2416b); } .g2 { background:linear-gradient(135deg,#3b82c4,#0f2a4a); }
+  .g3 { background:linear-gradient(135deg,#9bd28a,#2f6b4f); } .g4 { background:linear-gradient(135deg,#e9d6a8,#8a6a3a); }
+  .g5 { background:linear-gradient(135deg,#b48ce0,#3a2a6b); } .g6 { background:linear-gradient(135deg,#f0b4c8,#8c2f55); }
+  .g7 { background:linear-gradient(135deg,#7dd3c8,#1f5f63); }
+  .hl-sq { width:52px; } .hl-sq .hl-cv { width:52px; height:52px; } .hl-sq div:nth-child(2){ margin-top:3px; white-space:nowrap; overflow:hidden; }
+  .hl-future { border:1.5px dashed #C9BFB4; border-radius:10px; color:#8A8079; display:flex; align-items:center; justify-content:center; text-align:center; padding:6px; }
+  .hl-big { border-radius:14px; padding:10px; display:flex; gap:10px; align-items:center; flex:none; }
+  .hl-pl { width:20px; height:20px; border-radius:50%; background:#B53660; color:#fff; display:flex; align-items:center; justify-content:center; font-size:8px; }
+  .hl-tag { font-size:9px; color:#B53660; font-weight:600; }
+</style>
+
+<h2>首页换一种组织方式</h2>
+<p class="subtitle">三种思路，都只用现有内容。虚线框是以后可能加进来的东西（电台、历史、多音源、流派探索），用来看它们各自放在哪里。</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="shelves" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="hl">
+        <div class="hl-serif" style="font-size:18px">下午好</div>
+
+        <div class="hl-h hl-serif">为你推荐 <small>大卡片货架 · 横向排列</small></div>
+        <div class="hl-row">
+          <div class="hl-big" style="width:150px;background:linear-gradient(118deg,#FBE1D2,#F3D2DD)"><div class="hl-cv g1" style="width:52px;height:52px"></div><div><div class="hl-tag" style="color:#8C3A55">继续聆听</div><div class="hl-serif" style="font-size:12px">晴天</div><div style="color:#57534E">周杰伦</div></div></div>
+          <div class="hl-big" style="width:150px;background:#fff;box-shadow:0 4px 12px rgba(28,25,23,.08)"><div style="width:52px;height:52px;display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:none"><div class="hl-cv g2" style="border-radius:4px"></div><div class="hl-cv g3" style="border-radius:4px"></div><div class="hl-cv g4" style="border-radius:4px"></div><div class="hl-cv g5" style="border-radius:4px"></div></div><div><div class="hl-tag">每日精选</div><div class="hl-serif" style="font-size:12px">今日 30 首</div><div class="hl-pl" style="margin-top:3px">▶</div></div></div>
+          <div class="hl-future" style="width:80px;height:72px;flex:none">未来：<br>歌曲/艺术家电台</div>
+        </div>
+
+        <div class="hl-h hl-serif">最近播放 <small>方形封面货架 · 一行，数量随宽度</small></div>
+        <div class="hl-row">
+          <div class="hl-sq"><div class="hl-cv g2"></div><div>十一月的萧邦</div></div><div class="hl-sq"><div class="hl-cv g3"></div><div>范特西</div></div><div class="hl-sq"><div class="hl-cv g4"></div><div>七里香</div></div><div class="hl-sq"><div class="hl-cv g5"></div><div>我很忙</div></div><div class="hl-sq"><div class="hl-cv g6"></div><div>依然范特西</div></div>
+        </div>
+
+        <div class="hl-future" style="height:46px;margin-top:10px">未来：最近听过的歌<br>（歌曲列表货架，两列紧凑行）</div>
+
+        <div class="hl-h hl-serif">常听专辑</div>
+        <div class="hl-row"><div class="hl-sq"><div class="hl-cv g5"></div><div>我很忙</div></div><div class="hl-sq"><div class="hl-cv g1"></div><div>叶惠美</div></div><div class="hl-sq"><div class="hl-cv g7"></div><div>魔杰座</div></div><div class="hl-sq"><div class="hl-cv g2"></div><div>夜曲</div></div><div class="hl-sq"><div class="hl-cv g3"></div><div>范特西</div></div></div>
+
+        <div class="hl-future" style="height:30px;margin-top:10px">未来：流派/心情 标签行　·　本地音乐、Jellyfin 等音源货架</div>
+        <div class="hl-h hl-serif">最新专辑</div>
+        <div class="hl-row"><div class="hl-sq"><div class="hl-cv g7"></div><div>魔杰座</div></div><div class="hl-sq"><div class="hl-cv g6"></div><div>依然范特西</div></div><div class="hl-sq"><div class="hl-cv g4"></div><div>七里香</div></div></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · 模块化货架（推荐）</h3>
+      <p>整页是一列“货架”，每个货架只用 4 种标准样式之一：大卡片、方形封面、歌曲紧凑行、标签行。专辑货架只排一行、数量随窗口宽度，不再换行成网格。以后加功能就是加一个货架，不用重排整页。Apple Music、Spotify、YouTube Music 都是这个结构。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="bento" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="hl">
+        <div class="hl-serif" style="font-size:18px;margin-bottom:10px">下午好</div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:110px 90px 90px;gap:8px">
+          <div style="grid-row:span 2;border-radius:14px;padding:12px;background:linear-gradient(118deg,#FBE1D2,#F3D2DD);display:flex;flex-direction:column;justify-content:flex-end"><div class="hl-cv g1" style="width:80px;height:80px;margin-bottom:8px"></div><div class="hl-tag" style="color:#8C3A55">继续聆听</div><div class="hl-serif" style="font-size:16px">晴天</div><div style="color:#57534E">周杰伦 · 叶惠美</div></div>
+          <div style="grid-column:span 2;border-radius:14px;padding:10px;background:#fff;box-shadow:0 4px 12px rgba(28,25,23,.08)"><div class="hl-tag">每日精选</div><div class="hl-serif" style="font-size:13px">今日 30 首</div><div class="hl-row" style="margin-top:6px"><div class="hl-cv g2" style="width:30px;height:30px"></div><div class="hl-cv g3" style="width:30px;height:30px"></div><div class="hl-cv g4" style="width:30px;height:30px"></div><div class="hl-cv g5" style="width:30px;height:30px"></div></div></div>
+          <div style="border-radius:14px;padding:8px;background:#EFE9E2"><div class="hl-tag" style="color:#57534E">最近</div><div class="hl-row" style="flex-wrap:wrap;gap:4px;margin-top:4px"><div class="hl-cv g6" style="width:26px;height:26px"></div><div class="hl-cv g7" style="width:26px;height:26px"></div><div class="hl-cv g2" style="width:26px;height:26px"></div></div></div>
+          <div style="border-radius:14px;padding:8px;background:#EFE9E2"><div class="hl-tag" style="color:#57534E">常听</div><div class="hl-row" style="flex-wrap:wrap;gap:4px;margin-top:4px"><div class="hl-cv g5" style="width:26px;height:26px"></div><div class="hl-cv g1" style="width:26px;height:26px"></div><div class="hl-cv g7" style="width:26px;height:26px"></div></div></div>
+          <div style="border-radius:14px;padding:8px;background:#EFE9E2"><div class="hl-tag" style="color:#57534E">最新</div><div class="hl-row" style="flex-wrap:wrap;gap:4px;margin-top:4px"><div class="hl-cv g7" style="width:26px;height:26px"></div><div class="hl-cv g6" style="width:26px;height:26px"></div></div></div>
+          <div style="border-radius:14px;padding:8px;background:#EFE9E2"><div class="hl-tag" style="color:#57534E">随机</div><div class="hl-row" style="flex-wrap:wrap;gap:4px;margin-top:4px"><div class="hl-cv g3" style="width:26px;height:26px"></div><div class="hl-cv g4" style="width:26px;height:26px"></div></div></div>
+          <div class="hl-future">未来：电台？</div>
+        </div>
+        <div class="hl-future" style="height:60px;margin-top:10px">未来模块要放哪？<br>得重新排整块网格，窄窗口下格子也要重新拼</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · 便当格仪表盘</h3>
+      <p>大小不一的格子拼成一整块，第一眼最“设计感”。但每加一个模块都要重排整块网格，窄窗口下格子要重新拼，专辑在小格里只能放几张缩略图。适合内容固定的场景，扩展性最差。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="cover-story" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="hl">
+        <div style="border-radius:16px;height:200px;padding:16px;display:flex;gap:16px;align-items:flex-end;background:linear-gradient(160deg,#F3C7B0,#C9708F)">
+          <div class="hl-cv g1" style="width:130px;height:130px;box-shadow:0 12px 26px rgba(90,20,50,.35)"></div>
+          <div style="color:#2A1019"><div style="font-weight:600;font-size:10px">继续聆听</div><div class="hl-serif" style="font-size:28px;line-height:1.1">晴天</div><div>周杰伦 · 叶惠美</div><div class="hl-pl" style="margin-top:6px;width:26px;height:26px">▶</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 10px;border-radius:12px;background:#fff;box-shadow:0 4px 12px rgba(28,25,23,.08)"><span class="hl-tag">每日精选</span><span>今日 30 首 · 融合收藏、熟悉艺人与新发现</span><span class="hl-pl" style="margin-left:auto">▶</span></div>
+        <div class="hl-h hl-serif">最近播放</div>
+        <div class="hl-row"><div class="hl-sq"><div class="hl-cv g2"></div><div>十一月的萧邦</div></div><div class="hl-sq"><div class="hl-cv g3"></div><div>范特西</div></div><div class="hl-sq"><div class="hl-cv g4"></div><div>七里香</div></div><div class="hl-sq"><div class="hl-cv g5"></div><div>我很忙</div></div></div>
+        <div class="hl-h hl-serif">常听专辑</div>
+        <div class="hl-row"><div class="hl-sq"><div class="hl-cv g5"></div><div>我很忙</div></div><div class="hl-sq"><div class="hl-cv g1"></div><div>叶惠美</div></div><div class="hl-sq"><div class="hl-cv g7"></div><div>魔杰座</div></div></div>
+        <div class="hl-future" style="height:34px;margin-top:10px">未来模块：接在下面的列表里</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · 封面故事 + 信息流</h3>
+      <p>顶部一整幅“封面故事”给当前在听的歌，最有杂志感。但它占掉近半屏，每日精选被降成一条横幅，和产品规划里“每日精选是首页主入口”冲突。没在听歌时，这个大位置只能放最近专辑。</p>
+    </div>
+  </div>
+
+</div>

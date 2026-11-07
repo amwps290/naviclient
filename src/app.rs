@@ -22,6 +22,7 @@ mod shell;
 mod shortcuts;
 mod songs;
 mod sound;
+mod style;
 mod widgets;
 
 pub(crate) use covers::state::CoverRequest;
@@ -33,29 +34,7 @@ pub(crate) use library::requests::LibraryRequest;
 pub(crate) use recommendations::auto_continue_state::AutoContinueRequest;
 pub(crate) use recommendations::daily_mix_state::DailyMixRequest;
 pub(crate) use recommendations::radio_state::RadioRequest;
-
-/// 全局视觉 token 修正：普通控件统一 8px，卡片/弹窗统一 12px；
-/// 同时提高亮色主题的小号次要文字对比度。
-///
-/// 配置副本会被后续 `Theme::change` 重用，因此运行时切换深浅主题不会
-/// 丢失圆角规范。深色主题颜色保持 Kit 默认，仅同步圆角。
-pub fn adjust_light_theme_contrast(cx: &mut App) {
-    let mode = {
-        let theme = Theme::global_mut(cx);
-        let mut light = (*theme.light_theme).clone();
-        light.radius = Some(8);
-        light.radius_lg = Some(12);
-        light.colors.muted_foreground = Some("#525252".into());
-        theme.light_theme = std::rc::Rc::new(light);
-
-        let mut dark = (*theme.dark_theme).clone();
-        dark.radius = Some(8);
-        dark.radius_lg = Some(12);
-        theme.dark_theme = std::rc::Rc::new(dark);
-        theme.mode
-    };
-    Theme::change(mode, None, cx);
-}
+pub(crate) use style::theme::apply_app_theme;
 
 pub struct NavidromeApp {
     runtime: Runtime,

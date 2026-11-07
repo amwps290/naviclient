@@ -2,7 +2,6 @@
 //! `views.rs`; this module owns the drawer-specific header, tabs, empty states
 //! and queue actions so the main view router does not absorb another large UI.
 
-use crate::app::covers::artwork::{accent_foreground, adjust_lightness};
 use crate::app::prelude::*;
 
 impl NavidromeApp {
@@ -19,53 +18,61 @@ impl NavidromeApp {
             QueueDrawerTab::History => self.state.listening.recent_songs().len(),
         };
 
-        v_flex()
-            .id("queue-drawer")
-            .w(px(width))
-            .min_w_0()
-            .flex_none()
-            .when(overlay, |this| this.absolute().top_0().right_0().bottom_0())
-            .when(!overlay, |this| this.h_full())
-            .occlude()
-            .bg(cx.theme().background)
-            .border_l_1()
-            .border_color(cx.theme().border)
-            .child(self.render_queue_drawer_header(tab, visible_count, cx))
-            .child(self.render_queue_drawer_tabs(tab, cx))
-            .when(tab == QueueDrawerTab::UpNext, |this| {
-                this.child(self.render_auto_continue_control(cx))
-            })
-            .when(
-                tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
-                |this| this.child(self.render_queue_empty_state(false, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
-                |this| {
-                    this.child(self.render_queue_action_bar(compact, cx)).child(
-                        v_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .child(self.render_song_list(SongScope::Queue, cx)),
-                    )
-                },
-            )
-            .when(
-                tab == QueueDrawerTab::History && self.state.listening.recent_songs().is_empty(),
-                |this| this.child(self.render_queue_empty_state(true, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::History && !self.state.listening.recent_songs().is_empty(),
-                |this| {
-                    this.child(
-                        v_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .child(self.render_song_list(SongScope::History, cx)),
-                    )
-                },
-            )
-            .into_any_element()
+        raised_surface(
+            v_flex()
+                .id("queue-drawer")
+                .w(px(width))
+                .min_w_0()
+                .flex_none()
+                .mb(px(tokens::QUEUE_DRAWER_MARGIN))
+                .when(overlay, |this| {
+                    this.absolute()
+                        .top_0()
+                        .right(px(tokens::QUEUE_DRAWER_MARGIN))
+                        .bottom_0()
+                })
+                .when(!overlay, |this| this.mr(px(tokens::QUEUE_DRAWER_MARGIN)))
+                .occlude()
+                .overflow_hidden(),
+            tokens::radius::LARGE,
+            cx,
+        )
+        .child(self.render_queue_drawer_header(tab, visible_count, cx))
+        .child(self.render_queue_drawer_tabs(tab, cx))
+        .when(tab == QueueDrawerTab::UpNext, |this| {
+            this.child(self.render_auto_continue_control(cx))
+        })
+        .when(
+            tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
+            |this| this.child(self.render_queue_empty_state(false, cx)),
+        )
+        .when(
+            tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
+            |this| {
+                this.child(self.render_queue_action_bar(compact, cx)).child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.render_song_list(SongScope::Queue, cx)),
+                )
+            },
+        )
+        .when(
+            tab == QueueDrawerTab::History && self.state.listening.recent_songs().is_empty(),
+            |this| this.child(self.render_queue_empty_state(true, cx)),
+        )
+        .when(
+            tab == QueueDrawerTab::History && !self.state.listening.recent_songs().is_empty(),
+            |this| {
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.render_song_list(SongScope::History, cx)),
+                )
+            },
+        )
+        .into_any_element()
     }
 
     pub(in crate::app) fn render_queue_drawer_header(
@@ -80,17 +87,10 @@ impl NavidromeApp {
             .px_4()
             .items_center()
             .justify_between()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .child(
                 v_flex()
                     .gap_0p5()
-                    .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(tab.label()),
-                    )
+                    .child(section_title(tab.label(), cx))
                     .child(
                         div()
                             .text_xs()
@@ -124,8 +124,6 @@ impl NavidromeApp {
             .px_3()
             .gap_1()
             .items_center()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.7))
             .children(QueueDrawerTab::ALL.map(|tab| {
                 Button::new(match tab {
                     QueueDrawerTab::UpNext => "queue-tab-up-next",
@@ -156,8 +154,6 @@ impl NavidromeApp {
             .gap_3()
             .items_center()
             .justify_between()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.7))
             .child(
                 v_flex()
                     .flex_1()
@@ -239,27 +235,18 @@ impl NavidromeApp {
         compact: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let accent = self.now_playing_accent(cx);
-        let play_all_style = ButtonCustomVariant::new(cx)
-            .color(accent)
-            .foreground(accent_foreground(accent))
-            .hover(adjust_lightness(accent, 0.05))
-            .active(adjust_lightness(accent, -0.05));
         h_flex()
             .flex_none()
             .when(compact, |this| this.px_2())
             .when(!compact, |this| this.px_3())
             .py_2()
             .gap_0p5()
-            .bg(cx.theme().secondary.opacity(0.18))
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(0.7))
             .child(
                 Button::new("drawer-queue-play-all")
                     .icon(PlayerIcon::Play)
                     .label(t!("Play all"))
                     .tooltip(t!("Play all"))
-                    .custom(play_all_style)
+                    .primary()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.state.queue.is_empty() {

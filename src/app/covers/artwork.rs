@@ -46,6 +46,7 @@ pub(in crate::app) fn decode_cover(bytes: Vec<u8>, want_palette: bool) -> Decode
     DecodedCover { palette, image }
 }
 
+#[cfg(test)]
 pub(in crate::app) fn relative_luminance(color: Hsla) -> f32 {
     fn linearize(channel: f32) -> f32 {
         if channel <= 0.04045 {
@@ -59,48 +60,11 @@ pub(in crate::app) fn relative_luminance(color: Hsla) -> f32 {
     0.2126 * linearize(rgb.r) + 0.7152 * linearize(rgb.g) + 0.0722 * linearize(rgb.b)
 }
 
+#[cfg(test)]
 pub(in crate::app) fn contrast_ratio(a: Hsla, b: Hsla) -> f32 {
     let brighter = relative_luminance(a).max(relative_luminance(b));
     let darker = relative_luminance(a).min(relative_luminance(b));
     (brighter + 0.05) / (darker + 0.05)
-}
-
-pub(crate) fn readable_accent(mut accent: Hsla, background: Hsla) -> Hsla {
-    accent.s = accent.s.clamp(0.38, 0.78);
-    accent.a = 1.0;
-    let lighten = relative_luminance(background) < 0.35;
-    accent.l = if lighten {
-        accent.l.clamp(0.56, 0.74)
-    } else {
-        accent.l.clamp(0.26, 0.46)
-    };
-
-    for _ in 0..12 {
-        if contrast_ratio(accent, background) >= 4.5 {
-            break;
-        }
-        accent.l = if lighten {
-            (accent.l + 0.035).min(0.88)
-        } else {
-            (accent.l - 0.035).max(0.12)
-        };
-    }
-    accent
-}
-
-pub(crate) fn accent_foreground(accent: Hsla) -> Hsla {
-    let black = hsla(0.0, 0.0, 0.06, 1.0);
-    let white = hsla(0.0, 0.0, 0.98, 1.0);
-    if contrast_ratio(black, accent) >= contrast_ratio(white, accent) {
-        black
-    } else {
-        white
-    }
-}
-
-pub(crate) fn adjust_lightness(mut color: Hsla, amount: f32) -> Hsla {
-    color.l = (color.l + amount).clamp(0.0, 1.0);
-    color
 }
 
 pub(in crate::app) fn rgb_to_hsla(red: f32, green: f32, blue: f32) -> Hsla {

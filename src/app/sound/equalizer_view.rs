@@ -20,6 +20,7 @@ impl NavidromeApp {
                     .icon(AppIcon::Eq)
                     .tooltip(t!("Equalizer"))
                     .custom(self.player_toggle_style(enabled, cx))
+                    .selected(enabled)
                     .with_size(px(30.0))
                     .rounded_full()
                     .toggled(enabled),

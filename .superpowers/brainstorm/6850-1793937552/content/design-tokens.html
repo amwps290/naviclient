@@ -1,0 +1,114 @@
+<style>
+  .tk { font-family: system-ui, "Noto Sans CJK SC", sans-serif; border-radius: 12px; padding: 22px; }
+  .tk-serif { font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif; }
+  .tk h4 { margin: 18px 0 8px; font-size: 11px; letter-spacing: .04em; opacity: .6; font-weight: 600; }
+  .tk-sw { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tk-sw div { width: 92px; font-size: 10px; line-height: 1.35; }
+  .tk-sw span { display: block; height: 34px; border-radius: 8px; margin-bottom: 4px; box-shadow: inset 0 0 0 1px rgba(128,128,128,.18); }
+  .tk-type div { margin: 3px 0; }
+  .tk-rad { display: flex; gap: 10px; align-items: flex-end; font-size: 10px; }
+  .tk-rad div { text-align: center; }
+  .tk-rad span { display: block; width: 52px; height: 40px; margin-bottom: 4px; }
+  .tk-cv { width: 64px; height: 64px; border-radius: 12px; background: linear-gradient(135deg,#f6a35c,#c2416b); flex: none; }
+</style>
+
+<h2>第 1 段：设计规则（颜色、字体、间距、圆角、层次）</h2>
+<p class="subtitle">左浅右深。所有文字颜色都按 WCAG AA（≥ 4.5:1）校验过。玫瑰红微调成 #B53660，肉眼几乎看不出差别，但“淡玫瑰底上的玫瑰红字”（导航选中态）才能达标。</p>
+
+<div class="split">
+
+<div class="tk" style="background:#F7F3EE;color:#1C1917">
+  <h4>颜色</h4>
+  <div class="tk-sw">
+    <div><span style="background:#F7F3EE"></span>页面底 #F7F3EE</div>
+    <div><span style="background:#FFFFFF"></span>浮起表面 #FFFFFF<br>卡片/播放条/弹层</div>
+    <div><span style="background:#EFE9E2"></span>凹陷表面 #EFE9E2<br>悬停/输入框</div>
+    <div><span style="background:#B53660"></span>品牌 #B53660</div>
+    <div><span style="background:#F2E4E3"></span>品牌淡底 #F2E4E3<br>选中态</div>
+    <div><span style="background:#1C1917"></span>正文 #1C1917</div>
+    <div><span style="background:#57534E"></span>次要文字 #57534E</div>
+    <div><span style="background:#6F6863"></span>弱化文字 #6F6863</div>
+  </div>
+
+  <h4>字体（衬线只用于标题与歌词，其余为现有无衬线）</h4>
+  <div class="tk-type">
+    <div class="tk-serif" style="font-size:32px;font-weight:700;line-height:1.2">叶惠美 <span style="font-size:12px;font-weight:400;font-family:system-ui;opacity:.55">页面/详情大标题 32 衬线</span></div>
+    <div class="tk-serif" style="font-size:22px;font-weight:700">今天适合听 <span style="font-size:12px;font-weight:400;font-family:system-ui;opacity:.55">主卡标题 22 衬线</span></div>
+    <div class="tk-serif" style="font-size:18px;font-weight:700">最近播放 <span style="font-size:12px;font-weight:400;font-family:system-ui;opacity:.55">区块标题 18 衬线</span></div>
+    <div style="font-size:14px">晴天 · 周杰伦 <span style="font-size:12px;opacity:.55">正文 14</span></div>
+    <div style="font-size:13px;color:#57534E">2003 · 11 首 · 47 分钟 <span style="font-size:12px;opacity:.75">次要 13</span></div>
+    <div style="font-size:12px;color:#6F6863">说明文字 12</div>
+  </div>
+
+  <h4>间距与圆角</h4>
+  <div style="font-size:11px;color:#57534E;margin-bottom:8px">间距只用 4 · 8 · 12 · 16 · 24 · 32 · 48；页面边距 32（紧凑 20），区块间距 40</div>
+  <div class="tk-rad">
+    <div><span style="background:#EFE9E2;border-radius:8px"></span>8 按钮/行</div>
+    <div><span style="background:#EFE9E2;border-radius:12px"></span>12 封面/卡片</div>
+    <div><span style="background:#EFE9E2;border-radius:20px"></span>20 主卡/弹层</div>
+    <div><span style="background:#EFE9E2;border-radius:999px;width:70px"></span>胶囊</div>
+  </div>
+
+  <h4>层次：靠留白和表面色区分，不用分割线；只有浮起的东西有阴影</h4>
+  <div style="display:flex;gap:16px;align-items:center">
+    <div class="tk-cv" style="box-shadow:0 6px 16px rgba(28,25,23,.14)"></div>
+    <div style="flex:1;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;background:#fff;box-shadow:0 1px 2px rgba(28,25,23,.06),0 8px 24px rgba(28,25,23,.10);font-size:12px">
+      <b>晴天</b><span style="width:24px;height:24px;border-radius:50%;background:#B53660;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px">▶</span>
+      <span style="flex:1;height:3px;background:#E7E0D8;border-radius:2px;position:relative"><i style="position:absolute;left:0;top:0;bottom:0;width:40%;background:#B53660;border-radius:2px"></i></span>
+    </div>
+  </div>
+</div>
+
+<div class="tk" style="background:#1C1917;color:#F5F5F4">
+  <h4>颜色</h4>
+  <div class="tk-sw">
+    <div><span style="background:#1C1917"></span>页面底 #1C1917</div>
+    <div><span style="background:#292524"></span>浮起表面 #292524</div>
+    <div><span style="background:#24201E"></span>凹陷表面 #24201E</div>
+    <div><span style="background:#F28AA8"></span>品牌 #F28AA8</div>
+    <div><span style="background:#3A292B"></span>品牌淡底 #3A292B</div>
+    <div><span style="background:#F5F5F4"></span>正文 #F5F5F4</div>
+    <div><span style="background:#D6D3D1"></span>次要文字 #D6D3D1</div>
+    <div><span style="background:#A8A29E"></span>弱化文字 #A8A29E</div>
+  </div>
+
+  <h4>字体</h4>
+  <div class="tk-type">
+    <div class="tk-serif" style="font-size:32px;font-weight:700;line-height:1.2">叶惠美</div>
+    <div class="tk-serif" style="font-size:22px;font-weight:700">今天适合听</div>
+    <div class="tk-serif" style="font-size:18px;font-weight:700">最近播放</div>
+    <div style="font-size:14px">晴天 · 周杰伦</div>
+    <div style="font-size:13px;color:#D6D3D1">2003 · 11 首 · 47 分钟</div>
+    <div style="font-size:12px;color:#A8A29E">说明文字 12</div>
+  </div>
+
+  <h4>间距与圆角：与浅色完全相同</h4>
+  <div class="tk-rad">
+    <div><span style="background:#24201E;border-radius:8px"></span>8</div>
+    <div><span style="background:#24201E;border-radius:12px"></span>12</div>
+    <div><span style="background:#24201E;border-radius:20px"></span>20</div>
+    <div><span style="background:#24201E;border-radius:999px;width:70px"></span>胶囊</div>
+  </div>
+
+  <h4>层次：深色下阴影看不见，浮起的东西改用更亮的表面加一圈细边</h4>
+  <div style="display:flex;gap:16px;align-items:center">
+    <div class="tk-cv" style="box-shadow:0 6px 16px rgba(0,0,0,.4)"></div>
+    <div style="flex:1;display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;background:#292524;box-shadow:inset 0 0 0 1px #3A3431,0 8px 24px rgba(0,0,0,.35);font-size:12px">
+      <b>晴天</b><span style="width:24px;height:24px;border-radius:50%;background:#F28AA8;color:#1C1917;display:flex;align-items:center;justify-content:center;font-size:10px">▶</span>
+      <span style="flex:1;height:3px;background:#44403C;border-radius:2px;position:relative"><i style="position:absolute;left:0;top:0;bottom:0;width:40%;background:#F28AA8;border-radius:2px"></i></span>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>几条贯穿全局的规则</h3>
+  <ul style="font-size:14px;line-height:1.7">
+    <li><b>不用分割线划分区域。</b>侧栏、内容、播放条之间靠留白和表面色区分；歌曲行之间不再有横线，靠间距和悬停底色区分。边框只留给输入框、弹层和深色下的浮层。</li>
+    <li><b>品牌色只表达“状态和动作”。</b>选中、链接、主按钮、进度、正在播放。其余文字一律中性色。</li>
+    <li><b>封面色只铺在内容上。</b>首页主卡、详情页头部、正在播放页背景，用低强度的两色渐变，不影响控件颜色。</li>
+    <li><b>衬线字体按平台回退，不打包字体文件。</b>Linux 用 Noto Serif CJK / 思源宋体，macOS 用宋体-简；Windows 没有合适的中文衬线，回退为粗体无衬线。打包字体会让程序大 10 MB 以上，与之前压缩体积的努力相冲突。</li>
+    <li><b>所有数值集中定义在一个样式模块里，</b>页面不再写死颜色和像素值。改一处，全局生效。</li>
+  </ul>
+</div>

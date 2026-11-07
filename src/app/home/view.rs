@@ -1,11 +1,8 @@
-//! Home page composition and bounded album previews.
+//! Home page composition: a greeting above a stack of shelves.
 
+use super::greeting::current_greeting;
 use crate::app::prelude::*;
-
-/// Six 176px album cards with five 20px gaps: Home previews intentionally
-/// stop at six items, so the listening grid should share the same visual edge
-/// instead of stretching indefinitely on ultrawide/fullscreen windows.
-const HOME_PREVIEW_MAX_WIDTH: f32 = 6.0 * 176.0 + 5.0 * 20.0;
+use crate::app::widgets::shelf::hero_shelf;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_home(
@@ -13,38 +10,30 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let columns = self.content_columns(window).count;
+        let compact = self.shell_layout(window).compact;
         let recent = self.state.home_albums.albums(HomeAlbumSection::Recent);
         let frequent = self.state.home_albums.albums(HomeAlbumSection::Frequent);
         let newest = self.state.home_albums.albums(HomeAlbumSection::Newest);
         let random = self.state.home_albums.albums(HomeAlbumSection::Random);
         let feature_uses_recent = self.state.now_playing.is_none() && !recent.is_empty();
         let recent_start = usize::from(feature_uses_recent);
-        let recent_end = (recent_start + 6).min(recent.len());
+        let recent_end = (recent_start + columns).min(recent.len());
         let recent_preview = &recent[recent_start..recent_end];
-        let frequent_preview = &frequent[..frequent.len().min(6)];
-        let newest_preview = &newest[..newest.len().min(6)];
-        let random_preview = &random[..random.len().min(6)];
-        let status = if self.state.connection.server().is_some() {
-            format!("{} · {}", self.active_server_label(), t!("Connected"))
-        } else {
-            self.state.status.clone()
-        };
-        let listening_feature = self.render_home_feature(window, cx);
-        let daily_mix_card = self.render_daily_mix_card(window, cx);
+        let frequent_preview = &frequent[..frequent.len().min(columns)];
+        let newest_preview = &newest[..newest.len().min(columns)];
+        let random_preview = &random[..random.len().min(columns)];
+        let mut cards = Vec::with_capacity(2);
+        cards.extend(self.render_home_feature(compact, cx));
+        cards.push(self.render_daily_mix_card(compact, cx));
 
         v_flex()
-            .gap_6()
-            .child(self.page_header(t!("Home"), status, cx))
+            .gap(px(tokens::SECTION_GAP))
             .child(
-                h_flex()
-                    .w_full()
-                    .max_w(px(HOME_PREVIEW_MAX_WIDTH))
-                    .gap_4()
-                    .items_stretch()
-                    .when_some(listening_feature, |this, feature| {
-                        this.child(div().flex_1().min_w_0().child(feature))
-                    })
-                    .child(div().flex_1().min_w_0().child(daily_mix_card)),
+                v_flex()
+                    .gap_6()
+                    .child(serif_heading(current_greeting(), tokens::PAGE_TITLE, cx))
+                    .child(hero_shelf(cards)),
             )
             .when(
                 !recent_preview.is_empty()
@@ -60,6 +49,7 @@ impl NavidromeApp {
                             cx,
                             window,
                         ),
+                        cx,
                     ))
                 },
             )

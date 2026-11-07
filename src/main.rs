@@ -153,8 +153,9 @@ fn run_app() {
                                 Theme::sync_system_appearance(Some(window), cx)
                             }
                         }
-                        app::adjust_light_theme_contrast(cx);
+                        app::apply_app_theme(cx);
                         typography::configure_ui_font(cx, ui_locale);
+                        typography::configure_serif_font(cx, ui_locale);
 
                         cx.new(|cx| app::NavidromeApp::new(window, cx))
                     })

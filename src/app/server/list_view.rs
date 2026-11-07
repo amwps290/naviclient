@@ -48,27 +48,13 @@ impl NavidromeApp {
                     .gap_2()
                     .px_2()
                     .py_1p5()
-                    .rounded(px(8.0))
-                    .border_1()
-                    .border_color(if is_active {
-                        // 选中态的边框用框架的 list_active_border（亮色 blue-400、
-                        // 深色 blue-700），与行底同一个蓝色族，不再是灰上加灰。
-                        cx.theme().list_active_border.opacity(0.55)
-                    } else {
-                        cx.theme().border.opacity(0.7)
-                    })
-                    // 选中行底色沿用框架的选中语义色 list_active——accent 是
-                    // 背景 token，0.07 叠在卡片底上等于没叠（与歌曲行同一教训）。
-                    .bg(if is_active {
-                        cx.theme().list_active
-                    } else {
-                        cx.theme().background
-                    })
+                    .rounded(px(tokens::radius::CONTROL))
+                    .when(is_active, |this| this.bg(palette(cx).brand_soft))
                     .when(switchable, |this| {
                         // hover 预演选中态：从白色走向同一片蓝色，
                         // 而不是把鼠标经过变成一次无意义的灰色闪光。
                         this.cursor_pointer()
-                            .hover(|style| style.bg(cx.theme().list_active))
+                            .hover(|style| style.bg(palette(cx).sunken))
                     })
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                     // 当前连接由行底、图标与行尾胶囊三重表达，
@@ -129,7 +115,7 @@ impl NavidromeApp {
                                         .items_center()
                                         .h(px(20.0))
                                         .px(px(8.0))
-                                        .rounded(px(999.0))
+                                        .rounded(px(tokens::radius::FULL))
                                         .bg(cx.theme().primary)
                                         .text_color(cx.theme().primary_foreground)
                                         .text_xs()

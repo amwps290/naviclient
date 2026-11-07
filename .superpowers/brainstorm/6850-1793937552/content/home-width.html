@@ -1,0 +1,49 @@
+<style>
+  .wd { font-family: system-ui, "Noto Sans CJK SC", sans-serif; background:#F7F3EE; border-radius:10px; padding:14px 18px 18px; box-shadow:0 0 0 1px rgba(0,0,0,.08); }
+  .wd-serif { font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif; font-weight:700; color:#1C1917; }
+  .wd-big { height:64px; border-radius:12px; }
+  .wd-cv { aspect-ratio:1; border-radius:8px; }
+  .g1 { background:linear-gradient(135deg,#f6a35c,#c2416b); } .g2 { background:linear-gradient(135deg,#3b82c4,#0f2a4a); }
+  .g3 { background:linear-gradient(135deg,#9bd28a,#2f6b4f); } .g4 { background:linear-gradient(135deg,#e9d6a8,#8a6a3a); }
+  .g5 { background:linear-gradient(135deg,#b48ce0,#3a2a6b); } .g6 { background:linear-gradient(135deg,#f0b4c8,#8c2f55); }
+  .g7 { background:linear-gradient(135deg,#7dd3c8,#1f5f63); }
+  .wd-edge { position:absolute; top:0; bottom:0; width:0; border-left:1.5px dashed #B53660; }
+</style>
+
+<h2>全屏时上下不齐：怎么对齐</h2>
+<p class="subtitle">以全屏 1920 宽为例。虚线是内容的左右边缘。</p>
+
+<div class="mockup">
+  <div class="mockup-header">现在的草图：上面两张大卡撑满，下面专辑固定 150 宽，右边留出一截空白</div>
+  <div class="mockup-body" style="padding:12px">
+    <div class="wd" style="position:relative">
+      <div style="display:flex;gap:10px"><div class="wd-big g1" style="flex:1;opacity:.85"></div><div class="wd-big" style="flex:1;background:#fff;box-shadow:0 4px 12px rgba(28,25,23,.08)"></div></div>
+      <div class="wd-serif" style="font-size:12px;margin:12px 0 6px">最近播放</div>
+      <div style="display:flex;gap:10px"><div class="wd-cv g2" style="width:70px"></div><div class="wd-cv g3" style="width:70px"></div><div class="wd-cv g4" style="width:70px"></div><div class="wd-cv g5" style="width:70px"></div><div class="wd-cv g6" style="width:70px"></div><div class="wd-cv g7" style="width:70px"></div><div class="wd-cv g2" style="width:70px"></div><div class="wd-cv g3" style="width:70px"></div><div class="wd-cv g4" style="width:70px"></div></div>
+      <div style="font-size:11px;color:#B53660;margin-top:6px">放不下第 10 张，右边剩下的空白宽度不固定，和上面的大卡对不齐</div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:16px">
+  <div class="mockup-header">建议：统一的列网格，所有货架左右边缘一致；超宽屏时内容居中，最宽 1600</div>
+  <div class="mockup-body" style="padding:12px">
+    <div class="wd" style="position:relative">
+      <div style="display:flex;gap:10px"><div class="wd-big g1" style="flex:1;opacity:.85"></div><div class="wd-big" style="flex:1;background:#fff;box-shadow:0 4px 12px rgba(28,25,23,.08)"></div></div>
+      <div class="wd-serif" style="font-size:12px;margin:12px 0 6px">最近播放</div>
+      <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px"><div class="wd-cv g2"></div><div class="wd-cv g3"></div><div class="wd-cv g4"></div><div class="wd-cv g5"></div><div class="wd-cv g6"></div><div class="wd-cv g7"></div><div class="wd-cv g2"></div><div class="wd-cv g3"></div></div>
+      <div class="wd-serif" style="font-size:12px;margin:12px 0 6px">常听专辑</div>
+      <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:10px"><div class="wd-cv g5"></div><div class="wd-cv g1"></div><div class="wd-cv g7"></div><div class="wd-cv g2"></div><div class="wd-cv g3"></div><div class="wd-cv g4"></div><div class="wd-cv g6"></div><div class="wd-cv g5"></div></div>
+      <div style="font-size:11px;color:#B53660;margin-top:6px">先按“每张至少 160”算出这一行放几列，再把列宽拉伸到正好铺满（实际在 160 到 220 之间）。上下边缘永远对齐。</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px;font-size:14px;line-height:1.7">
+  <ul>
+    <li><b>封面大小随宽度微调，范围 160 到 220。</b>先算这一行能放几列，再把列宽拉伸到刚好铺满，所以每个货架的右边缘都和上面的大卡片对齐。</li>
+    <li><b>超宽屏不无限拉伸。</b>内容区最宽 1600，超出后居中，两侧留出暖白底。这条也是杂志排版的“版心”。</li>
+    <li><b>同一套列网格会用在所有页面：</b>专辑、艺术家、流派、播放列表的网格页都一样，全屏时到处对齐。</li>
+    <li><b>窄屏也成立。</b>900 宽时，侧栏折叠后内容约 800，放 4 列，每张约 185。</li>
+  </ul>
+</div>

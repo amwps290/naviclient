@@ -48,6 +48,7 @@ JavaScript runtime.
   if a `t!()` key is missing from any catalog, is no longer used, or changes its
   placeholder set
 - Responsive album and artist grids with virtualized-ready component foundations
+- Bright magazine-style interface: warm off-white surfaces with a warm black dark mode, serif headings, a fixed rose brand color for controls and selection, soft cover-colored backgrounds on content, floating player and queue cards, and shelves whose cover count follows the window width
 - Audio playback with play/pause, stop, previous/next, seek, and queue
   progression. Controls respond immediately to accepted commands; listening
   history, track notifications, Scrobble thresholds and retry confirmation wait
@@ -350,6 +351,9 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/audio/gapless.rs` - continuous output and sample-accurate prepared-track handoff, using the separate transition state machine
 - `src/playback_timeline.rs` - shared song duration selection and bounded, saturating relative seeks for UI and system media controls
 - `src/app.rs` and `src/app/` - GPUI orchestration, views, and isolated feature state
+- `src/app/style.rs` and `src/app/style/` - design tokens, kit theme overrides, serif headings, raised surfaces, button recipes, the shared cover column grid, normalized cover tints and genre color blocks; page code reads its colors and visual sizes from here
+- `src/app/shell/layout.rs` - sidebar, drawer, padding and content width computed from the current frame's window size
+- `src/app/widgets/shelf.rs` and `src/app/widgets/detail_hero.rs` - Home shelves on the shared grid, and the header shared by album, artist and playlist pages
 - `src/app/shell/titlebar.rs`, `src/app/shell/sidebar.rs`, `src/app/shell/navigation.rs` and `src/app/shell/view_state.rs` - window navigation, shared section presentation, isolated navigation/overlay transitions and detail-page relationships
 - `src/app/home/view.rs`, `src/app/home/feature_view.rs`, `src/app/home/section_view.rs` and `src/app/recommendations/daily_mix_view.rs` - Home composition, listening feature, lazy album sections and Daily Mix controls
 - `src/app/player/controls.rs` and `src/app/widgets/favorite_button.rs` - shared player styles, shuffle/repeat controls and favorite buttons
@@ -523,7 +527,7 @@ selection; an obsolete edit target cannot fall back to another server. An
 unconfigured active server opens its form automatically, while configured
 servers open their forms through the row's edit button.
 
-Main titlebars and sidebar entries share section titles and icons. Expanded and
+Sidebar entries and page headings share section titles and icons. Expanded and
 collapsed sidebar entries use the same navigation action and library-loading
 rules; detail pages keep their library section selected, and both the back button
 and Escape use the same parent mapping. Home album sections build their grids

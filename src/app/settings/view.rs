@@ -16,20 +16,15 @@ impl NavidromeApp {
         v_flex()
             .w_full()
             .max_w(px(840.0))
-            .gap_5()
+            .gap_6()
             .child(
                 v_flex()
                     .gap_1()
+                    .child(section_title(presentation.title, cx))
                     .child(
                         div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(presentation.title),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_size(px(tokens::META))
+                            .text_color(palette(cx).text_secondary)
                             .child(presentation.description),
                     ),
             )

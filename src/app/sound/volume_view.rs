@@ -37,67 +37,66 @@ impl NavidromeApp {
             }))
             .when(self.volume.panel_open(), |this| {
                 this.child(
-                    v_flex()
-                        .id("player-volume-panel")
-                        .absolute()
-                        .bottom(px(64.0))
-                        .left(px(-13.0))
-                        .w(px(54.0))
-                        .p_2()
-                        .items_center()
-                        .gap_1()
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().popover)
-                        .text_color(cx.theme().popover_foreground)
-                        .shadow_md()
-                        .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
-                            this.begin_volume_panel_drag(cx);
-                        }))
-                        .capture_any_mouse_up(cx.listener(|this, _, _, cx| {
-                            this.end_volume_panel_drag(true, cx);
-                        }))
-                        .on_mouse_up_out(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                this.end_volume_panel_drag(false, cx);
-                            }),
-                        )
-                        .on_hover(cx.listener(|this, hovering, _, cx| {
-                            if *hovering {
-                                this.show_volume_panel(cx);
+                    raised_surface(
+                        v_flex()
+                            .id("player-volume-panel")
+                            .absolute()
+                            .bottom(px(56.0))
+                            .left(px(-13.0))
+                            .w(px(54.0))
+                            .p_2()
+                            .items_center()
+                            .gap_1()
+                            .text_color(cx.theme().popover_foreground),
+                        tokens::radius::COVER,
+                        cx,
+                    )
+                    .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
+                        this.begin_volume_panel_drag(cx);
+                    }))
+                    .capture_any_mouse_up(cx.listener(|this, _, _, cx| {
+                        this.end_volume_panel_drag(true, cx);
+                    }))
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.end_volume_panel_drag(false, cx);
+                        }),
+                    )
+                    .on_hover(cx.listener(|this, hovering, _, cx| {
+                        if *hovering {
+                            this.show_volume_panel(cx);
+                        } else {
+                            this.schedule_volume_panel_close(cx);
+                        }
+                    }))
+                    .child(
+                        div()
+                            .h(px(18.0))
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if self.volume.muted() {
+                                cx.theme().muted_foreground
                             } else {
-                                this.schedule_volume_panel_close(cx);
-                            }
-                        }))
-                        .child(
-                            div()
-                                .h(px(18.0))
-                                .text_xs()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(if self.volume.muted() {
-                                    cx.theme().muted_foreground
-                                } else {
-                                    cx.theme().popover_foreground
-                                })
-                                .child(format!("{}%", volume_value.round() as u32)),
-                        )
-                        .child(
-                            div()
-                                .h(px(120.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    Slider::new(&self.volume_slider)
-                                        .vertical()
-                                        .h(px(120.0))
-                                        .bg(accent)
-                                        .text_color(accent)
-                                        .rounded_full(),
-                                ),
-                        ),
+                                cx.theme().popover_foreground
+                            })
+                            .child(format!("{}%", volume_value.round() as u32)),
+                    )
+                    .child(
+                        div()
+                            .h(px(120.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Slider::new(&self.volume_slider)
+                                    .vertical()
+                                    .h(px(120.0))
+                                    .bg(accent)
+                                    .text_color(accent)
+                                    .rounded_full(),
+                            ),
+                    ),
                 )
             })
             .child(

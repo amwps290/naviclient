@@ -15,11 +15,11 @@ impl NavidromeApp {
             | View::Albums
             | View::Genres
             | View::GenreDetail) => self.render_library_browse(view, window, cx),
-            View::Playlists => self.render_playlists(cx),
+            View::Playlists => self.render_playlists(window, cx),
             View::Search => self.render_search(window, cx),
             View::ArtistDetail => self.render_artist_detail(window, cx),
-            View::AlbumDetail => self.render_album_detail(cx),
-            View::PlaylistDetail => self.render_playlist_detail(cx),
+            View::AlbumDetail => self.render_album_detail(window, cx),
+            View::PlaylistDetail => self.render_playlist_detail(window, cx),
             View::NowPlaying => self.render_now_playing(window, cx),
         }
     }

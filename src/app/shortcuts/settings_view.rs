@@ -50,10 +50,7 @@ impl NavidromeApp {
                             .items_center()
                             .gap_4()
                             .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("App shortcuts")),
+                                section_title(t!("App shortcuts"), cx),
                             )
                             .child(
                                 Button::new("reset-all-shortcuts")
@@ -81,19 +78,14 @@ impl NavidromeApp {
             .child(
                 v_flex()
                     .gap_3()
-                    .pt_5()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
+                    .pt_6()
                     .child(
                         h_flex()
                             .justify_between()
                             .items_center()
                             .gap_4()
                             .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Global shortcuts")),
+                                section_title(t!("Global shortcuts"), cx),
                             )
                             .child(
                                 Button::new("reset-all-global-shortcuts")
