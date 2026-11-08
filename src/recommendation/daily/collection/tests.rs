@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 
-fn api(server: &Server) -> OpenSubsonicProvider {
-    OpenSubsonicProvider::new(&server.url(""), "listener", "fixture").unwrap()
+fn api(server: &Server) -> MusicSource {
+    MusicSource::opensubsonic("fixture-server", &server.url(""), "listener", "fixture").unwrap()
 }
 
 fn respond(request: &Request) -> (u16, String) {

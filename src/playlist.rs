@@ -12,6 +12,8 @@ pub struct PlaylistDetails {
     pub playlist: Playlist,
     #[serde(default, rename = "entry")]
     pub songs: Vec<Song>,
+    #[serde(default)]
+    pub unavailable_count: usize,
 }
 
 #[derive(Clone, Debug)]

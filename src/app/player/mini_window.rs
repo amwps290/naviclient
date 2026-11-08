@@ -11,7 +11,7 @@ impl NavidromeApp {
         ) else {
             return;
         };
-        self.state.settings.open = false;
+        self.state.settings.close();
         window.resize(target);
         set_always_on_top(window, true);
         cx.notify();

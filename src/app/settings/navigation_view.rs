@@ -88,6 +88,9 @@ impl NavidromeApp {
             .selected(selected)
             .rounded(px(tokens::radius::CONTROL))
             .on_click(cx.listener(move |this, _, _, cx| {
+                if section != this.state.settings.section {
+                    this.state.settings.bilibili_login.cancel();
+                }
                 this.cancel_shortcut_recording();
                 this.state.settings.section = section;
                 this.settings_scroll.scroll_to_top_of_item(0);

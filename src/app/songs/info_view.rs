@@ -58,6 +58,14 @@ impl NavidromeApp {
         };
         let mut info = v_flex().gap_2();
         info = info_row(info, &t!("Title"), song.title.clone());
+        if let Some(part) = &song.bilibili_part {
+            info = info_row(info, &t!("Uploader"), part.uploader.clone());
+            info = info_row(
+                info,
+                &t!("Part"),
+                format!("P{}/{} · {}", part.index, part.count, part.title),
+            );
+        }
         if !song.artist.trim().is_empty() {
             info = info_row(info, &t!("Artist"), song.artist.clone());
         }
@@ -109,7 +117,11 @@ impl NavidromeApp {
                         .pt_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(t!("Metadata from the Navidrome server.")),
+                        .child(if song.bilibili_part.is_some() {
+                            t!("Metadata from Bilibili.")
+                        } else {
+                            t!("Metadata from the Navidrome server.")
+                        }),
                 ),
             )
     }

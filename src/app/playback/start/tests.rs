@@ -11,8 +11,70 @@ fn song(id: &str) -> Song {
     }
 }
 
-fn api() -> OpenSubsonicProvider {
-    OpenSubsonicProvider::new("http://127.0.0.1:1", "fixture-user", "fixture-password").unwrap()
+fn api() -> MusicSource {
+    MusicSource::opensubsonic(
+        "fixture-server",
+        "http://127.0.0.1:1",
+        "fixture-user",
+        "fixture-password",
+    )
+    .unwrap()
+}
+
+#[test]
+fn mixed_source_replacement_and_append_are_rejected_without_sending_or_changing_playback() {
+    let mut state = state();
+    let before = snapshot(&state);
+    let foreign = Song {
+        source: Some(SourceId::new(
+            crate::source::ProviderKind::Bilibili,
+            "fixture-server",
+        )),
+        ..song("new")
+    };
+    let replacement =
+        PlaybackQueue::from_songs(vec![song("local"), foreign.clone()], QueueOrigin::Manual);
+    for target in [
+        StartTarget::replacement(replacement, 0).unwrap(),
+        StartTarget::append(
+            &state.queue,
+            vec![QueueEntry::new(foreign, QueueOrigin::Manual)],
+        )
+        .unwrap(),
+    ] {
+        let result = PreparedStart::prepare(
+            target,
+            Some(&api()),
+            TranscodingQuality::Original,
+            Duration::ZERO,
+            Selection::New,
+        );
+        assert!(matches!(result, Err(StartError::Request(_))));
+    }
+    assert_eq!(snapshot(&state), before);
+    let owner = SourceId::new(crate::source::ProviderKind::Bilibili, "another");
+    state.queue = PlaybackQueue::from_songs(
+        vec![Song {
+            source: Some(owner),
+            ..song("old")
+        }],
+        QueueOrigin::Manual,
+    );
+    let target = StartTarget::append(
+        &state.queue,
+        vec![QueueEntry::new(song("local"), QueueOrigin::Manual)],
+    )
+    .unwrap();
+    assert!(matches!(
+        PreparedStart::prepare(
+            target,
+            Some(&api()),
+            TranscodingQuality::Original,
+            Duration::ZERO,
+            Selection::New
+        ),
+        Err(StartError::Request(_))
+    ));
 }
 
 fn state() -> AppState {
@@ -135,7 +197,10 @@ fn accepted_replacement_commits_selected_song_origin_identity_and_history_togeth
         .commit(&mut state, &mut session(), |request| {
             assert_eq!(
                 request.cache_key,
-                "http://127.0.0.1:1:selected:profile=original"
+                api()
+                    .resolve_immediate(&song("selected"), TranscodingQuality::Original)
+                    .unwrap()
+                    .cache_key()
             );
             assert_eq!(request.position, Duration::ZERO);
             true
@@ -437,10 +502,9 @@ fn signed_stream_profile_and_cache_identity_use_the_same_effective_quality() {
             assert_eq!(request.quality, effective);
             assert_eq!(
                 request.cache_key,
-                format!(
-                    "http://127.0.0.1:1:audio:profile={}",
-                    effective.cache_profile()
-                )
+                api.resolve_immediate(&song, configured)
+                    .unwrap()
+                    .cache_key()
             );
             let url = url::Url::parse(&request.url).unwrap();
             let params: std::collections::HashMap<_, _> = url.query_pairs().collect();
@@ -479,4 +543,206 @@ fn preparation_clamps_known_duration_but_preserves_unknown_duration_positions() 
         let start = prepared(target, Duration::MAX, Selection::Resume);
         assert_eq!(start.request.position, expected);
     }
+}
+
+#[test]
+fn resolving_a_different_media_or_source_never_creates_a_committable_start() {
+    let api = api();
+    for resolved_song in [song("other-id"), song("wanted")] {
+        let mut resource = api
+            .resolve_immediate(&resolved_song, TranscodingQuality::Original)
+            .unwrap();
+        if resolved_song.id == "wanted" {
+            resource.media.source =
+                SourceId::new(crate::source::ProviderKind::Bilibili, "same-profile");
+        }
+        let plan = UnresolvedStart::new(
+            StartTarget::replacement(
+                PlaybackQueue::from_songs(vec![song("wanted")], QueueOrigin::Manual),
+                0,
+            )
+            .unwrap(),
+            Some(&api),
+            TranscodingQuality::Original,
+            Duration::ZERO,
+            Selection::New,
+        )
+        .unwrap();
+        assert!(matches!(plan.finish(resource), Err(StartError::Request(_))));
+    }
+}
+
+#[test]
+fn queue_transport_uses_playback_owner_and_library_replacement_uses_its_source() {
+    let playback = api();
+    let browsing =
+        MusicSource::opensubsonic("browsing", "http://127.0.0.1:2", "user", "password").unwrap();
+    let queue = PlaybackQueue::from_songs(vec![song("same")], QueueOrigin::Manual);
+    let target = StartTarget::existing(&queue, 0).unwrap();
+    assert_eq!(
+        target
+            .source(Some(&browsing), Some(&playback))
+            .unwrap()
+            .id(),
+        playback.id()
+    );
+    let target = StartTarget::replacement(
+        PlaybackQueue::from_songs(
+            vec![Song {
+                source: Some(browsing.id().clone()),
+                ..song("same")
+            }],
+            QueueOrigin::Manual,
+        ),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        target
+            .source(Some(&browsing), Some(&playback))
+            .unwrap()
+            .id(),
+        browsing.id()
+    );
+    let target = StartTarget::replacement(
+        PlaybackQueue::from_songs(
+            vec![Song {
+                source: Some(playback.id().clone()),
+                ..song("same")
+            }],
+            QueueOrigin::Manual,
+        ),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        target
+            .source(Some(&browsing), Some(&playback))
+            .unwrap()
+            .id(),
+        playback.id()
+    );
+}
+
+#[test]
+fn foreign_queue_added_during_resolution_is_rejected_before_audio_submission() {
+    let mut state = state();
+    let start = prepared(
+        StartTarget::existing(&state.queue, 0).unwrap(),
+        Duration::ZERO,
+        Selection::New,
+    );
+    state.queue.insert(
+        1,
+        vec![Song {
+            source: Some(SourceId::new(
+                crate::source::ProviderKind::Bilibili,
+                "foreign",
+            )),
+            ..song("other")
+        }],
+        QueueOrigin::Manual,
+    );
+    assert!(matches!(
+        start.commit(&mut state, &mut session(), |_| panic!(
+            "foreign queue must not be submitted"
+        )),
+        Err(StartError::Stale)
+    ));
+}
+
+fn bilibili_api() -> MusicSource {
+    MusicSource::Bilibili(
+        crate::source::bilibili::BilibiliProvider::new(
+            SourceId::new(crate::source::ProviderKind::Bilibili, "test-account"),
+            crate::source::bilibili::auth::AuthSession::decode_secret(
+                zeroize::Zeroizing::new(b"SESSDATA=fake; bili_jct=csrf; DedeUserID=123".to_vec()),
+                123,
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn unavailable_replacement_preserves_old_playback_and_never_enters_shuffle_history() {
+    let api = bilibili_api();
+    let mut state = state();
+    let before = snapshot(&state);
+    let start = UnresolvedStart::new(
+        StartTarget::replacement(
+            PlaybackQueue::from_songs(
+                vec![song("deleted"), song("available")],
+                QueueOrigin::Playlist,
+            ),
+            0,
+        )
+        .unwrap(),
+        Some(&api),
+        TranscodingQuality::Original,
+        Duration::ZERO,
+        Selection::New,
+    )
+    .unwrap()
+    .with_history(ShuffleHistory::restore(vec![0], vec![]));
+    let next = start.skip_unavailable(&state.queue).unwrap();
+    assert_eq!(next.song().id, "available");
+    assert_eq!(snapshot(&state), before);
+    let resource = PlaybackResource {
+        media: crate::source::MediaKey::new(api.id().clone(), "available"),
+        representation: "aac-lc".into(),
+        http: HttpResource::new("https://a.bilivideo.com/audio"),
+        backups: vec![],
+        quality: Default::default(),
+        duration: Some(Duration::from_secs(180)),
+        expires_at: None,
+    };
+    let prepared = next.finish(resource).unwrap();
+    prepared
+        .commit(&mut state, &mut session(), |_| true)
+        .unwrap();
+    assert_eq!(state.now_playing.as_ref().unwrap().id, "available");
+    assert_eq!(state.queue_index, Some(1));
+    assert_eq!(state.shuffle_history.snapshot(), (vec![1], vec![]));
+}
+
+#[test]
+fn unavailable_items_have_a_bounded_skip_budget_and_resume_never_selects_another_item() {
+    let api = bilibili_api();
+    let state = state();
+    let target = || {
+        StartTarget::replacement(
+            PlaybackQueue::from_songs(
+                (0..30).map(|index| song(&index.to_string())).collect(),
+                QueueOrigin::Playlist,
+            ),
+            0,
+        )
+        .unwrap()
+    };
+    let resumed = UnresolvedStart::new(
+        target(),
+        Some(&api),
+        TranscodingQuality::Original,
+        Duration::from_secs(42),
+        Selection::Resume,
+    )
+    .unwrap();
+    assert!(resumed.skip_unavailable(&state.queue).is_none());
+    let mut next = UnresolvedStart::new(
+        target(),
+        Some(&api),
+        TranscodingQuality::Original,
+        Duration::ZERO,
+        Selection::New,
+    )
+    .unwrap();
+    for index in 1..=20 {
+        next = next.skip_unavailable(&state.queue).unwrap();
+        assert_eq!(next.song().id, index.to_string());
+    }
+    assert!(next.skip_unavailable(&state.queue).is_none());
+    assert_eq!(state.now_playing.as_ref().unwrap().id, "old");
 }

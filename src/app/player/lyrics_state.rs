@@ -4,10 +4,11 @@ use gpui_kit::Pixels;
 
 use crate::app::library::requests::{LibraryLoad, LibraryRequest, LibraryRequests};
 use crate::models::Lyrics;
+use crate::source::MediaKey;
 
 #[derive(Default)]
 pub(in crate::app) struct LyricsState {
-    song_id: Option<String>,
+    media: Option<MediaKey>,
     lyrics: Option<Lyrics>,
     load: LibraryLoad,
     pub(in crate::app) active_index: Option<usize>,
@@ -40,16 +41,14 @@ impl LyricsState {
     /// failed load can be retried; returning to a song gets a new request ID.
     pub(in crate::app) fn begin(
         &mut self,
-        song_id: &str,
+        media: &MediaKey,
         requests: &mut LibraryRequests,
     ) -> Option<LibraryRequest> {
         self.reset_follow();
-        if self.song_id.as_deref() == Some(song_id)
-            && (self.lyrics.is_some() || self.load.loading())
-        {
+        if self.media.as_ref() == Some(media) && (self.lyrics.is_some() || self.load.loading()) {
             return None;
         }
-        self.song_id = Some(song_id.to_string());
+        self.media = Some(media.clone());
         self.lyrics = None;
         Some(self.load.begin(requests))
     }

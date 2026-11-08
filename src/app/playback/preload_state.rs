@@ -4,12 +4,14 @@ use std::time::Duration;
 
 use crate::models::{PlaybackQueue, QueueEntryId, TranscodingQuality};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct NextPreload {
     pub(in crate::app) id: u64,
     pub(in crate::app) index: usize,
     pub(in crate::app) entry: QueueEntryId,
     pub(in crate::app) quality: TranscodingQuality,
+    pub(in crate::app) audio_quality: Option<crate::source::AudioQuality>,
+    cache_key: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -58,12 +60,25 @@ impl PreloadState {
             index,
             entry,
             quality,
+            audio_quality: None,
+            cache_key: None,
         });
         true
     }
 
+    pub(in crate::app) fn set_resource(
+        &mut self,
+        quality: Option<crate::source::AudioQuality>,
+        cache_key: String,
+    ) {
+        if let Some(next) = &mut self.pending {
+            next.audio_quality = quality;
+            next.cache_key = Some(cache_key);
+        }
+    }
+
     pub(in crate::app) fn reserved_index(&self, queue: &PlaybackQueue) -> Option<usize> {
-        let next = self.pending?;
+        let next = self.pending.as_ref()?;
         (queue.entry_id(next.index) == Some(next.entry)).then_some(next.index)
     }
 
@@ -74,8 +89,23 @@ impl PreloadState {
         position: Duration,
     ) -> Option<u64> {
         self.pending
+            .as_ref()
             .filter(|next| next.entry == entry && next.quality == quality && position.is_zero())
             .map(|next| next.id)
+    }
+
+    pub(in crate::app) fn reusable_resource_id(
+        &self,
+        entry: QueueEntryId,
+        quality: TranscodingQuality,
+        position: Duration,
+        cache_key: &str,
+    ) -> Option<u64> {
+        self.reusable_id(entry, quality, position).filter(|_| {
+            self.pending
+                .as_ref()
+                .is_some_and(|next| next.cache_key.as_deref().is_none_or(|key| key == cache_key))
+        })
     }
 
     /// An unrelated event leaves the current reservation intact. A matching
@@ -87,7 +117,9 @@ impl PreloadState {
     ) -> Result<NextPreload, PreloadTransitionError> {
         let next = self
             .pending
+            .as_ref()
             .filter(|next| next.id == id)
+            .cloned()
             .ok_or(PreloadTransitionError::Unreserved)?;
         self.pending = None;
         if queue.entry_id(next.index) != Some(next.entry) {

@@ -68,6 +68,7 @@ fn snapshots(server: &str, variant: u32) -> Vec<CacheSnapshot> {
 
 fn value(snapshot: &CacheSnapshot) -> serde_json::Value {
     match snapshot {
+        CacheSnapshot::Scoped { snapshot, .. } => return value(snapshot),
         CacheSnapshot::Session(data) => serde_json::to_value(data),
         CacheSnapshot::Loudness(data) => serde_json::to_value(data),
         CacheSnapshot::Genres(data) => serde_json::to_value(data),

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::source::MediaKey;
 use super::Song;
 
 pub const LISTENING_HISTORY_LIMIT: usize = 1_000;
@@ -26,6 +27,21 @@ pub struct ListeningHistory {
 }
 
 impl ListeningHistory {
+    pub fn update_latest_media(
+        &mut self,
+        media: &MediaKey,
+        listened_seconds: u32,
+        completed: bool,
+    ) -> bool {
+        let Some(event) = self.events.iter_mut().rev().find(|event| {
+            event.song.source.as_ref() == Some(&media.source) && event.song.id == media.remote_id
+        }) else {
+            return false;
+        };
+        event.listened_seconds = event.listened_seconds.max(listened_seconds);
+        event.completed |= completed;
+        true
+    }
     pub fn record_started(&mut self, song: Song, started_at: u64) {
         if song.id.trim().is_empty() {
             return;

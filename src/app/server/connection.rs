@@ -16,6 +16,9 @@ impl NavidromeApp {
 
     fn load_open_subsonic_info(&mut self, request: LibraryRequest) {
         let Some(api) = self.api.clone() else { return };
+        if api.id().provider != crate::source::ProviderKind::OpenSubsonic {
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api.open_subsonic_info().await.map_err(error_message);
@@ -63,13 +66,23 @@ impl NavidromeApp {
     }
 
     fn update_connection_status(&mut self) {
+        if self
+            .api
+            .as_ref()
+            .zip(self.playback_source.as_ref())
+            .is_some_and(|(browse, play)| {
+                browse.id() == play.id() && browse.base_url() == play.base_url()
+            })
+        {
+            self.playback_server = self.state.connection.server().cloned();
+        }
         let Some(server) = self.state.connection.server() else {
             return;
         };
         let base_url = self
             .api
             .as_ref()
-            .map(OpenSubsonicProvider::base_url)
+            .map(MusicSource::base_url)
             .unwrap_or_default();
         self.state.status = format!(
             "{} {} - {}",

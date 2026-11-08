@@ -13,7 +13,7 @@ use super::{
     recommend, CandidateSource, RecommendationCandidate, RecommendationContext,
     RecommendationGenerationContext, RecommendationKind, RecommendationRequest,
 };
-use crate::api::OpenSubsonicProvider;
+use crate::source::MusicSource;
 use album_plan::merge_album_plan;
 use collection::{collect_album_candidates, collect_genre_candidates, collect_similar_candidates};
 use snapshot::daily_seed;
@@ -31,7 +31,7 @@ pub struct DailyMixGenerationContext {
 }
 
 pub async fn generate_daily_mix(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     context: DailyMixGenerationContext,
 ) -> Result<DailyMixSnapshot> {
     let DailyMixGenerationContext {

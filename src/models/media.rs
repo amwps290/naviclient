@@ -1,3 +1,4 @@
+use super::source::{MediaKey, SourceId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -70,8 +71,15 @@ pub struct Album {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Song {
+    /// Filled by the source adapter; remote IDs retain their protocol meaning.
+    /// Legacy payloads are bound to their owner when restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceId>,
     pub id: String,
     pub title: String,
+    /// Bilibili part metadata is auxiliary; `title` remains the video title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bilibili_part: Option<BilibiliPart>,
     #[serde(default)]
     pub album: String,
     #[serde(default)]
@@ -120,6 +128,29 @@ pub struct Song {
     pub replay_gain_album_gain: Option<f32>,
     #[serde(default, deserialize_with = "deserialize_optional_f32")]
     pub replay_gain_album_peak: Option<f32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BilibiliPart {
+    pub bvid: String,
+    pub cid: u64,
+    pub index: u32,
+    pub count: u32,
+    pub title: String,
+    pub uploader: String,
+}
+
+impl Song {
+    pub fn media_key(&self) -> Option<MediaKey> {
+        self.source
+            .clone()
+            .map(|source| MediaKey::new(source, &self.id))
+    }
+
+    pub fn belongs_to(&self, source: &SourceId) -> bool {
+        self.source.as_ref().is_none_or(|owner| owner == source)
+    }
 }
 
 /// 容错解析可选的 f32 字段：接受数字或字符串，其他情况返回 None。

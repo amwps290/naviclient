@@ -6,6 +6,9 @@ use crate::app::prelude::*;
 impl NavidromeApp {
     pub(in crate::app) fn handle_playback_end(&mut self) {
         self.sync_gapless_transition();
+        if self.start_resolution.pending() {
+            return;
+        }
         let playback = self.audio.state();
         if !self.state.occurrence.active() || self.state.now_playing.is_none() {
             return;
@@ -63,9 +66,26 @@ impl NavidromeApp {
         let Some(occurrence) = self.state.occurrence.id() else {
             return false;
         };
-        let decision =
+        let refreshing = self
+            .playback_source
+            .as_ref()
+            .is_some_and(|api| api.id().provider == crate::source::ProviderKind::Bilibili)
+            && matches!(failure, Some(StreamFailure::Http(401 | 403)));
+        let attempts = if refreshing {
+            1
+        } else {
+            PLAYBACK_RECONNECT_ATTEMPTS
+        };
+        let decision = if refreshing {
+            self.reconnect.schedule_resource_refresh(
+                occurrence,
+                position,
+                std::time::Instant::now(),
+            )
+        } else {
             self.reconnect
-                .schedule(occurrence, failure, position, std::time::Instant::now());
+                .schedule(occurrence, failure, position, std::time::Instant::now())
+        };
         let Some(kind) = failure else {
             return false;
         };
@@ -75,7 +95,7 @@ impl NavidromeApp {
                 self.notify_error(t!(
                     "%{summary} — gave up after %{attempts} retries. %{cause}",
                     summary = kind.summary(),
-                    attempts = PLAYBACK_RECONNECT_ATTEMPTS,
+                    attempts = attempts,
                     cause = kind.cause()
                 ));
                 return true;
@@ -91,13 +111,16 @@ impl NavidromeApp {
             "%{summary} — reconnecting (%{attempt}/%{attempts})…",
             summary = kind.summary(),
             attempt = attempt,
-            attempts = PLAYBACK_RECONNECT_ATTEMPTS
+            attempts = attempts
         ));
         true
     }
 
     /// 由 UI 循环调用：到点后从断点重新拉流，并在播放恢复正常后清零计数。
     pub(in crate::app) fn poll_playback_reconnect(&mut self) {
+        if self.start_resolution.pending() {
+            return;
+        }
         let playback = self.audio.progress();
         let index = self
             .state
@@ -107,7 +130,7 @@ impl NavidromeApp {
         match self.reconnect.poll(
             std::time::Instant::now(),
             occurrence,
-            self.api.is_some() && index.is_some(),
+            self.playback_source.is_some() && index.is_some(),
             &playback,
         ) {
             ReconnectPoll::Idle => {}

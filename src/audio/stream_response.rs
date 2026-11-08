@@ -2,6 +2,7 @@
 
 use std::io::{self, Read};
 
+use crate::source::HttpResource;
 use anyhow::{anyhow, Result};
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, CONTENT_RANGE, CONTENT_TYPE, RANGE};
@@ -189,9 +190,74 @@ impl Read for StreamResponse {
     }
 }
 
+/// Headers are applied per request. A dedicated client prevents a redirect
+/// carrying provider-specific headers into a different origin.
+pub(super) fn resource_client(client: Client, resource: &HttpResource) -> Result<Client> {
+    if resource.headers().is_empty() && resource.proxy().is_none() {
+        return Ok(client);
+    }
+    let origin = Url::parse(resource.url())
+        .map_err(|_| anyhow!("invalid audio resource address"))?
+        .origin();
+    let mut builder = Client::builder()
+        .no_proxy()
+        // Preserve the explicitly supplied provider Referer on same-origin
+        // redirects instead of replacing it with the signed CDN address.
+        .referer(false)
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() < 10 && attempt.url().origin() == origin {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }));
+    if let Some(proxy) = resource.proxy() {
+        builder = builder
+            .no_proxy()
+            .proxy(reqwest::Proxy::all(proxy).map_err(|_| anyhow!("invalid audio proxy address"))?);
+    }
+    builder
+        .build()
+        .map_err(reqwest::Error::without_url)
+        .map_err(Into::into)
+}
+
+/// Select a backup only before a reader exposes bytes. Once decoding starts,
+/// ranges stay on that representation/address; reconnection uses a fresh reader.
+pub(super) fn initial_resource_response(
+    client: Client,
+    resource: HttpResource,
+) -> Result<(Client, HttpResource, StreamResponse)> {
+    let mut last_error = None;
+    for candidate in std::iter::once(&resource).chain(resource.backups()).take(3) {
+        let attempt = resource_client(client.clone(), candidate).and_then(|client| {
+            request_resource_range(&client, candidate, 0)
+                .map(|response| (client, candidate.clone().with_backups(Vec::new()), response))
+        });
+        match attempt {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow!("no audio addresses available")))
+}
+
+#[cfg(test)]
 pub(super) fn request_range(client: &Client, url: &str, position: u64) -> Result<StreamResponse> {
+    request_resource_range(client, &HttpResource::new(url), position)
+}
+
+pub(super) fn request_resource_range(
+    client: &Client,
+    resource: &HttpResource,
+    position: u64,
+) -> Result<StreamResponse> {
+    let url = resource.url();
     let response = client
         .get(url)
+        .headers(resource.headers().clone())
         .header(RANGE, format!("bytes={position}-"))
         .send()
         .map_err(|error| {
@@ -230,10 +296,14 @@ pub(super) fn request_range(client: &Client, url: &str, position: u64) -> Result
         // A bounded read can end in the middle of a UTF-8 character. Retain the
         // diagnostic prefix, including bytes received before a transport error.
         let body = String::from_utf8_lossy(&bytes);
-        let detail = subsonic_error_detail(&body);
+        let detail = if resource.headers().is_empty() {
+            subsonic_error_detail(&body)
+        } else {
+            "server returned a non-audio response".to_string()
+        };
         log::warn!(
-            "stream endpoint returned a non-audio response; endpoint={} status={status} content_type={} body={}",
-            stream_endpoint(url), content_type, body.trim()
+            "stream endpoint returned a non-audio response; endpoint={} status={status} content_type={}",
+            stream_endpoint(url), content_type
         );
         return Err(anyhow!(FailureError::new(
             StreamFailure::Http(status.as_u16()),

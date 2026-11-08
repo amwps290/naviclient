@@ -48,6 +48,21 @@ impl NavidromeApp {
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
             match message {
+                Msg::BilibiliLogin { request, update } => {
+                    self.finish_bilibili_login(request, update)
+                }
+                Msg::BilibiliAccount { source, result } => {
+                    self.finish_bilibili_account(source, result)
+                }
+                Msg::BilibiliRemoved { source, result } => {
+                    self.finish_bilibili_removal(source, result)
+                }
+                Msg::PlaybackResolved { request, result } => {
+                    self.finish_playback_resolution(request, result)
+                }
+                Msg::PreloadResolved { request, result } => {
+                    self.finish_preload_resolution(request, result)
+                }
                 Msg::Ping { request, result } => self.finish_ping(request, result),
                 Msg::OpenSubsonicInfo { request, result } => {
                     self.finish_open_subsonic_info(request, result)

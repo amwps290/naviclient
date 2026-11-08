@@ -5,11 +5,11 @@ use super::super::candidates::{
 };
 use super::super::{CandidateSource, RecommendationCandidate};
 use super::RadioSeed;
-use crate::api::OpenSubsonicProvider;
 use crate::models::{Artist, CapabilitySupport, Song};
+use crate::source::MusicSource;
 
 pub(super) async fn collect(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seed: &RadioSeed,
     sonic_similarity: CapabilitySupport,
     top_songs_by_artist_id: CapabilitySupport,
@@ -34,7 +34,7 @@ pub(super) async fn collect(
 }
 
 async fn collect_song_candidates(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seed: &Song,
     sonic_similarity: CapabilitySupport,
     errors: &mut Vec<String>,
@@ -102,7 +102,7 @@ async fn collect_song_candidates(
 }
 
 async fn collect_artist_candidates(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     artist: &Artist,
     sonic_similarity: CapabilitySupport,
     top_songs_by_artist_id: CapabilitySupport,

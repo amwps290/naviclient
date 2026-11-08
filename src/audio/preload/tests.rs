@@ -6,6 +6,29 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime};
 
+#[test]
+fn preload_keeps_resource_headers_and_does_not_publish_temporary_audio() {
+    use crate::audio::http_stream::resource_tests::{resource, Fixture};
+    let cache = TestCache::new();
+    let fixture = Fixture::audio(wav());
+    let mut preloader = Preloader::new(client()).unwrap();
+    let mut http = resource(fixture.url());
+    http = http.with_mime_hint(Some("audio/wav".into()));
+    preloader.request(1, http, "resource-preload".into(), None, cache.0.clone());
+    wait_ready(&mut preloader);
+    let stream = preloader
+        .take(Some(1), "resource-preload", Duration::ZERO)
+        .unwrap();
+    let control = stream.source.control();
+    // After promotion, the bounded decoder buffer can hold this short fixture.
+    wait_for(|| control.fully_decoded());
+    assert_eq!(stream.source.count(), 12 * 48_000 * 2);
+    assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 0);
+    for request in fixture.requests() {
+        assert_eq!(request["referer"], "https://www.bilibili.com/");
+    }
+}
+
 pub(in crate::audio) struct TestCache(pub(in crate::audio) PathBuf);
 
 impl TestCache {
@@ -31,6 +54,7 @@ impl Drop for TestCache {
     }
 }
 
+#[track_caller]
 pub(in crate::audio) fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !condition() {
@@ -66,6 +90,10 @@ pub(in crate::audio) fn wav() -> Vec<u8> {
 }
 
 fn accept(listener: &TcpListener) -> TcpStream {
+    accept_request(listener).0
+}
+
+fn accept_request(listener: &TcpListener) -> (TcpStream, String) {
     let (mut stream, _) = listener.accept().unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
@@ -79,7 +107,7 @@ fn accept(listener: &TcpListener) -> TcpStream {
         stream.read_exact(&mut byte).unwrap();
         request.push(byte[0]);
     }
-    stream
+    (stream, String::from_utf8(request).unwrap())
 }
 
 fn send_audio(stream: &mut TcpStream) {
@@ -100,6 +128,7 @@ pub(in crate::audio) fn client() -> Client {
         .unwrap()
 }
 
+#[track_caller]
 pub(in crate::audio) fn wait_ready(preloader: &mut Preloader) {
     wait_for(|| {
         preloader.poll();
@@ -127,7 +156,7 @@ fn ready_stream_sleeps_then_plays_all_samples_without_a_second_request() {
     let mut preloader = Preloader::new(client()).unwrap();
     preloader.request(
         7,
-        url,
+        url.into(),
         "song:128".into(),
         Some(Duration::from_secs(12)),
         cache.0.clone(),
@@ -162,7 +191,7 @@ fn cancelling_sleeping_decoder_preserves_current_songs_partial_cache() {
     let url = format!("http://{}/stream", listener.local_addr().unwrap());
     let server = thread::spawn(move || send_audio(&mut accept(&listener)));
     let mut preloader = Preloader::new(client()).unwrap();
-    preloader.request(1, url, "same-song".into(), None, cache.0.clone());
+    preloader.request(1, url.into(), "same-song".into(), None, cache.0.clone());
     wait_ready(&mut preloader);
     let control = preloader.entry.as_ref().unwrap().control.clone();
     preloader.cancel();
@@ -196,10 +225,22 @@ fn rapid_replacements_run_only_latest_pending_request_and_discard_stale_result()
         send_audio(&mut last);
     });
     let mut preloader = Preloader::new(client()).unwrap();
-    preloader.request(1, url.clone(), "same-song".into(), None, cache.0.clone());
+    preloader.request(
+        1,
+        url.clone().into(),
+        "same-song".into(),
+        None,
+        cache.0.clone(),
+    );
     accepted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     for id in 2..=100 {
-        preloader.request(id, url.clone(), "same-song".into(), None, cache.0.clone());
+        preloader.request(
+            id,
+            url.clone().into(),
+            "same-song".into(),
+            None,
+            cache.0.clone(),
+        );
     }
     release_tx.send(()).unwrap();
     wait_ready(&mut preloader);
@@ -223,7 +264,7 @@ fn failed_preload_allows_ordinary_playback_to_retry() {
         send_audio(&mut accept(&listener));
     });
     let mut preloader = Preloader::new(client()).unwrap();
-    preloader.request(1, url.clone(), "song".into(), None, cache.0.clone());
+    preloader.request(1, url.clone().into(), "song".into(), None, cache.0.clone());
     wait_for(|| {
         preloader.poll();
         preloader.entry.as_ref().unwrap().control.check().is_err()
@@ -281,7 +322,7 @@ fn truncated_preload_does_not_poison_cache_and_falls_back_to_fresh_audio() {
         send_audio(&mut accept(&listener));
     });
     let mut preloader = Preloader::new(client()).unwrap();
-    preloader.request(1, url.clone(), "song".into(), None, cache.0.clone());
+    preloader.request(1, url.clone().into(), "song".into(), None, cache.0.clone());
     wait_for(|| {
         preloader.poll();
         preloader.entry.as_ref().unwrap().control.check().is_err()
@@ -319,7 +360,7 @@ fn cancellation_during_http_read_exits_within_io_timeout() {
         release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     });
     let mut preloader = Preloader::new(client()).unwrap();
-    preloader.request(1, url, "song".into(), None, cache.0.clone());
+    preloader.request(1, url.into(), "song".into(), None, cache.0.clone());
     accepted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     let control = preloader.entry.as_ref().unwrap().control.clone();
     preloader.cancel();
@@ -346,9 +387,17 @@ fn cancelled_decoder_read_cannot_accumulate_speculative_workers() {
         first.write_all(&data[..32 * 1024]).unwrap();
         release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         drop(first);
-        let mut last = accept(&listener);
-        drop(listener);
-        send_audio(&mut last);
+        // A running decoder can observe cancellation before its next blocking
+        // read. The sole worker may then start an intermediate, soon-cancelled
+        // job while requests 2..=100 are still being posted. Serve those jobs
+        // until the final ticket arrives instead of assuming request 2 is 100.
+        loop {
+            let (mut last, request) = accept_request(&listener);
+            send_audio(&mut last);
+            if request.lines().next().unwrap().contains("?ticket=100 ") {
+                break;
+            }
+        }
     });
     // The release channel controls this stalled response. A short request
     // timeout could expire before the test observes the decoder running.
@@ -358,11 +407,23 @@ fn cancelled_decoder_read_cannot_accumulate_speculative_workers() {
         .build()
         .unwrap();
     let mut preloader = Preloader::new(controlled_client).unwrap();
-    preloader.request(1, url.clone(), "song".into(), None, cache.0.clone());
+    preloader.request(
+        1,
+        format!("{url}?ticket=1").into(),
+        "song".into(),
+        None,
+        cache.0.clone(),
+    );
     let old = preloader.entry.as_ref().unwrap().control.clone();
     wait_for(|| old.decoder_running());
     for id in 2..=100 {
-        preloader.request(id, url.clone(), "song".into(), None, cache.0.clone());
+        preloader.request(
+            id,
+            format!("{url}?ticket={id}").into(),
+            "song".into(),
+            None,
+            cache.0.clone(),
+        );
     }
     let latest = preloader.entry.as_ref().unwrap().control.clone();
     // Until the first read returns, the replacement decoder cannot start.

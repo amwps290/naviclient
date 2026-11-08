@@ -20,7 +20,18 @@ impl NavidromeApp {
         sonic_similarity: crate::models::CapabilitySupport,
         recent_limit: usize,
     ) -> RecommendationGenerationContext {
-        let history = self.state.listening.history();
+        let owner =
+            crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, &server_id);
+        let other_history;
+        let history = if self.session.source() == Some(&owner) {
+            self.state.listening.history()
+        } else {
+            other_history = self
+                .server_cache_writer
+                .pending_source_history(&owner)
+                .unwrap_or_else(|| config::load_source_history(&owner));
+            &other_history
+        };
         RecommendationGenerationContext {
             server_id,
             sonic_similarity,
@@ -30,6 +41,7 @@ impl NavidromeApp {
                 .state
                 .queue
                 .songs()
+                .filter(|song| song.belongs_to(&owner))
                 .map(|song| song.id.clone())
                 .collect(),
         }

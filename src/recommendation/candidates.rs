@@ -5,8 +5,8 @@
 use md5::{Digest, Md5};
 use tokio::task::JoinSet;
 
-use crate::api::OpenSubsonicProvider;
 use crate::models::{Album, Song};
+use crate::source::MusicSource;
 
 pub(super) const MAX_CANDIDATES: usize = 180;
 const MAX_ALBUMS: usize = 8;
@@ -15,10 +15,7 @@ const MAX_SIMILARITY_SEEDS: usize = 3;
 const MAX_GENRE_SEEDS: usize = 2;
 const REQUEST_CONCURRENCY: usize = 4;
 
-pub(super) async fn collect_album_tracks(
-    api: OpenSubsonicProvider,
-    albums: Vec<Album>,
-) -> Vec<Song> {
+pub(super) async fn collect_album_tracks(api: MusicSource, albums: Vec<Album>) -> Vec<Song> {
     let mut songs = Vec::new();
     let albums = albums.into_iter().take(MAX_ALBUMS).collect::<Vec<_>>();
     for chunk in albums.chunks(REQUEST_CONCURRENCY) {
@@ -44,7 +41,7 @@ pub(super) async fn collect_album_tracks(
 }
 
 pub(super) async fn collect_similar_tracks(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seeds: &[Song],
     errors: &mut Vec<String>,
 ) -> Vec<Song> {
@@ -66,7 +63,7 @@ pub(super) async fn collect_similar_tracks(
 }
 
 pub(super) async fn collect_genre_tracks(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seeds: &[Song],
     errors: &mut Vec<String>,
 ) -> Vec<Song> {

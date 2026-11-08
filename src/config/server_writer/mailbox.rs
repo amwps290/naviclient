@@ -6,11 +6,14 @@ use std::time::{Duration, Instant};
 
 use super::super::server_cache::{CacheKind, CacheSnapshot};
 use super::super::server_scope;
+use super::super::source_scope;
+use crate::source::{ProviderKind, SourceId};
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct CacheKey {
+    provider: ProviderKind,
     scope: String,
     kind: CacheKind,
 }
@@ -18,7 +21,16 @@ pub(super) struct CacheKey {
 impl CacheKey {
     pub(super) fn new(server_id: Option<&str>, kind: CacheKind) -> Self {
         Self {
+            provider: ProviderKind::OpenSubsonic,
             scope: server_scope(server_id),
+            kind,
+        }
+    }
+
+    pub(super) fn for_source(source: &SourceId, kind: CacheKind) -> Self {
+        Self {
+            provider: source.provider,
+            scope: source_scope(source),
             kind,
         }
     }
@@ -92,7 +104,10 @@ impl Mailbox {
             .expect("cache revision exhausted");
         let revision = state.revision;
         state.pending.insert(
-            CacheKey::new(server_id, snapshot.kind()),
+            snapshot.source().map_or_else(
+                || CacheKey::new(server_id, snapshot.kind()),
+                |source| CacheKey::for_source(source, snapshot.kind()),
+            ),
             PendingWrite {
                 revision,
                 server_id: server_id.map(str::to_string),
@@ -116,6 +131,19 @@ impl Mailbox {
             .unwrap()
             .pending
             .get(&CacheKey::new(server_id, kind))
+            .map(|task| task.snapshot.clone())
+    }
+
+    pub(super) fn source_snapshot(
+        &self,
+        source: &SourceId,
+        kind: CacheKind,
+    ) -> Option<Arc<CacheSnapshot>> {
+        self.state
+            .lock()
+            .unwrap()
+            .pending
+            .get(&CacheKey::for_source(source, kind))
             .map(|task| task.snapshot.clone())
     }
 
@@ -166,20 +194,32 @@ impl Mailbox {
 
     /// Cancel retries and wait for an existing file replacement before deleting
     /// that server's cache. The UI is the single submitter during this operation.
+    #[cfg(test)]
     pub(super) fn discard(&self, server_id: Option<&str>) {
-        let scope = server_scope(server_id);
+        self.discard_scope(CacheKey::new(server_id, CacheKind::Session));
+    }
+
+    pub(super) fn discard_source(&self, source: &SourceId) {
+        self.discard_scope(CacheKey::for_source(source, CacheKind::Session));
+    }
+
+    fn discard_scope(&self, scope: CacheKey) {
         let mut state = self.state.lock().unwrap();
-        state.pending.retain(|key, _| key.scope != scope);
+        state
+            .pending
+            .retain(|key, _| key.scope != scope.scope || key.provider != scope.provider);
         self.settled.notify_all();
         while state
             .in_flight
             .as_ref()
-            .is_some_and(|key| key.scope == scope)
+            .is_some_and(|key| key.scope == scope.scope && key.provider == scope.provider)
             && !state.closed
         {
             state = self.settled.wait(state).unwrap();
         }
-        state.receipts.retain(|key, _| key.scope != scope);
+        state
+            .receipts
+            .retain(|key, _| key.scope != scope.scope || key.provider != scope.provider);
         self.settled.notify_all();
     }
 

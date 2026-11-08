@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::audio::PlaybackState;
 use crate::models::{ListeningHistory, PlaybackId, Song};
+use crate::source::{MediaKey, SourceId};
 
 const HISTORY_DISPLAY_LIMIT: usize = 200;
 const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -17,6 +18,7 @@ pub(in crate::app) struct ListeningState {
 }
 
 struct ActiveListening {
+    source: Option<SourceId>,
     occurrence: PlaybackId,
     song_id: String,
     last_position: Duration,
@@ -28,7 +30,15 @@ struct ActiveListening {
 impl ActiveListening {
     fn update_history(&self, history: &mut ListeningHistory, completed: bool) {
         let listened_seconds = u32::try_from(self.accumulated.as_secs()).unwrap_or(u32::MAX);
-        history.update_latest(&self.song_id, listened_seconds, completed);
+        if let Some(source) = self.source.as_ref() {
+            history.update_latest_media(
+                &MediaKey::new(source.clone(), &self.song_id),
+                listened_seconds,
+                completed,
+            );
+        } else {
+            history.update_latest(&self.song_id, listened_seconds, completed);
+        }
     }
 }
 
@@ -79,11 +89,11 @@ impl ListeningState {
                 ListeningUpdate::Unchanged
             };
         };
-        if self
-            .active
-            .as_ref()
-            .is_none_or(|active| active.song_id != song.id || active.occurrence != occurrence)
-        {
+        if self.active.as_ref().is_none_or(|active| {
+            active.source != song.source
+                || active.song_id != song.id
+                || active.occurrence != occurrence
+        }) {
             let finished = self.finish(false);
             if !playback.active {
                 return if finished {
@@ -96,6 +106,7 @@ impl ListeningState {
             self.recent.insert(0, song.clone());
             self.recent.truncate(HISTORY_DISPLAY_LIMIT);
             self.active = Some(ActiveListening {
+                source: song.source.clone(),
                 occurrence,
                 song_id: song.id.clone(),
                 last_position: playback.position,

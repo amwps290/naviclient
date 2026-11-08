@@ -149,7 +149,7 @@ impl NavidromeApp {
         cover_id: Option<&str>,
         cx: &Context<Self>,
     ) -> Option<(Hsla, Hsla)> {
-        let palette = cover_id.and_then(|id| self.state.covers.palette(id));
+        let palette = cover_id.and_then(|id| self.browsing_cover_palette(id));
         cover_tint(
             surface,
             palette,
@@ -159,10 +159,11 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn now_playing_cover_palette(&self) -> Option<(Hsla, Hsla)> {
-        self.state
-            .now_playing
-            .as_ref()
-            .and_then(|song| song.cover_art.as_deref())
-            .and_then(|cover_id| self.state.covers.palette(cover_id))
+        self.state.now_playing.as_ref().and_then(|song| {
+            let source = song.source.as_ref().or_else(|| self.session.source())?;
+            self.state
+                .covers
+                .palette(source, song.cover_art.as_deref()?)
+        })
     }
 }

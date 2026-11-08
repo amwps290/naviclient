@@ -17,12 +17,16 @@ pub fn load() -> Config {
 fn read_config_at(path: &Path) -> Config {
     let mut config: Config = match fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(mut value) => {
+            Ok(mut value) if value.is_object() => {
                 migrate_legacy_playback_mode(&mut value);
                 serde_json::from_value(value).unwrap_or_else(|error| {
                     log::warn!("invalid config at {}: {error}", path.display());
                     Config::default()
                 })
+            }
+            Ok(_) => {
+                log::warn!("config at {} must be a JSON object", path.display());
+                Config::default()
             }
             Err(error) => {
                 log::warn!("invalid config JSON at {}: {error}", path.display());

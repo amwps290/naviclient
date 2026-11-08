@@ -54,7 +54,7 @@ impl NavidromeApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
-                    this.state.settings.open = false;
+                    this.state.settings.close();
                     this.cancel_shortcut_recording();
                     cx.notify();
                 }),
@@ -91,7 +91,7 @@ impl NavidromeApp {
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.state.settings.open = false;
+                                    this.state.settings.close();
                                     this.cancel_shortcut_recording();
                                     cx.notify();
                                 })),

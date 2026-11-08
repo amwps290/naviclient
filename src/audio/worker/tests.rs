@@ -84,7 +84,14 @@ fn assert_pending_http_cancelled(shutdown: bool) {
         .unwrap();
     let path = cache.0.clone();
     let worker = thread::spawn(move || run_playback(rx, state, path, client, output));
-    audio.play(url, "late-stream".into(), None, 1.0, Duration::ZERO, None);
+    audio.play(
+        url.into(),
+        "late-stream".into(),
+        None,
+        1.0,
+        Duration::ZERO,
+        None,
+    );
     wait_for(|| partial.exists());
     assert!(audio.state().active);
     assert!(!audio.progress().active);

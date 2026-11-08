@@ -20,10 +20,9 @@ impl NavidromeApp {
         );
         if update == ListeningUpdate::Started {
             self.state.song_selection.clear_scope(SongScope::History);
-            self.ensure_cover(
-                song.as_ref().and_then(|song| song.cover_art.as_deref()),
-                false,
-            );
+            if let Some(song) = song.as_ref() {
+                self.ensure_song_cover(song, false);
+            }
         }
         if update != ListeningUpdate::Unchanged {
             self.persist_listening_history();
@@ -37,10 +36,15 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn persist_listening_history(&self) {
-        if let Err(error) = self.server_cache_writer.submit(
-            self.state.listening.server_id(),
-            config::CacheSnapshot::ListeningHistory(self.state.listening.history().clone()),
-        ) {
+        let snapshot =
+            config::CacheSnapshot::ListeningHistory(self.state.listening.history().clone());
+        let submitted = match self.session.source() {
+            Some(source) => self.server_cache_writer.submit_source(source, snapshot),
+            None => self
+                .server_cache_writer
+                .submit(self.state.listening.server_id(), snapshot),
+        };
+        if let Err(error) = submitted {
             log::warn!("could not queue listening history: {error}");
         }
     }

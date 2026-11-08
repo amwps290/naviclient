@@ -7,6 +7,7 @@ const SERVER_URL: &str = "https://music.example";
 fn saved_session(position: f64) -> PlaybackSession {
     PlaybackSession {
         server_url: SERVER_URL.into(),
+        source: None,
         queue: ["first", "second"]
             .into_iter()
             .map(|id| Song {
@@ -25,6 +26,85 @@ fn saved_session(position: f64) -> PlaybackSession {
         shuffle_played: vec![0, 1],
         shuffle_forward: vec![0],
     }
+}
+
+#[test]
+fn legacy_session_is_bound_to_its_open_subsonic_owner_without_losing_occurrences() {
+    let source = SourceId::new(ProviderKind::OpenSubsonic, "server-a");
+    let mut session = SessionState::new(Instant::now());
+    session.bind_source(source.clone(), Some(SERVER_URL));
+    let mut state = AppState::default();
+    let mut saved = saved_session(45.0);
+    saved.queue[1].id = saved.queue[0].id.clone();
+    assert!(session.restore(&mut state, saved));
+    assert_ne!(state.queue.entry_id(0), state.queue.entry_id(1));
+    assert!(state
+        .queue
+        .songs()
+        .all(|song| song.source.as_ref() == Some(&source)));
+    let snapshot = session.snapshot(&state, &PlaybackState::default()).unwrap();
+    assert_eq!(snapshot.source, Some(source));
+    assert_eq!(snapshot.position_secs, 45.0);
+    assert_eq!(
+        snapshot.queue_origins,
+        [QueueOrigin::Manual, QueueOrigin::DailyMix]
+    );
+}
+
+#[test]
+fn bilibili_session_requires_qualified_identity_and_rejects_foreign_queue_entries() {
+    let source = SourceId::new(ProviderKind::Bilibili, "account-a");
+    let mut session = SessionState::new(Instant::now());
+    session.bind_source(source.clone(), None);
+    let mut state = AppState::default();
+    assert!(!session.restore(&mut state, saved_session(10.0)));
+    let mut saved = saved_session(45.0);
+    saved.source = Some(source.clone());
+    saved.server_url.clear();
+    assert!(session.restore(&mut state, saved.clone()));
+    assert!(state
+        .queue
+        .songs()
+        .all(|song| song.source.as_ref() == Some(&source)));
+    let snapshot = session.snapshot(&state, &PlaybackState::default()).unwrap();
+    assert_eq!(snapshot.source.as_ref(), Some(&source));
+    assert!(snapshot.server_url.is_empty());
+    for owner in [
+        SourceId::new(ProviderKind::Bilibili, "account-b"),
+        SourceId::new(ProviderKind::OpenSubsonic, "account-a"),
+    ] {
+        let mut wrong = saved.clone();
+        wrong.source = Some(owner.clone());
+        assert!(!session.restore(&mut state, wrong));
+        let mut mixed = saved.clone();
+        mixed.queue[1].source = Some(owner);
+        assert!(!session.restore(&mut state, mixed));
+    }
+    assert_eq!(
+        session
+            .snapshot(&state, &PlaybackState::default())
+            .unwrap()
+            .position_secs,
+        45.0
+    );
+}
+
+#[test]
+fn changing_bound_source_cannot_persist_another_sources_queue() {
+    let mut session = SessionState::new(Instant::now());
+    session.bind_source(
+        SourceId::new(ProviderKind::OpenSubsonic, "old"),
+        Some(SERVER_URL),
+    );
+    let mut state = AppState::default();
+    assert!(session.restore(&mut state, saved_session(45.0)));
+    session.bind_source(
+        SourceId::new(ProviderKind::OpenSubsonic, "new"),
+        Some(SERVER_URL),
+    );
+    assert!(session
+        .snapshot(&state, &PlaybackState::default())
+        .is_none());
 }
 
 fn restored_session(position: f64) -> (SessionState, AppState) {

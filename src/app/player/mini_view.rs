@@ -21,9 +21,9 @@ impl NavidromeApp {
             (playback.position.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
         };
 
-        let cover_id = song.as_ref().and_then(|song| song.cover_art.as_deref());
-        let cover = cover_id
-            .and_then(|id| self.state.covers.image(id))
+        let cover = song
+            .as_ref()
+            .and_then(|song| self.song_cover_image(song))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
@@ -46,7 +46,12 @@ impl NavidromeApp {
             .unwrap_or_else(|| t!("No track playing").to_string());
         let artist = song
             .as_ref()
-            .map(|song| song.artist.clone())
+            .map(|song| {
+                song.bilibili_part
+                    .as_ref()
+                    .map(|part| format!("P{}/{} · {}", part.index, part.count, part.title))
+                    .unwrap_or_else(|| song.artist.clone())
+            })
             .unwrap_or_else(|| t!("Choose a song").to_string());
 
         let cover_element = img(cover)

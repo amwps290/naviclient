@@ -5,7 +5,7 @@ use crate::app::prelude::*;
 impl AppState {
     /// Change the browsing page without dismissing the queue or its selection.
     pub(in crate::app) fn navigate_to(&mut self, view: View) {
-        self.settings.open = false;
+        self.settings.close();
         self.view = view;
     }
 
@@ -28,7 +28,7 @@ impl AppState {
         if self.song_selection.multi().is_some() {
             self.song_selection.clear_multi();
         } else if self.settings.open {
-            self.settings.open = false;
+            self.settings.close();
         } else if self.queue_drawer_open {
             self.queue_drawer_open = false;
             self.song_selection.clear_multi();
@@ -42,6 +42,15 @@ impl AppState {
 
 impl NavidromeApp {
     pub(in crate::app) fn navigate_to(&mut self, view: View) {
+        let view = if self.browsing_bilibili()
+            && !matches!(
+                view,
+                View::Playlists | View::PlaylistDetail | View::NowPlaying
+            ) {
+            View::Playlists
+        } else {
+            view
+        };
         self.state.navigate_to(view);
         match view {
             View::Artists if self.state.artists.is_empty() => self.load_artists(),

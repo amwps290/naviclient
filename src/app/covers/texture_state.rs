@@ -53,6 +53,7 @@ impl CoverTextures {
         self.retired.insert(id, image);
     }
 
+    #[cfg(test)]
     pub(in crate::app) fn reset(&mut self, source_images: impl IntoIterator<Item = Arc<Image>>) {
         let used = std::mem::take(&mut self.used);
         let evicted = std::mem::take(&mut self.evicted);

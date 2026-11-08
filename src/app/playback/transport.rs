@@ -29,6 +29,7 @@ pub(in crate::app) fn stop_playback_state(
     session.clear_position();
     state.now_playing = None;
     state.now_playing_quality = None;
+    state.now_playing_audio_quality = None;
     state.lyrics.clear();
     state.occurrence.clear();
     finished_listening
@@ -58,6 +59,7 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn request_playback(&mut self, request: PlaybackRequest, can_play: bool) {
+        self.start_resolution.cancel();
         self.state.cancel_deferred_playback();
         self.reconnect.cancel();
         self.sync_gapless_transition();
@@ -71,6 +73,7 @@ impl NavidromeApp {
     }
 
     pub fn stop_playback(&mut self) {
+        self.start_resolution.cancel();
         self.reconnect.cancel();
         self.cancel_next_preload();
         self.audio.stop();

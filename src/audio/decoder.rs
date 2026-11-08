@@ -19,11 +19,13 @@ use super::http_stream::HttpRangeReader;
 use super::stream_cache::BufferProgress;
 use super::stream_control::StreamControl;
 use super::stream_response::stream_endpoint;
+use crate::source::HttpResource;
 
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 const DECODED_CHUNK_FRAMES: usize = 4096;
 const DECODED_BUFFER_CHUNKS: usize = 512;
 
+#[cfg(test)]
 pub(super) fn play_url(
     client: Client,
     url: &str,
@@ -33,18 +35,33 @@ pub(super) fn play_url(
     start_position: Duration,
     control: Arc<StreamControl>,
 ) -> Result<PreparedStream> {
-    log::debug!(
-        "preparing audio stream; endpoint={} start_ms={}",
-        stream_endpoint(url),
-        start_position.as_millis()
-    );
-    let reader = HttpRangeReader::open_controlled(
+    play_resource(
         client,
-        url.to_string(),
+        HttpResource::new(url),
         cache_dir,
         cache_key,
-        control.clone(),
-    )?;
+        duration_hint,
+        start_position,
+        control,
+    )
+}
+
+pub(super) fn play_resource(
+    client: Client,
+    resource: HttpResource,
+    cache_dir: &Path,
+    cache_key: &str,
+    duration_hint: Option<Duration>,
+    start_position: Duration,
+    control: Arc<StreamControl>,
+) -> Result<PreparedStream> {
+    log::debug!(
+        "preparing audio stream; endpoint={} start_ms={}",
+        stream_endpoint(&resource),
+        start_position.as_millis()
+    );
+    let reader =
+        HttpRangeReader::open_resource(client, resource, cache_dir, cache_key, control.clone())?;
     let buffer_progress = reader.buffer_progress();
     let byte_len = reader.len();
     let seekable = reader.is_seekable();

@@ -14,12 +14,6 @@ impl NavidromeApp {
         self.cover_textures.borrow_mut().retire(image);
     }
 
-    pub(in crate::app) fn retire_server_covers(&self) {
-        self.cover_textures
-            .borrow_mut()
-            .reset(self.state.covers.images().cloned());
-    }
-
     /// Only decoded textures are released; cached source bytes remain available
     /// to decode again when the user scrolls back to an evicted cover.
     pub(in crate::app) fn release_unused_cover_textures(

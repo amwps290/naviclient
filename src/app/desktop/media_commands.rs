@@ -43,7 +43,7 @@ impl NavidromeApp {
                     self.cancel_next_preload();
                     let current_id = self.state.now_playing.as_ref().map(|song| {
                         media_session::track_id(
-                            self.api.as_ref().map_or("", |api| api.base_url()),
+                            &self.playback_source_key(),
                             &song.id,
                             self.state.occurrence.id(),
                         )

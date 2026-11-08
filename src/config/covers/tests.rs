@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn cover_sources_are_isolated_and_open_subsonic_keeps_existing_cache_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: Some(dir.path().into()),
+        ..Config::default()
+    };
+    let subsonic = SourceId::new(ProviderKind::OpenSubsonic, "same-profile");
+    let bilibili = SourceId::new(ProviderKind::Bilibili, "same-profile");
+    let other = SourceId::new(ProviderKind::Bilibili, "other-account");
+    let cover = "../same-cover";
+    assert_eq!(
+        source_cover_cache_path(&config, &subsonic, cover),
+        cover_cache_path(&config, Some("same-profile"), cover)
+    );
+    write_source_cover_cache(&config, &subsonic, cover, b"subsonic-cover");
+    write_source_cover_cache(&config, &bilibili, cover, b"bilibili-cover");
+    assert_eq!(
+        read_source_cover_cache(&config, &subsonic, cover).unwrap(),
+        b"subsonic-cover"
+    );
+    assert_eq!(
+        read_source_cover_cache(&config, &bilibili, cover).unwrap(),
+        b"bilibili-cover"
+    );
+    assert!(read_source_cover_cache(&config, &other, cover).is_none());
+    assert_eq!(
+        source_cover_cache_path(&config, &bilibili, cover).parent(),
+        Some(cover_cache_dir(&config).as_path())
+    );
+}
+
+#[test]
 fn cover_cache_file_name_is_deterministic_and_path_safe() {
     let a = cover_cache_file_name(Some("srv-a"), "al-123");
     let b = cover_cache_file_name(Some("srv-a"), "al-123");

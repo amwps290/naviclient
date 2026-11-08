@@ -15,6 +15,8 @@ gpui-kit = "0.7.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 md-5 = "0.10"
 rand = "0.8"
+qrcodegen = "1.8"
+zeroize = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # i18n：编译期嵌入 locales/*.yml，t! 宏取词，运行时 set_locale 切换。
 # 缺失的键回退原文（键即英文），迁移可渐进无损。
@@ -28,7 +30,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 smol = "2"
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util", "signal"] }
 url = "2"
 biquad = "0.6.0"
 
@@ -38,6 +40,8 @@ notify-rust = { version = "4", default-features = false }
 # Linux 托盘：纯 Rust StatusNotifierItem over D-Bus，无需 GTK/libappindicator。
 ksni = { version = "0.3", features = ["blocking"] }
 zbus = "5.19"
+# Bilibili credentials use encrypted Secret Service sessions, never config files.
+secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = "0.24.2"

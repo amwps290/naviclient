@@ -6,6 +6,7 @@ use std::thread::{self, JoinHandle};
 
 use crate::models::{Genre, ListeningHistory, PlaybackSession};
 use crate::recommendation::DailyMixSnapshot;
+use crate::source::SourceId;
 
 use super::server_cache::{save_snapshot, CacheKind, CacheSnapshot};
 
@@ -58,17 +59,70 @@ impl ServerCacheWriter {
         self.mailbox.submit(server_id, snapshot.into())
     }
 
-    pub(crate) fn pending_session(&self, server_id: Option<&str>) -> Option<PlaybackSession> {
+    pub(crate) fn submit_source(
+        &self,
+        source: &SourceId,
+        snapshot: impl Into<CacheSnapshot>,
+    ) -> Result<(), String> {
+        self.mailbox.submit(
+            Some(&source.profile_id),
+            CacheSnapshot::scoped(source.clone(), snapshot),
+        )
+    }
+
+    pub(crate) fn pending_source_session(&self, source: &SourceId) -> Option<PlaybackSession> {
         match self
             .mailbox
-            .snapshot(server_id, CacheKind::Session)?
-            .as_ref()
+            .source_snapshot(source, CacheKind::Session)?
+            .value()
         {
             CacheSnapshot::Session(value) => Some(value.clone()),
             _ => None,
         }
     }
 
+    pub(crate) fn pending_source_history(&self, source: &SourceId) -> Option<ListeningHistory> {
+        match self
+            .mailbox
+            .source_snapshot(source, CacheKind::ListeningHistory)?
+            .value()
+        {
+            CacheSnapshot::ListeningHistory(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn pending_source_loudness(
+        &self,
+        source: &SourceId,
+    ) -> Option<std::collections::HashMap<String, (f32, f32)>> {
+        match self
+            .mailbox
+            .source_snapshot(source, CacheKind::Loudness)?
+            .value()
+        {
+            CacheSnapshot::Loudness(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn discard_source(&self, source: &SourceId) {
+        self.mailbox.discard_source(source);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_session(&self, server_id: Option<&str>) -> Option<PlaybackSession> {
+        match self
+            .mailbox
+            .snapshot(server_id, CacheKind::Session)?
+            .value()
+        {
+            CacheSnapshot::Session(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn pending_loudness(
         &self,
         server_id: Option<&str>,
@@ -76,18 +130,19 @@ impl ServerCacheWriter {
         match self
             .mailbox
             .snapshot(server_id, CacheKind::Loudness)?
-            .as_ref()
+            .value()
         {
             CacheSnapshot::Loudness(value) => Some(value.clone()),
             _ => None,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn pending_history(&self, server_id: Option<&str>) -> Option<ListeningHistory> {
         match self
             .mailbox
             .snapshot(server_id, CacheKind::ListeningHistory)?
-            .as_ref()
+            .value()
         {
             CacheSnapshot::ListeningHistory(value) => Some(value.clone()),
             _ => None,
@@ -95,11 +150,7 @@ impl ServerCacheWriter {
     }
 
     pub(crate) fn pending_genres(&self, server_id: Option<&str>) -> Option<Vec<Genre>> {
-        match self
-            .mailbox
-            .snapshot(server_id, CacheKind::Genres)?
-            .as_ref()
-        {
+        match self.mailbox.snapshot(server_id, CacheKind::Genres)?.value() {
             CacheSnapshot::Genres(value) => Some(value.clone()),
             _ => None,
         }
@@ -109,7 +160,7 @@ impl ServerCacheWriter {
         match self
             .mailbox
             .snapshot(server_id, CacheKind::DailyMix)?
-            .as_ref()
+            .value()
         {
             CacheSnapshot::DailyMix(value) => Some(value.clone()),
             _ => None,
@@ -124,6 +175,7 @@ impl ServerCacheWriter {
 
     /// Cancel retries and wait for an existing file replacement before deleting
     /// that server's cache. The UI is the single submitter during this operation.
+    #[cfg(test)]
     pub(crate) fn discard(&self, server_id: Option<&str>) {
         self.mailbox.discard(server_id);
     }

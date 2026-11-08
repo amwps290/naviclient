@@ -36,14 +36,18 @@ impl NavidromeApp {
             return div().into_any_element();
         };
         let total = self.state.songs_for_scope(scope).map_or(0, SongList::len);
-        let key = item_instance_key(scope.id(), "song", index, &song.id);
+        let media_id = song
+            .media_key()
+            .map(|key| key.cache_key())
+            .unwrap_or_else(|| song.id.clone());
+        let key = item_instance_key(scope.id(), "song", index, &media_id);
         let menu_app = cx.entity().downgrade();
         let button_menu_app = menu_app.clone();
         let current_song = self
             .state
             .now_playing
             .as_ref()
-            .is_some_and(|playing| playing.id == song.id);
+            .is_some_and(|playing| playing.id == song.id && playing.source == song.source);
         let current = if scope == SongScope::History {
             index == 0 && current_song
         } else {
@@ -136,8 +140,8 @@ impl NavidromeApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(self.render_cover_styled(
-                        song.cover_art.as_deref(),
+                    .child(self.render_song_cover_styled(
+                        song,
                         40.0,
                         tokens::radius::CONTROL,
                         Vec::new(),
@@ -192,14 +196,14 @@ impl NavidromeApp {
                                 .text_size(px(tokens::META))
                                 .text_color(p.text_secondary)
                                 .line_height(rems(1.2))
-                                .when(queue_drawer, |this| {
+                                .when(queue_drawer && song.bilibili_part.is_none(), |this| {
                                     this.child(self.song_artist_link(
                                         SharedString::from(format!("song-row-artist-{key}")),
                                         song,
                                         cx,
                                     ))
                                 })
-                                .when(!queue_drawer, |this| {
+                                .when(!queue_drawer || song.bilibili_part.is_some(), |this| {
                                     this.child(self.song_album_link(
                                         SharedString::from(format!("song-row-album-{key}")),
                                         album,
@@ -297,9 +301,16 @@ impl NavidromeApp {
                             })),
                     )
                 })
-                .when(!editable && !compact_columns, |slot| {
-                    slot.child(self.favorite_button(FavoriteKind::Song, &song.id, cx))
-                })
+                .when(
+                    !editable
+                        && !compact_columns
+                        && self.browsing_owns_song(song)
+                        && self
+                            .api
+                            .as_ref()
+                            .is_some_and(|api| api.capabilities().favorite_write),
+                    |slot| slot.child(self.favorite_button(FavoriteKind::Song, &song.id, cx)),
+                )
                 .when(!editable, |slot| {
                     slot.child(
                         Button::new(SharedString::from(format!("play-song-{key}")))

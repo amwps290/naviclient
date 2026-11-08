@@ -8,19 +8,24 @@ use gpui_kit::{Hsla, Image as GpuiImage};
 use super::artwork::cover_request_needed;
 use crate::app::library::requests::{LibraryRequest, LibraryRequests};
 use crate::msg::DecodedCover;
+use crate::source::{MediaKey, SourceId};
 
 const MAX_FAILED_COVERS: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CoverRequest {
     request: LibraryRequest,
-    id: String,
+    key: MediaKey,
     want_palette: bool,
 }
 
 impl CoverRequest {
+    pub(in crate::app) fn source(&self) -> &SourceId {
+        &self.key.source
+    }
+
     pub(in crate::app) fn id(&self) -> &str {
-        &self.id
+        &self.key.remote_id
     }
 }
 
@@ -40,10 +45,10 @@ struct PendingCover {
 
 #[derive(Default)]
 pub(in crate::app) struct CoverCache {
-    entries: HashMap<String, CoverEntry>,
-    pending: HashMap<String, PendingCover>,
-    failed: HashSet<String>,
-    failed_order: VecDeque<String>,
+    entries: HashMap<MediaKey, CoverEntry>,
+    pending: HashMap<MediaKey, PendingCover>,
+    failed: HashSet<MediaKey>,
+    failed_order: VecDeque<MediaKey>,
 }
 
 #[derive(Default)]
@@ -53,25 +58,62 @@ pub(in crate::app) struct CoverUpdate {
 }
 
 impl CoverCache {
-    pub(in crate::app) fn image(&self, id: &str) -> Option<&Arc<GpuiImage>> {
-        self.entries.get(id)?.image.as_ref()
+    pub(in crate::app) fn retain_sources(
+        &mut self,
+        sources: &HashSet<SourceId>,
+    ) -> Vec<Arc<GpuiImage>> {
+        let retained: HashSet<_> = self
+            .entries
+            .iter()
+            .filter(|(key, _)| sources.contains(&key.source))
+            .filter_map(|(_, entry)| entry.image.as_ref().map(|image| image.id()))
+            .collect();
+        let removed: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(key, _)| !sources.contains(&key.source))
+            .filter_map(|(_, entry)| entry.image.clone())
+            .filter(|image| !retained.contains(&image.id()))
+            .collect();
+        self.entries.retain(|key, _| sources.contains(&key.source));
+        self.pending.retain(|key, _| sources.contains(&key.source));
+        self.failed.retain(|key| sources.contains(&key.source));
+        self.failed_order
+            .retain(|key| sources.contains(&key.source));
+        removed
     }
 
-    pub(in crate::app) fn palette(&self, id: &str) -> Option<(Hsla, Hsla)> {
-        self.entries.get(id)?.palette
+    pub(in crate::app) fn image(&self, source: &SourceId, id: &str) -> Option<&Arc<GpuiImage>> {
+        self.entries
+            .get(&MediaKey::new(source.clone(), id))?
+            .image
+            .as_ref()
     }
 
+    pub(in crate::app) fn palette(&self, source: &SourceId, id: &str) -> Option<(Hsla, Hsla)> {
+        self.entries
+            .get(&MediaKey::new(source.clone(), id))?
+            .palette
+    }
+
+    #[cfg(test)]
     pub(in crate::app) fn images(&self) -> impl Iterator<Item = &Arc<GpuiImage>> {
         self.entries
             .values()
             .filter_map(|entry| entry.image.as_ref())
     }
 
-    pub(in crate::app) fn request_needed(&self, id: &str, want_palette: bool) -> bool {
-        if self.failed.contains(id) {
+    pub(in crate::app) fn request_needed(
+        &self,
+        source: &SourceId,
+        id: &str,
+        want_palette: bool,
+    ) -> bool {
+        let key = MediaKey::new(source.clone(), id);
+        if self.failed.contains(&key) {
             return false;
         }
-        let entry = self.entries.get(id);
+        let entry = self.entries.get(&key);
         cover_request_needed(
             entry.is_some_and(|entry| entry.image.is_some()),
             entry.is_some_and(|entry| entry.palette.is_some()),
@@ -81,14 +123,16 @@ impl CoverCache {
 
     pub(in crate::app) fn begin(
         &mut self,
+        source: &SourceId,
         id: &str,
         want_palette: bool,
         requests: &mut LibraryRequests,
     ) -> Option<CoverRequest> {
-        if !self.request_needed(id, want_palette) {
+        if !self.request_needed(source, id, want_palette) {
             return None;
         }
-        if let Some(pending) = self.pending.get_mut(id) {
+        let key = MediaKey::new(source.clone(), id);
+        if let Some(pending) = self.pending.get_mut(&key) {
             // A feature/playing view can request color while a grid image is
             // still loading. Preserve that demand for the completion handler.
             pending.want_palette |= want_palette;
@@ -96,11 +140,11 @@ impl CoverCache {
         }
         let request = CoverRequest {
             request: requests.next(),
-            id: id.to_string(),
+            key: key.clone(),
             want_palette,
         };
         self.pending.insert(
-            id.to_string(),
+            key,
             PendingCover {
                 request: request.clone(),
                 want_palette,
@@ -116,7 +160,7 @@ impl CoverCache {
     ) -> Option<CoverUpdate> {
         if self
             .pending
-            .get(request.id())
+            .get(&request.key)
             .map(|pending| &pending.request)
             != Some(request)
         {
@@ -124,16 +168,16 @@ impl CoverCache {
         }
         let pending = self
             .pending
-            .remove(request.id())
+            .remove(&request.key)
             .expect("matching cover request exists");
         let decoded = match result {
             Ok(decoded) if decoded.image.is_some() || decoded.palette.is_some() => decoded,
             _ => {
-                self.remember_failed(request.id.clone());
+                self.remember_failed(request.key.clone());
                 return Some(CoverUpdate::default());
             }
         };
-        let entry = self.entries.entry(request.id.clone()).or_default();
+        let entry = self.entries.entry(request.key.clone()).or_default();
         entry.palette_attempted |= request.want_palette || decoded.palette.is_some();
         if let Some(palette) = decoded.palette {
             entry.palette = Some(palette);
@@ -154,7 +198,7 @@ impl CoverCache {
         })
     }
 
-    fn remember_failed(&mut self, id: String) {
+    fn remember_failed(&mut self, id: MediaKey) {
         if self.failed.insert(id.clone()) {
             self.failed_order.push_back(id);
         }

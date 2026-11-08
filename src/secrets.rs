@@ -3,16 +3,18 @@
 //!
 //! - Windows：Credential Manager（advapi32 的 `CredWriteW`/`CredReadW`/
 //!   `CredDeleteW`，复用既有 `windows-sys` 依赖，无需新增 crate）。
-//! - 其他平台：暂未接入（Linux Secret Service 需要 DH 密钥交换 + AES 的
-//!   加密协议，待依赖可用时补齐）。存取函数返回"不可用"，应用自动回退
-//!   为在配置文件里保存明文密码，功能不受影响。
+//! - 下方旧服务器密码 API 在其他平台仍保留既有配置回退行为。
+//! - Bilibili 使用独立的 `source_credentials` 严格 API：Linux 通过 DH
+//!   加密 Secret Service，Windows 通过 Credential Manager，绝不回退文件。
 //!
-//! 所有失败路径都只记日志、不抛错给调用方：凭据库是安全增强，绝不能
-//! 因为它缺失而让播放器无法连接。
+//! 旧服务器密码的迁移是可选增强；Bilibili 凭据库失败必须返回账号界面。
 
 use crate::models::Config;
 
+#[cfg(target_os = "linux")]
+mod linux_credentials;
 mod migration;
+pub mod source_credentials;
 #[cfg(target_os = "windows")]
 mod windows_credentials;
 

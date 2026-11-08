@@ -1,4 +1,40 @@
 use super::*;
+
+#[test]
+fn seek_keeps_resource_headers_proxy_and_temporary_cache_policy() {
+    use crate::source::{CachePolicy, HttpResource};
+    use reqwest::header::{HeaderMap, HeaderValue, REFERER};
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        REFERER,
+        HeaderValue::from_static("https://www.bilibili.com/"),
+    );
+    let mut resource = HttpResource::new("https://cdn.test/audio?signature=secret")
+        .with_headers(headers)
+        .with_proxy(Some("http://proxy.test:7890".into()));
+    resource = resource.with_cache_policy(CachePolicy::Temporary { max_bytes: 10 });
+    resource = resource.with_mime_hint(Some("audio/mp4".into()));
+    let mut track = TrackState::default();
+    track.begin_play(
+        resource,
+        "stable-key".into(),
+        Some(Duration::from_secs(180)),
+        1.0,
+        Duration::ZERO,
+    );
+    let (position, seek) = track
+        .prepare_seek(Duration::from_secs(120), PathBuf::from("unused"))
+        .unwrap();
+    assert_eq!(position, Duration::from_secs(120));
+    assert_eq!(seek.cache_key, "stable-key");
+    assert_eq!(seek.url.headers()[REFERER], "https://www.bilibili.com/");
+    assert_eq!(seek.url.proxy(), Some("http://proxy.test:7890"));
+    assert_eq!(
+        seek.url.cache_policy(),
+        CachePolicy::Temporary { max_bytes: 10 }
+    );
+    assert_eq!(seek.url.mime_hint(), Some("audio/mp4"));
+}
 use crate::audio::error::StreamFailure;
 use crate::audio::preparation_state::PreparationKind;
 use crate::audio::stream_cache::BufferProgress;
@@ -185,7 +221,7 @@ fn gapless_handoff_uses_next_source_clock_and_diagnostics_without_old_errors() {
     let (_, request) = track
         .prepare_seek(Duration::ZERO, PathBuf::from("/new-cache"))
         .unwrap();
-    assert_eq!(request.url, "https://two.test/b");
+    assert_eq!(request.url.url(), "https://two.test/b");
     assert_eq!(request.cache_key, "b");
     assert_eq!(request.cache_dir, PathBuf::from("/new-cache"));
 }

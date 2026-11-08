@@ -16,7 +16,7 @@ use super::track_transition::{TrackTransition, Transition};
 
 pub(super) struct PreloadRequest {
     pub(super) id: u64,
-    pub(super) url: String,
+    pub(super) url: crate::source::HttpResource,
     pub(super) cache_key: String,
     pub(super) duration: Option<Duration>,
     pub(super) gain: f32,

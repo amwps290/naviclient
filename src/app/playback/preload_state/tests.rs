@@ -17,7 +17,7 @@ fn queue() -> PlaybackQueue {
 
 fn reserve(state: &mut PreloadState, queue: &PlaybackQueue, index: usize) -> u64 {
     assert!(state.reserve(queue, index, TranscodingQuality::Original, |_| true));
-    state.pending.unwrap().id
+    state.pending.as_ref().unwrap().id
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn invalid_or_duplicate_reservations_do_not_send_audio_commands() {
             panic!("an accepted reservation must not be replaced implicitly")
         })
     );
-    assert_eq!(state.pending.unwrap().id, id);
+    assert_eq!(state.pending.as_ref().unwrap().id, id);
     assert_eq!(state.reserved_index(&queue), Some(2));
 }
 
@@ -185,7 +185,7 @@ fn rejected_audio_commands_leave_no_reservation_and_can_be_retried() {
             submit(&connected.audio, id)
         })
     );
-    assert!(state.pending.unwrap().id > rejected_id);
+    assert!(state.pending.as_ref().unwrap().id > rejected_id);
     assert_eq!(state.reserved_index(&queue), Some(2));
 }
 

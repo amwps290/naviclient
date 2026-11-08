@@ -29,6 +29,22 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let collapsed = layout.sidebar_collapsed;
+        if self.browsing_bilibili() {
+            return v_flex()
+                .w(px(layout.sidebar_width))
+                .h_full()
+                .p_3()
+                .gap_2()
+                .child(div().text_sm().child("Bilibili"))
+                .child(self.nav_button(
+                    View::Playlists,
+                    Some(self.state.playlists.items().len()),
+                    collapsed,
+                    cx,
+                ))
+                .child(self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx))
+                .into_any_element();
+        }
         v_flex()
             .w(px(layout.sidebar_width))
             .h_full()
@@ -115,7 +131,15 @@ impl NavidromeApp {
         collapsed: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let (label, icon) = view.navigation_presentation();
+        let (label, icon) =
+            if self.browsing_bilibili() && matches!(view, View::Playlists | View::PlaylistDetail) {
+                (
+                    t!("My Bilibili favorites").into(),
+                    Icon::new(AppIcon::Playlists),
+                )
+            } else {
+                view.navigation_presentation()
+            };
         let nav_id = view.nav_id();
         let selected = view.is_selected_for(self.state.view);
         let p = palette(cx);

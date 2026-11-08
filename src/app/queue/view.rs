@@ -95,7 +95,11 @@ impl NavidromeApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(t!("%{count} tracks", count = visible_count)),
+                            .child(format!(
+                                "{} · {}",
+                                self.playback_source_label(),
+                                t!("%{count} tracks", count = visible_count)
+                            )),
                     ),
             )
             .child(
@@ -277,9 +281,28 @@ impl NavidromeApp {
                     .tooltip(t!("Save as playlist"))
                     .ghost()
                     .small()
-                    .disabled(self.state.playlists.editing() || self.api.is_none())
+                    .disabled(
+                        self.state.playlists.editing()
+                            || self.api.as_ref().is_none_or(|api| {
+                                !api.capabilities().playlist_write
+                                    || self
+                                        .state
+                                        .queue
+                                        .songs()
+                                        .any(|song| !song.belongs_to(api.id()))
+                            }),
+                    )
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.name_playlist(None, this.state.queue.song_ids(), window, cx);
+                        if this.api.as_ref().is_some_and(|api| {
+                            api.capabilities().playlist_write
+                                && this
+                                    .state
+                                    .queue
+                                    .songs()
+                                    .all(|song| song.belongs_to(api.id()))
+                        }) {
+                            this.name_playlist(None, this.state.queue.song_ids(), window, cx);
+                        }
                     })),
             )
             .child(div().flex_1())

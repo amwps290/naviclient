@@ -4,6 +4,20 @@ use crate::app::prelude::*;
 
 impl NavidromeApp {
     pub(in crate::app) fn song_gain(&self, song: &Song) -> f32 {
+        if let Some(source) = song
+            .source
+            .as_ref()
+            .filter(|source| Some(*source) != self.session.source())
+        {
+            let mut cache = crate::app::sound::loudness_state::LoudnessCache::default();
+            cache.restore(
+                Some(&source.profile_id),
+                self.server_cache_writer
+                    .pending_source_loudness(source)
+                    .unwrap_or_else(|| config::load_source_loudness(source)),
+            );
+            return cache.gain(song, self.config.volume_normalization);
+        }
         self.state
             .loudness
             .gain(song, self.config.volume_normalization)
@@ -30,10 +44,14 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn persist_loudness(&self) {
-        if let Err(error) = self.server_cache_writer.submit(
-            self.state.loudness.server_id(),
-            config::CacheSnapshot::Loudness(self.state.loudness.items().clone()),
-        ) {
+        let snapshot = config::CacheSnapshot::Loudness(self.state.loudness.items().clone());
+        let submitted = match self.session.source() {
+            Some(source) => self.server_cache_writer.submit_source(source, snapshot),
+            None => self
+                .server_cache_writer
+                .submit(self.state.loudness.server_id(), snapshot),
+        };
+        if let Err(error) = submitted {
             log::warn!("could not queue loudness cache: {error}");
         }
     }

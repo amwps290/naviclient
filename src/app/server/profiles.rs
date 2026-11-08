@@ -10,7 +10,12 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.config.active_server.as_deref() == Some(id) {
+        if self.config.active_source.as_ref()
+            == Some(&crate::source::SourceId::new(
+                crate::source::ProviderKind::OpenSubsonic,
+                id,
+            ))
+        {
             return;
         }
         if !self.config.servers.iter().any(|profile| profile.id == id) {
@@ -66,7 +71,11 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let removing_active = self.config.active_server.as_deref() == Some(id);
+        let removing_active = self.config.active_source.as_ref()
+            == Some(&crate::source::SourceId::new(
+                crate::source::ProviderKind::OpenSubsonic,
+                id,
+            ));
         let Some(profile) = self
             .config
             .servers
@@ -83,12 +92,23 @@ impl NavidromeApp {
             self.notify_error(t!("Keep at least one server configured"));
             return;
         }
+        self.retire_playback_source(&crate::source::SourceId::new(
+            crate::source::ProviderKind::OpenSubsonic,
+            id,
+        ));
         if clean_data {
-            self.server_cache_writer.discard(Some(id));
+            self.server_cache_writer
+                .discard_source(&crate::source::SourceId::new(
+                    crate::source::ProviderKind::OpenSubsonic,
+                    id,
+                ));
             if profile.password_in_keyring {
                 secrets::delete_password(id);
             }
-            let removed = config::remove_server_cache(id);
+            let removed = config::remove_source_cache(&crate::source::SourceId::new(
+                crate::source::ProviderKind::OpenSubsonic,
+                id,
+            ));
             log::info!("removed {removed} scoped cache file(s) of server {id}");
         }
         if let Err(error) = config::save(&self.config) {
@@ -106,11 +126,26 @@ impl NavidromeApp {
             self.reconnect_active_server();
             self.sync_server_inputs(window, cx);
         }
+        self.prune_source_covers();
         self.state.status = t!("Removed %{server}", server = profile.label()).to_string();
     }
 
     /// 当前服务器的显示名（侧边栏与设置页顶部共用）。
     pub(in crate::app) fn active_server_label(&self) -> String {
+        if self.browsing_bilibili() {
+            return self
+                .config
+                .sources
+                .iter()
+                .find(|profile| Some(profile.id()) == self.config.active_source)
+                .and_then(|profile| match profile {
+                    crate::source::SourceProfile::Bilibili { name, .. } => {
+                        Some(format!("Bilibili · {name}"))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "Bilibili".into());
+        }
         self.config
             .active_profile()
             .map(|profile| profile.label())

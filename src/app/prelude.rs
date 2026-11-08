@@ -38,7 +38,7 @@ pub(in crate::app) use rust_i18n::t;
 pub(in crate::app) use smol::Timer;
 pub(in crate::app) use tokio::runtime::Runtime;
 
-pub(in crate::app) use crate::api::{format_duration, OpenSubsonicProvider};
+pub(in crate::app) use crate::api::format_duration;
 pub(in crate::app) use crate::assets::{AppIcon, PlayerIcon};
 pub(in crate::app) use crate::audio::{
     format_playback, AudioHandle, PlaybackState, StreamFailure, TrackTransition,
@@ -59,6 +59,7 @@ pub(in crate::app) use crate::msg::{error_message, Msg};
 pub(in crate::app) use crate::notify;
 pub(in crate::app) use crate::secrets;
 pub(in crate::app) use crate::single_instance;
+pub(in crate::app) use crate::source::MusicSource;
 pub(in crate::app) use crate::tray::{self, TrayCommand};
 pub(in crate::app) use crate::vinyl::VinylCover;
 

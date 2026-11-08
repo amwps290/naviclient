@@ -31,7 +31,13 @@ impl NavidromeApp {
         if self.state.playlists.editing() {
             return;
         }
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .api
+            .clone()
+            .filter(|api| api.capabilities().playlist_write)
+        else {
+            return;
+        };
         let Some(request) = self
             .state
             .playlists

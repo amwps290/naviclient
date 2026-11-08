@@ -185,6 +185,7 @@ fn typed_queues_preserve_the_saved_session_format_and_song_metadata() {
 #[test]
 fn playback_session_round_trips_through_json() {
     let session = PlaybackSession {
+        source: None,
         server_url: "http://localhost:4533".to_string(),
         queue: vec![Song::default()],
         queue_origins: vec![QueueOrigin::DailyMix],

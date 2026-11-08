@@ -7,6 +7,94 @@ use crate::audio::stream_cache::cache_paths;
 use std::fs;
 
 #[test]
+fn header_resource_decodes_pcm_with_a_bounded_temporary_cache() {
+    use crate::audio::http_stream::resource_tests::{resource, Fixture};
+    let cache = TestCache::new();
+    let fixture = Fixture::audio(wav());
+    let mut http = resource(fixture.url());
+    http = http.with_mime_hint(Some("audio/wav".into()));
+    let control = StreamControl::new(false);
+    let prepared = play_resource(
+        client(),
+        http,
+        &cache.0,
+        "resource",
+        None,
+        Duration::ZERO,
+        control.clone(),
+    )
+    .unwrap();
+    let error = prepared.error.clone();
+    wait_for(|| Arc::strong_count(&control) == 2);
+    assert_eq!(prepared.source.count(), 12 * 48_000 * 2);
+    assert!(control.fully_decoded());
+    assert!(error.lock().unwrap().is_none());
+    assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 0);
+    assert!(!fixture.requests().is_empty());
+    for request in fixture.requests() {
+        assert_eq!(request["referer"], "https://www.bilibili.com/");
+    }
+}
+
+/// Run explicitly with a previously fetched independent AAC-LC sample.
+/// No online/API requests or credentials are needed by this development probe.
+#[test]
+#[ignore = "set NAVICLIENT_AUDIO_PROBE_FILE to a local AAC-LC sample"]
+fn independent_aac_lc_sample_decodes_and_seeks_via_application_http_reader() {
+    use crate::audio::http_stream::resource_tests::{resource, Fixture};
+    let path = std::env::var_os("NAVICLIENT_AUDIO_PROBE_FILE").expect("missing sample path");
+    let bytes = fs::read(path).expect("could not read independent audio sample");
+    let fixture = Fixture::audio(bytes);
+    let cache = TestCache::new();
+    for position in [0, 120, 15, 200] {
+        let mut http = resource(fixture.url());
+        http = http.with_mime_hint(Some("audio/mp4".into()));
+        let control = StreamControl::new(false);
+        let prepared = play_resource(
+            client(),
+            http,
+            &cache.0,
+            "aac-probe",
+            Some(Duration::from_secs(213)),
+            Duration::from_secs(position),
+            control.clone(),
+        )
+        .unwrap();
+        assert_eq!(prepared.source.channels().get(), 2);
+        assert_eq!(prepared.source.sample_rate().get(), 48_000);
+        let error = prepared.error.clone();
+        let (count, nonzero, finite) =
+            prepared
+                .source
+                .fold((0_u64, false, true), |(count, nonzero, finite), sample| {
+                    (
+                        count + 1,
+                        nonzero || sample.abs() > 0.00001,
+                        finite && sample.is_finite(),
+                    )
+                });
+        // The nonblocking production source can inject buffering silence when
+        // consumed faster than an output device. Count decoded PCM separately.
+        let synthetic =
+            (control.synthetic_silence_duration().as_secs_f64() * 96_000.0).round() as u64;
+        let pcm = count.saturating_sub(synthetic);
+        assert!(pcm > 48_000 * 2 && nonzero && finite);
+        assert!(control.fully_decoded());
+        assert!(error.lock().unwrap().is_none());
+        println!("AAC-LC application reader: start={position}s PCM_samples={pcm} decoded=true");
+    }
+    assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 0);
+    let requests = fixture.requests();
+    assert!(requests
+        .iter()
+        .any(|request| request["range"] != "bytes=0-"));
+    for request in requests {
+        assert_eq!(request["referer"], "https://www.bilibili.com/");
+        assert!(!request.contains_key("cookie"));
+    }
+}
+
+#[test]
 fn reported_io_failure_does_not_verify_a_decoded_stream() {
     let cache = TestCache::new();
     fs::write(cache_paths(&cache.0, "reported-failure").0, wav()).unwrap();

@@ -4,10 +4,22 @@ use crate::app::prelude::*;
 
 impl Drop for NavidromeApp {
     fn drop(&mut self) {
+        self.state.settings.bilibili_login.cancel();
+        // Closing the receiver rejects even store completions arriving during
+        // shutdown, allowing their staging guards to roll back their entries.
+        let (_, closed_rx) = mpsc::channel();
+        drop(std::mem::replace(&mut self.rx, closed_rx));
         self.save_playback_before_exit();
         // Close the bounded frame channel before Runtime::drop waits for its
         // blocking worker; otherwise a producer could wait on a full queue.
         self.vinyl_cover.cancel_pending();
+        let _ = self.runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(30),
+                secrets::source_credentials::settle_staging(),
+            )
+            .await
+        });
     }
 }
 
@@ -37,8 +49,25 @@ impl NavidromeApp {
             .active_profile()
             .map(|profile| profile.resolved_password())
             .unwrap_or_default();
-        let api =
-            OpenSubsonicProvider::new(&config.server_url, &config.username, &active_password).ok();
+        let api = config.active_source.as_ref().and_then(|source| {
+            crate::app::playback::source_context::configured_source(&config, source)
+        });
+        let playback_source = config
+            .playback_source
+            .as_ref()
+            .and_then(|source| {
+                crate::app::playback::source_context::configured_source(&config, source)
+            })
+            .or_else(|| {
+                config
+                    .playback_source
+                    .is_none()
+                    .then(|| api.clone())
+                    .flatten()
+            });
+        if let Some(api) = &playback_source {
+            config.playback_source = Some(api.id().clone());
+        }
         let (tx, rx) = mpsc::channel();
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
@@ -115,14 +144,32 @@ impl NavidromeApp {
             })
             .collect();
 
+        let initial_bilibili_proxy = config
+            .sources
+            .iter()
+            .find_map(|profile| match profile {
+                crate::source::SourceProfile::Bilibili { proxy, .. } => proxy.clone(),
+                _ => None,
+            })
+            .unwrap_or_default();
         let mut app = Self {
+            bilibili_accounts: HashMap::new(),
+            bilibili_proxy_input: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("http://172.16.15.251:7890")
+                    .default_value(initial_bilibili_proxy)
+            }),
             runtime,
+            playback_source,
+            playback_server: None,
             api,
             config,
             tx,
             rx,
             audio,
             preload: PreloadState::default(),
+            start_resolution: Default::default(),
+            preload_resolution: Default::default(),
             media_session,
             global_shortcuts,
             default_cover,
@@ -273,15 +320,19 @@ impl NavidromeApp {
 
         if app.api.is_some() {
             app.refresh_library();
+        } else if app.browsing_bilibili() {
+            app.state.view = View::Playlists;
+            app.state.status = t!("Verifying Bilibili account…").to_string();
         } else {
             app.state.status = t!("Open Settings to configure the server").to_string();
         }
-        if app.config.username.trim().is_empty() {
+        if app.config.username.trim().is_empty() && !app.browsing_bilibili() {
             app.state.status = t!("Configure your Navidrome server").to_string();
             app.state.settings.open = true;
         }
 
         Self::start_polling(window, cx);
+        app.restore_bilibili_accounts();
 
         app
     }

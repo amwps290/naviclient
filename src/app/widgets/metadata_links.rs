@@ -59,10 +59,20 @@ impl NavidromeApp {
         song: &Song,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        match album_for_song(song) {
-            Some(album) => self.clickable_meta(id, display_name, cx, move |this| {
-                this.open_album(album.clone());
-            }),
+        if let Some(part) = &song.bilibili_part {
+            return div()
+                .min_w_0()
+                .truncate()
+                .child(format!("P{}/{} · {}", part.index, part.count, part.title))
+                .into_any_element();
+        }
+        match album_for_song(song).filter(|_| self.browsing_owns_song(song)) {
+            Some(_) => {
+                let song = song.clone();
+                self.clickable_meta(id, display_name, cx, move |this| {
+                    this.open_song_album(&song);
+                })
+            }
             None => div()
                 .min_w_0()
                 .truncate()
@@ -78,10 +88,20 @@ impl NavidromeApp {
         song: &Song,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        match artist_for_song(song) {
-            Some(artist) => self.clickable_meta(id, song.artist.clone(), cx, move |this| {
-                this.open_artist(artist.clone());
-            }),
+        if let Some(part) = &song.bilibili_part {
+            return div()
+                .min_w_0()
+                .truncate()
+                .child(t!("Uploader: %{name}", name = part.uploader))
+                .into_any_element();
+        }
+        match artist_for_song(song).filter(|_| self.browsing_owns_song(song)) {
+            Some(_) => {
+                let song = song.clone();
+                self.clickable_meta(id, song.artist.clone(), cx, move |this| {
+                    this.open_song_artist(&song);
+                })
+            }
             None => div()
                 .min_w_0()
                 .truncate()

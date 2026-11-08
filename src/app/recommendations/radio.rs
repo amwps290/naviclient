@@ -23,14 +23,15 @@ impl NavidromeApp {
     }
 
     fn start_radio(&mut self, seed: RadioSeed, initial_song: Song) {
-        let Some(api) = self.api.clone() else {
+        let Some(api) = self
+            .source_for_song(&initial_song)
+            .cloned()
+            .filter(|api| api.capabilities().recommendations)
+        else {
             self.notify_error(t!("Configure a server before playing"));
             return;
         };
-        let Some(server_id) = self.config.active_server_id().map(str::to_string) else {
-            self.notify_error(t!("Configure a server before playing"));
-            return;
-        };
+        let server_id = api.id().profile_id.clone();
         let origin = if matches!(seed, RadioSeed::Artist(_)) {
             QueueOrigin::ArtistRadio
         } else {
@@ -50,9 +51,8 @@ impl NavidromeApp {
         self.save_session();
 
         let capabilities = self
-            .state
-            .connection
-            .server()
+            .playback_server
+            .as_ref()
             .map(|server| server.capabilities)
             .unwrap_or_default();
         let common = self.recommendation_generation_context(
@@ -96,7 +96,7 @@ impl NavidromeApp {
     ) {
         let Some(result) = self.state.radio.complete(
             &request,
-            self.config.active_server_id(),
+            self.session.server_id(),
             self.state.queue_index,
             &self.state.queue,
             self.state.now_playing.as_ref(),

@@ -64,11 +64,39 @@ impl PlaybackReconnect {
         position: Duration,
         now: Instant,
     ) -> ReconnectDecision {
+        self.schedule_with_budget(
+            occurrence,
+            failure,
+            position,
+            now,
+            PLAYBACK_RECONNECT_ATTEMPTS,
+        )
+    }
+
+    /// A CDN rejection can indicate an expired signed URL. Resolve once; an
+    /// API permission/region/auth failure stops before another audio request.
+    pub(in crate::app) fn schedule_resource_refresh(
+        &mut self,
+        occurrence: PlaybackId,
+        position: Duration,
+        now: Instant,
+    ) -> ReconnectDecision {
+        self.schedule_with_budget(occurrence, Some(StreamFailure::Connect), position, now, 1)
+    }
+
+    fn schedule_with_budget(
+        &mut self,
+        occurrence: PlaybackId,
+        failure: Option<StreamFailure>,
+        position: Duration,
+        now: Instant,
+        budget: u8,
+    ) -> ReconnectDecision {
         let previous = self
             .context()
             .filter(|context| context.occurrence == occurrence)
             .map_or(0, |context| context.attempt);
-        let decision = reconnect_decision(failure, previous, PLAYBACK_RECONNECT_ATTEMPTS);
+        let decision = reconnect_decision(failure, previous, budget);
         self.phase = match decision {
             ReconnectDecision::Retry { attempt, delay } => ReconnectPhase::Waiting {
                 context: RetryContext {

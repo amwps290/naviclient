@@ -9,12 +9,14 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 
-use super::decoder::{play_url, PreparedStream};
+#[cfg(test)]
+use super::decoder::play_url;
+use super::decoder::{play_resource, PreparedStream};
 use super::stream_control::StreamControl;
 
 struct Job {
     id: u64,
-    url: String,
+    url: crate::source::HttpResource,
     cache_key: String,
     cache_dir: PathBuf,
     duration: Option<Duration>,
@@ -62,9 +64,9 @@ impl Preloader {
                     }
                     pending.job.take().unwrap()
                 };
-                let result = play_url(
+                let result = play_resource(
                     client.clone(),
-                    &job.url,
+                    job.url,
                     &job.cache_dir,
                     &job.cache_key,
                     job.duration,
@@ -87,7 +89,7 @@ impl Preloader {
     pub(super) fn request(
         &mut self,
         id: u64,
-        url: String,
+        url: crate::source::HttpResource,
         cache_key: String,
         duration: Option<Duration>,
         cache_dir: PathBuf,

@@ -64,6 +64,12 @@ impl NavidromeApp {
     ) -> PopupMenu {
         self.playlist_ui.menu_focus = Some(menu.focus_handle(cx));
         let song = context.song;
+        let browsing_owner = self.browsing_owns_song(&song);
+        let capabilities = self
+            .api
+            .as_ref()
+            .map(MusicSource::capabilities)
+            .unwrap_or_default();
         let play = context.source.clone();
         menu = menu.item(PopupMenuItem::new(t!("Play now")).on_click(cx.listener(
             move |this, _, _, cx| {
@@ -103,65 +109,115 @@ impl NavidromeApp {
                 cx.notify();
             },
         )));
-        let radio_seed = song.clone();
-        let radio_loading = self.song_radio_loading(&song.id);
-        menu = menu.item(
-            PopupMenuItem::new(if radio_loading {
-                t!("Building song radio…")
+        let is_bilibili = song
+            .source
+            .as_ref()
+            .is_some_and(|source| source.provider == crate::source::ProviderKind::Bilibili);
+        if let (Some(part), SongMenuSource::Library { songs, .. }) =
+            (&song.bilibili_part, &context.source)
+        {
+            let parts = songs
+                .iter()
+                .filter(|candidate| {
+                    candidate.source == song.source
+                        && candidate
+                            .bilibili_part
+                            .as_ref()
+                            .is_some_and(|candidate| candidate.bvid == part.bvid)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Play all parts of this video")).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.replace_queue_and_play(parts.clone(), 0, QueueOrigin::Playlist);
+                        cx.notify();
+                    },
+                )),
+            );
+        }
+        if !is_bilibili {
+            let radio_seed = song.clone();
+            let radio_loading = self.song_radio_loading(&song.id);
+            menu = menu.item(
+                PopupMenuItem::new(if radio_loading {
+                    t!("Building song radio…")
+                } else {
+                    t!("Start song radio")
+                })
+                .disabled(
+                    self.source_for_song(&song)
+                        .is_none_or(|api| !api.capabilities().recommendations)
+                        || radio_loading,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_song_radio(radio_seed.clone());
+                    cx.notify();
+                })),
+            );
+            let add = song.clone();
+            menu = menu.separator().item(
+                PopupMenuItem::new(t!("Add to playlist…"))
+                    .disabled(
+                        self.state.playlists.editing()
+                            || !browsing_owner
+                            || !capabilities.playlist_write,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.browsing_owns_song(&add) {
+                            this.choose_playlist(vec![add.id.clone()], window, cx)
+                        }
+                    })),
+            );
+            let key = FavoriteKey::new(FavoriteKind::Song, &song.id);
+            let label = if self.state.favorites.is_starred(&key) {
+                t!("Remove from favorites")
             } else {
-                t!("Start song radio")
-            })
-            .disabled(self.api.is_none() || radio_loading)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.start_song_radio(radio_seed.clone());
-                cx.notify();
-            })),
-        );
-        let add = song.id.clone();
-        menu = menu.separator().item(
-            PopupMenuItem::new(t!("Add to playlist…"))
-                .disabled(self.state.playlists.editing() || self.api.is_none())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.choose_playlist(vec![add.clone()], window, cx)
-                })),
-        );
-        let key = FavoriteKey::new(FavoriteKind::Song, &song.id);
-        let label = if self.state.favorites.is_starred(&key) {
-            t!("Remove from favorites")
-        } else {
-            t!("Add to favorites")
-        };
-        let favorite_id = song.id.clone();
-        menu = menu.item(
-            PopupMenuItem::new(label)
-                .disabled(self.state.favorites.is_pending(&key))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_favorite(FavoriteKey::new(FavoriteKind::Song, &favorite_id));
-                    cx.notify();
-                })),
-        );
-        // 与行内可点击的艺术家/专辑名一致：菜单也提供导航入口，
-        // 缺少服务器 id（如整理过的杂项曲库）时禁用。
-        let song_for_artist = song.clone();
-        let artist_available = artist_for_song(&song).is_some();
-        menu = menu.item(
-            PopupMenuItem::new(t!("Go to artist"))
-                .disabled(!artist_available)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_song_artist(&song_for_artist);
-                    cx.notify();
-                })),
-        );
-        let song_for_album = song.clone();
-        let album_available = album_for_song(&song).is_some();
-        menu = menu.item(
-            PopupMenuItem::new(t!("Go to album"))
-                .disabled(!album_available)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_song_album(&song_for_album);
-                    cx.notify();
-                })),
-        );
+                t!("Add to favorites")
+            };
+            let favorite_song = song.clone();
+            menu = menu.item(
+                PopupMenuItem::new(label)
+                    .disabled(
+                        self.state.favorites.is_pending(&key)
+                            || !browsing_owner
+                            || !capabilities.favorite_write,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.browsing_owns_song(&favorite_song) {
+                            this.toggle_favorite(FavoriteKey::new(
+                                FavoriteKind::Song,
+                                &favorite_song.id,
+                            ));
+                        }
+                        cx.notify();
+                    })),
+            );
+            // 与行内可点击的艺术家/专辑名一致：菜单也提供导航入口，
+            // 缺少服务器 id（如整理过的杂项曲库）时禁用。
+            let song_for_artist = song.clone();
+            let artist_available =
+                browsing_owner && capabilities.library && artist_for_song(&song).is_some();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Go to artist"))
+                    .disabled(!artist_available)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_song_artist(&song_for_artist);
+                        cx.notify();
+                    })),
+            );
+            let song_for_album = song.clone();
+            let album_available =
+                browsing_owner && capabilities.library && album_for_song(&song).is_some();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Go to album"))
+                    .disabled(!album_available)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_song_album(&song_for_album);
+                        cx.notify();
+                    })),
+            );
+        }
         let song_for_info = song.clone();
         menu = menu
             .separator()
@@ -176,6 +232,9 @@ impl NavidromeApp {
             playlist: Some(playlist),
         } = context.source
         {
+            if is_bilibili {
+                return menu;
+            }
             let disabled = self.state.playlists.editing()
                 || self.state.playlists.detail_loading()
                 || !can_edit(&playlist, &self.config.username);

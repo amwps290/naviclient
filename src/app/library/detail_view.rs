@@ -282,7 +282,8 @@ impl NavidromeApp {
         };
         let rename = playlist.clone();
         let delete = playlist.clone();
-        let read_only = !crate::playlist::can_edit(playlist, &self.config.username);
+        let bilibili = self.browsing_bilibili();
+        let read_only = bilibili || !crate::playlist::can_edit(playlist, &self.config.username);
         let edit_disabled =
             read_only || self.state.playlists.editing() || self.state.playlists.detail_loading();
         let playback_disabled =
@@ -290,7 +291,12 @@ impl NavidromeApp {
         let padding = self.shell_layout(window).page_padding;
         let hero = self.render_detail_hero(
             DetailHero {
-                kind: t!("Playlist").into(),
+                kind: if bilibili {
+                    t!("Bilibili favorite folder")
+                } else {
+                    t!("Playlist")
+                }
+                .into(),
                 title: playlist.name.clone().into(),
                 cover_id: playlist.cover_art.clone(),
                 round_cover: false,
@@ -327,22 +333,26 @@ impl NavidromeApp {
                                 cx.notify();
                             })),
                     )
-                    .child(
-                        capsule_button("rename-playlist")
-                            .label(t!("Rename"))
-                            .disabled(edit_disabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.name_playlist(Some(rename.clone()), vec![], window, cx)
-                            })),
-                    )
-                    .child(
-                        capsule_button("delete-playlist")
-                            .label(t!("Delete"))
-                            .disabled(edit_disabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.delete_playlist(delete.clone(), window, cx)
-                            })),
-                    )
+                    .when(!bilibili, |this| {
+                        this.child(
+                            capsule_button("rename-playlist")
+                                .label(t!("Rename"))
+                                .disabled(edit_disabled)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.name_playlist(Some(rename.clone()), vec![], window, cx)
+                                })),
+                        )
+                    })
+                    .when(!bilibili, |this| {
+                        this.child(
+                            capsule_button("delete-playlist")
+                                .label(t!("Delete"))
+                                .disabled(edit_disabled)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.delete_playlist(delete.clone(), window, cx)
+                                })),
+                        )
+                    })
                     .child(
                         Button::new("refresh-playlist")
                             .icon(AppIcon::Refresh)
@@ -381,7 +391,11 @@ impl NavidromeApp {
                             .child(if self.state.playlists.editing() {
                                 t!("Saving playlist…")
                             } else if self.state.playlists.detail_loading() {
-                                t!("Loading playlist…")
+                                if bilibili { t!("Loading all favorite pages and parts…") } else { t!("Loading playlist…") }
+                            } else if let Some(error) = self.state.playlists.detail_error() {
+                                std::borrow::Cow::Owned(error.to_string())
+                            } else if bilibili {
+                                t!("All pages loaded · Video order and part order preserved")
                             } else if read_only {
                                 t!("Shared playlist · Only the owner can edit it.")
                             } else if self.state.playlists.songs().is_empty() {

@@ -16,6 +16,19 @@ pub(in crate::app) struct PlaylistLibrary {
     list_load: LibraryLoad,
     detail_load: LibraryLoad,
     edits: PlaylistEdits,
+    list_task: Option<tokio::task::AbortHandle>,
+    detail_task: Option<tokio::task::AbortHandle>,
+}
+
+impl Drop for PlaylistLibrary {
+    fn drop(&mut self) {
+        if let Some(task) = self.list_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.detail_task.take() {
+            task.abort();
+        }
+    }
 }
 
 impl PlaylistLibrary {
@@ -46,6 +59,10 @@ impl PlaylistLibrary {
         self.list_load.loading()
     }
 
+    pub(in crate::app) fn list_error(&self) -> Option<&str> {
+        self.list_load.error()
+    }
+
     pub(in crate::app) fn detail_loading(&self) -> bool {
         self.detail_load.loading()
     }
@@ -55,15 +72,33 @@ impl PlaylistLibrary {
     }
 
     pub(in crate::app) fn select(&mut self, playlist: Playlist) {
+        if let Some(task) = self.detail_task.take() {
+            task.abort();
+        }
         self.selected = Some(PlaylistDetails {
             playlist,
             songs: Vec::new(),
+            unavailable_count: 0,
         });
         self.detail_load = LibraryLoad::default();
     }
 
     pub(in crate::app) fn begin_list(&mut self, requests: &mut LibraryRequests) -> LibraryRequest {
+        if let Some(task) = self.list_task.take() {
+            task.abort();
+        }
         self.list_load.begin(requests)
+    }
+
+    pub(in crate::app) fn attach_list(&mut self, task: tokio::task::AbortHandle) {
+        self.list_task = Some(task);
+    }
+    pub(in crate::app) fn attach_detail(&mut self, task: tokio::task::AbortHandle) {
+        self.detail_task = Some(task);
+    }
+
+    pub(in crate::app) fn detail_error(&self) -> Option<&str> {
+        self.detail_load.error()
     }
 
     pub(in crate::app) fn complete_list(
@@ -86,6 +121,9 @@ impl PlaylistLibrary {
         requests: &mut LibraryRequests,
     ) -> Option<LibraryRequest> {
         self.selected.as_ref()?;
+        if let Some(task) = self.detail_task.take() {
+            task.abort();
+        }
         Some(self.detail_load.begin(requests))
     }
 
@@ -156,6 +194,12 @@ impl PlaylistLibrary {
     }
 
     fn invalidate_reads(&mut self) {
+        if let Some(task) = self.list_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.detail_task.take() {
+            task.abort();
+        }
         self.list_load = LibraryLoad::default();
         self.detail_load = LibraryLoad::default();
     }

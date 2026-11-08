@@ -9,9 +9,10 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use super::json::{read_json_at, write_json_atomic};
 use super::migration::migrate_legacy_playback_mode;
-use super::paths::{config_dir, server_scope};
+use super::paths::{config_dir, server_scope, source_scope};
 use crate::models::{Genre, ListeningHistory, PlaybackSession};
 use crate::recommendation::DailyMixSnapshot;
+use crate::source::{ProviderKind, SourceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum CacheKind {
@@ -56,6 +57,10 @@ impl CacheKind {
 /// performed by the background saver rather than while submitting on the UI.
 #[derive(Clone)]
 pub(crate) enum CacheSnapshot {
+    Scoped {
+        source: SourceId,
+        snapshot: Box<CacheSnapshot>,
+    },
     Session(PlaybackSession),
     Loudness(HashMap<String, (f32, f32)>),
     Genres(Vec<Genre>),
@@ -64,8 +69,29 @@ pub(crate) enum CacheSnapshot {
 }
 
 impl CacheSnapshot {
+    pub(crate) fn scoped(source: SourceId, snapshot: impl Into<Self>) -> Self {
+        Self::Scoped {
+            source,
+            snapshot: Box::new(snapshot.into()),
+        }
+    }
+
+    pub(crate) fn source(&self) -> Option<&SourceId> {
+        match self {
+            Self::Scoped { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn value(&self) -> &Self {
+        match self {
+            Self::Scoped { snapshot, .. } => snapshot.value(),
+            _ => self,
+        }
+    }
     pub(super) fn kind(&self) -> CacheKind {
         match self {
+            Self::Scoped { snapshot, .. } => snapshot.kind(),
             Self::Session(_) => CacheKind::Session,
             Self::Loudness(_) => CacheKind::Loudness,
             Self::Genres(_) => CacheKind::Genres,
@@ -87,6 +113,17 @@ struct ServerCache {
 }
 
 impl ServerCache {
+    fn for_source(dir: PathBuf, source: &SourceId) -> Self {
+        let dir = if source.provider == ProviderKind::OpenSubsonic {
+            dir
+        } else {
+            dir.join("sources").join(source.cache_namespace())
+        };
+        Self {
+            dir,
+            scope: source_scope(source),
+        }
+    }
     fn new(dir: PathBuf, server_id: Option<&str>) -> Self {
         Self {
             dir,
@@ -118,6 +155,9 @@ impl ServerCache {
     fn save_snapshot(&self, snapshot: &CacheSnapshot) -> Result<()> {
         let kind = snapshot.kind();
         match snapshot {
+            CacheSnapshot::Scoped { source, snapshot } => {
+                Self::for_source(self.dir.clone(), source).save_snapshot(snapshot.value())
+            }
             CacheSnapshot::Session(value) => self.save(kind, value),
             CacheSnapshot::Loudness(value) => self.save(kind, value),
             CacheSnapshot::Genres(value) => self.save(kind, value),
@@ -192,35 +232,63 @@ fn read_session_at(path: &Path) -> Option<PlaybackSession> {
     serde_json::from_value(value).ok()
 }
 
-pub fn load_loudness(server_id: Option<&str>) -> HashMap<String, (f32, f32)> {
-    ServerCache::current(server_id).loudness()
-}
-
 pub fn load_genres_cache(server_id: Option<&str>) -> Option<Vec<Genre>> {
     ServerCache::current(server_id).genres()
-}
-
-pub fn load_session(server_id: Option<&str>, server_url: &str) -> Option<PlaybackSession> {
-    ServerCache::current(server_id).session(server_url)
-}
-
-pub fn load_listening_history(server_id: Option<&str>) -> ListeningHistory {
-    ServerCache::current(server_id)
-        .load(CacheKind::ListeningHistory)
-        .unwrap_or_default()
 }
 
 pub fn load_daily_mix(server_id: Option<&str>) -> Option<DailyMixSnapshot> {
     ServerCache::current(server_id).load(CacheKind::DailyMix)
 }
 
-pub(super) fn save_snapshot(server_id: Option<&str>, snapshot: &CacheSnapshot) -> Result<()> {
-    ServerCache::current(server_id).save_snapshot(snapshot)
+fn source_session(
+    cache: &ServerCache,
+    source: &SourceId,
+    server_url: Option<&str>,
+) -> Option<PlaybackSession> {
+    let session = if source.provider == ProviderKind::OpenSubsonic {
+        cache.session(server_url?)
+    } else {
+        cache.load(CacheKind::Session)
+    }?;
+    session
+        .matches_source(source, server_url)
+        .then_some(session)
 }
 
-/// Cover and audio files retain their content hashes and separate eviction policy.
-pub fn remove_server_cache(server_id: &str) -> usize {
-    ServerCache::current(Some(server_id)).remove()
+pub fn load_source_session(source: &SourceId, server_url: Option<&str>) -> Option<PlaybackSession> {
+    source_session(
+        &ServerCache::for_source(config_dir(), source),
+        source,
+        server_url,
+    )
+}
+
+pub fn load_source_history(source: &SourceId) -> ListeningHistory {
+    let mut history: ListeningHistory = ServerCache::for_source(config_dir(), source)
+        .load(CacheKind::ListeningHistory)
+        .unwrap_or_default();
+    history.events.retain(|event| event.song.belongs_to(source));
+    for event in &mut history.events {
+        event.song.source = Some(source.clone());
+    }
+    history
+}
+
+pub fn load_source_loudness(source: &SourceId) -> HashMap<String, (f32, f32)> {
+    let cache = ServerCache::for_source(config_dir(), source);
+    if source.provider == ProviderKind::OpenSubsonic {
+        cache.loudness()
+    } else {
+        cache.load(CacheKind::Loudness).unwrap_or_default()
+    }
+}
+
+pub fn remove_source_cache(source: &SourceId) -> usize {
+    ServerCache::for_source(config_dir(), source).remove()
+}
+
+pub(super) fn save_snapshot(server_id: Option<&str>, snapshot: &CacheSnapshot) -> Result<()> {
+    ServerCache::current(server_id).save_snapshot(snapshot)
 }
 
 #[cfg(test)]

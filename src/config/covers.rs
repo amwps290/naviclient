@@ -7,6 +7,7 @@ use md5::{Digest, Md5};
 
 use super::{cover_cache_dir, server_scope};
 use crate::models::Config;
+use crate::source::{ProviderKind, SourceId};
 
 /// 由服务器作用域 + 封面 id 派生缓存文件名。
 ///
@@ -21,8 +22,32 @@ pub fn cover_cache_file_name(server_id: Option<&str>, cover_id: &str) -> String 
 }
 
 /// 封面缓存的完整路径，通知图标等需要读原文件的场景直接复用。
+#[cfg(test)]
 pub fn cover_cache_path(config: &Config, server_id: Option<&str>, cover_id: &str) -> PathBuf {
-    cover_cache_dir(config).join(super::cover_cache_file_name(server_id, cover_id))
+    cover_cache_dir(config).join(cover_cache_file_name(server_id, cover_id))
+}
+
+pub fn source_cover_cache_path(config: &Config, source: &SourceId, cover_id: &str) -> PathBuf {
+    let name = if source.provider == ProviderKind::OpenSubsonic {
+        cover_cache_file_name(Some(&source.profile_id), cover_id)
+    } else {
+        let mut hash = Md5::new();
+        hash.update(cover_id.as_bytes());
+        format!("{}-{:x}.cover", source.cache_namespace(), hash.finalize())
+    };
+    cover_cache_dir(config).join(name)
+}
+
+pub fn read_source_cover_cache(
+    config: &Config,
+    source: &SourceId,
+    cover_id: &str,
+) -> Option<Vec<u8>> {
+    read_cover_at(&source_cover_cache_path(config, source, cover_id))
+}
+
+pub fn write_source_cover_cache(config: &Config, source: &SourceId, cover_id: &str, bytes: &[u8]) {
+    write_cover_at(&source_cover_cache_path(config, source, cover_id), bytes);
 }
 
 /// 读取缓存的原封字节；文件缺失或读取失败按未命中处理。
@@ -85,6 +110,7 @@ fn prune_cover_cache_at(dir: &Path, max_bytes: u64) -> u64 {
 
 /// 读取封面磁盘缓存；未命中返回 None。
 /// 同一封面 id 只保留一份原始响应字节；请求尺寸调整不影响旧缓存兼容性。
+#[cfg(test)]
 pub fn read_cover_cache(
     config: &Config,
     server_id: Option<&str>,
@@ -94,6 +120,7 @@ pub fn read_cover_cache(
 }
 
 /// 下载成功后写入封面磁盘缓存。
+#[cfg(test)]
 pub fn write_cover_cache(config: &Config, server_id: Option<&str>, cover_id: &str, bytes: &[u8]) {
     write_cover_at(&cover_cache_path(config, server_id, cover_id), bytes);
 }

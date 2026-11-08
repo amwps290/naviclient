@@ -79,3 +79,98 @@ pub fn delete(target: &str) -> bool {
     let deleted = unsafe { CredDeleteW(target_wide.as_ptr(), CRED_TYPE_GENERIC, 0) };
     deleted == OK
 }
+
+// Strict binary adapter for provider sessions, separate from password fallback.
+pub(super) fn store_source(
+    target: &str,
+    secret: &[u8],
+) -> super::source_credentials::StoreResult<()> {
+    use super::source_credentials::CredentialError;
+    if secret.len() > 2560 {
+        return Err(CredentialError::Invalid);
+    }
+    let target_wide = to_wide(target);
+    let username_wide = to_wide("Bilibili");
+    let credential = CREDENTIALW {
+        Type: CRED_TYPE_GENERIC,
+        TargetName: target_wide.as_ptr() as _,
+        CredentialBlobSize: secret.len() as u32,
+        CredentialBlob: secret.as_ptr() as _,
+        Persist: CRED_PERSIST_LOCAL_MACHINE,
+        UserName: username_wide.as_ptr() as _,
+        ..Default::default()
+    };
+    if unsafe { CredWriteW(&credential, 0) } != OK {
+        return Err(CredentialError::Unavailable);
+    }
+    Ok(())
+}
+
+pub(super) fn load_source(
+    target: &str,
+) -> super::source_credentials::StoreResult<zeroize::Zeroizing<Vec<u8>>> {
+    use super::source_credentials::CredentialError;
+    let target_wide = to_wide(target);
+    let mut credential: *mut CREDENTIALW = std::ptr::null_mut();
+    if unsafe { CredReadW(target_wide.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) } != OK {
+        return Err(if unsafe { GetLastError() } == 1168 {
+            CredentialError::Missing
+        } else {
+            CredentialError::Unavailable
+        });
+    }
+    let result = unsafe {
+        let credential_ref = &*credential;
+        if credential_ref.CredentialBlobSize == 0 || credential_ref.CredentialBlob.is_null() {
+            Err(CredentialError::Invalid)
+        } else {
+            Ok(zeroize::Zeroizing::new(
+                std::slice::from_raw_parts(
+                    credential_ref.CredentialBlob,
+                    credential_ref.CredentialBlobSize as usize,
+                )
+                .to_vec(),
+            ))
+        }
+    };
+    unsafe {
+        CredFree(credential.cast());
+    }
+    result
+}
+
+pub(super) fn delete_source(target: &str) -> super::source_credentials::StoreResult<()> {
+    if delete(target) || unsafe { GetLastError() } == 1168 {
+        Ok(())
+    } else {
+        Err(super::source_credentials::CredentialError::Unavailable)
+    }
+}
+
+pub(super) fn delete_source_scope(scope: &str) -> super::source_credentials::StoreResult<()> {
+    use super::source_credentials::CredentialError;
+    use windows_sys::Win32::Security::Credentials::CredEnumerateW;
+    let filter = to_wide(&format!("{scope}*"));
+    let mut count = 0;
+    let mut credentials: *mut *mut CREDENTIALW = std::ptr::null_mut();
+    if unsafe { CredEnumerateW(filter.as_ptr(), 0, &mut count, &mut credentials) } != OK {
+        return if unsafe { GetLastError() } == 1168 {
+            Ok(())
+        } else {
+            Err(CredentialError::Unavailable)
+        };
+    }
+    let mut result = Ok(());
+    for index in 0..count as usize {
+        let target = unsafe { (**credentials.add(index)).TargetName };
+        if unsafe { CredDeleteW(target, CRED_TYPE_GENERIC, 0) } != OK
+            && unsafe { GetLastError() } != 1168
+        {
+            result = Err(CredentialError::Unavailable);
+        }
+    }
+    unsafe {
+        CredFree(credentials.cast());
+    }
+    result
+}

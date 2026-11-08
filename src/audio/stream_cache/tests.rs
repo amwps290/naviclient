@@ -1,6 +1,61 @@
 use super::*;
 use crate::audio::preload::tests::TestCache;
 
+#[test]
+fn temporary_cache_is_bounded_ignores_persistent_files_and_never_publishes() {
+    for limit in [0, 3, 20] {
+        let cache = TestCache::new();
+        let (complete, part) = cache_paths(&cache.0, "song");
+        fs::write(&complete, b"old persistent bytes").unwrap();
+        fs::write(&part, b"old partial bytes").unwrap();
+        let mut stream = StreamCache::open_with_policy(
+            &cache.0,
+            "song",
+            StreamControl::new(false),
+            CachePolicy::Temporary { max_bytes: limit },
+        )
+        .unwrap();
+        assert!(!stream.complete());
+        stream.prepare_partial(Some(5), true);
+        stream.append(0, b"audio");
+        assert_eq!(stream.cached_len(), limit.min(5));
+        assert_eq!(
+            stream
+                .file
+                .as_ref()
+                .map_or(0, |file| file.metadata().unwrap().len()),
+            limit.min(5)
+        );
+        if limit > 0 {
+            assert_eq!(read_all(&mut stream), &b"audio"[..limit.min(5) as usize]);
+        }
+        drop(stream);
+        assert_eq!(fs::read(&complete).unwrap(), b"old persistent bytes");
+        assert_eq!(fs::read(&part).unwrap(), b"old partial bytes");
+        assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 2);
+    }
+}
+
+#[test]
+fn temporary_foreground_and_preload_readers_cannot_share_scratch_bytes() {
+    let cache = TestCache::new();
+    let policy = CachePolicy::Temporary { max_bytes: 10 };
+    let mut active =
+        StreamCache::open_with_policy(&cache.0, "same", StreamControl::new(false), policy).unwrap();
+    let mut next =
+        StreamCache::open_with_policy(&cache.0, "same", StreamControl::new(true), policy).unwrap();
+    active.prepare_partial(Some(5), true);
+    next.prepare_partial(Some(5), true);
+    active.append(0, b"first");
+    next.append(0, b"other");
+    assert_eq!(read_all(&mut active), b"first");
+    assert_eq!(read_all(&mut next), b"other");
+    drop(next);
+    assert_eq!(read_all(&mut active), b"first");
+    drop(active);
+    assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 0);
+}
+
 fn partial(cache: &TestCache, control: Arc<StreamControl>, len: Option<u64>) -> StreamCache {
     let mut stream = StreamCache::open(&cache.0, "song", control).unwrap();
     stream.prepare_partial(len, true);

@@ -6,7 +6,7 @@ use crate::app::prelude::*;
 impl NavidromeApp {
     pub(in crate::app) fn media_capabilities(&self) -> MediaCapabilities {
         MediaCapabilities::for_queue(
-            self.api.is_some(),
+            self.playback_source.is_some(),
             self.state.queue_index,
             self.state.queue.len(),
             self.state.playback_modes,
@@ -17,14 +17,12 @@ impl NavidromeApp {
     pub(in crate::app) fn sync_media_session(&mut self, playback: &PlaybackState) {
         let capabilities = self.media_capabilities();
         let song = self.state.now_playing.as_ref();
-        let cover = song
-            .and_then(|song| song.cover_art.as_ref())
-            .and_then(|id| self.state.covers.image(id));
+        let cover = song.and_then(|song| self.song_cover_image(song)).cloned();
         self.media_session.update(MediaUpdate {
-            server: self.api.as_ref().map_or("", |api| api.base_url()),
+            server: &self.playback_source_key(),
             song,
             occurrence: self.state.occurrence.id(),
-            cover,
+            cover: cover.as_ref(),
             playback,
             position: self
                 .session

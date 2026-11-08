@@ -246,3 +246,28 @@ fn retry_resumes_at_the_failed_profile_and_completed_migrations_never_write_agai
     .is_empty());
     assert_eq!(snapshot(&config), after_success);
 }
+#[test]
+fn browsing_bilibili_does_not_retain_migrated_server_passwords_in_legacy_mirrors() {
+    use crate::source::{ProviderKind, SourceId, SourceProfile};
+    let mut config = Config {
+        servers: vec![profile("nav-account")],
+        ..Config::default()
+    };
+    config.sync_active_profile();
+    config.sources.push(SourceProfile::Bilibili {
+        id: "bili-account".into(),
+        name: String::new(),
+        account_id: None,
+        credential_key: Some("bilibili-credential-reference".into()),
+        proxy: None,
+    });
+    let source = SourceId::new(ProviderKind::Bilibili, "bili-account");
+    assert!(config.switch_source(&source));
+    assert!(!config.password.is_empty());
+    let migrated = migrate_config(&mut config, |_, _, _| Ok(()));
+    assert_eq!(migrated, vec!["nav-account"]);
+    assert!(config.password.is_empty());
+    assert!(config.servers[0].password.is_empty());
+    assert!(config.servers[0].password_in_keyring);
+    assert_eq!(config.active_source, Some(source));
+}

@@ -1,4 +1,41 @@
 use super::*;
+
+#[test]
+fn scoped_snapshots_and_cleanup_are_qualified_by_provider_even_with_equal_scope_strings() {
+    let mailbox = Mailbox::default();
+    let bilibili = SourceId::new(ProviderKind::Bilibili, "profile");
+    let subsonic = SourceId::new(ProviderKind::OpenSubsonic, bilibili.cache_namespace());
+    assert_eq!(source_scope(&bilibili), source_scope(&subsonic));
+    mailbox
+        .submit(
+            Some(&bilibili.profile_id),
+            CacheSnapshot::scoped(bilibili.clone(), PlaybackSession::default()),
+        )
+        .unwrap();
+    mailbox
+        .submit(
+            Some(&subsonic.profile_id),
+            CacheSnapshot::scoped(subsonic.clone(), PlaybackSession::default()),
+        )
+        .unwrap();
+    assert!(mailbox
+        .source_snapshot(&bilibili, CacheKind::Session)
+        .is_some());
+    assert!(mailbox
+        .source_snapshot(&subsonic, CacheKind::Session)
+        .is_some());
+    mailbox.discard_source(&bilibili);
+    assert!(mailbox
+        .source_snapshot(&bilibili, CacheKind::Session)
+        .is_none());
+    assert!(mailbox
+        .source_snapshot(&subsonic, CacheKind::Session)
+        .is_some());
+    let task = mailbox.next().unwrap();
+    assert_eq!(task.snapshot().source(), Some(&subsonic));
+    mailbox.complete(task, None);
+    mailbox.flush().unwrap();
+}
 use crate::models::PlaybackSession;
 use std::sync::mpsc;
 use std::thread;

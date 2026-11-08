@@ -83,7 +83,12 @@ impl NavidromeApp {
                 .rounded(px(tokens::radius::COVER))
                 .hover(|style| style.bg(palette(cx).sunken))
                 .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
-                .child(self.render_cover(song.cover_art.as_deref(), player_cover_size, cx))
+                .child(self.render_song_cover_styled(
+                    song,
+                    player_cover_size,
+                    tokens::radius::COVER,
+                    Vec::new(),
+                ))
                 .child(
                     v_flex()
                         .flex_1()
@@ -162,7 +167,15 @@ impl NavidromeApp {
             .now_playing
             .as_ref()
             .zip(self.state.now_playing_quality)
-            .map(|(song, quality)| playback_technical_info(song, quality));
+            .map(|(song, quality)| {
+                if song.bilibili_part.is_some() {
+                    crate::app::playback::display::bilibili_technical_info(
+                        self.state.now_playing_audio_quality.as_ref(),
+                    )
+                } else {
+                    playback_technical_info(song, quality)
+                }
+            });
         h_flex()
             .w(px(right_controls_width))
             .h(px(40.0))
@@ -211,7 +224,7 @@ impl NavidromeApp {
                     .rounded_full()
                     .toggled(queue_open)
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings.open = false;
+                        this.state.settings.close();
                         this.state.queue_drawer_open = !this.state.queue_drawer_open;
                         if !this.state.queue_drawer_open {
                             this.clear_song_multi();

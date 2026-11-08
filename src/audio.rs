@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::models::EqSettings;
+use crate::source::HttpResource;
 
 mod buffered_stream;
 mod decoder;
@@ -22,6 +23,7 @@ mod output_track;
 mod preload;
 mod preparation;
 mod preparation_state;
+pub(crate) mod probe;
 mod stream_cache;
 mod stream_control;
 mod stream_response;
@@ -108,7 +110,7 @@ impl AudioHandle {
 
     pub fn play(
         &self,
-        url: String,
+        url: HttpResource,
         cache_key: String,
         duration_hint: Option<Duration>,
         gain: f32,
@@ -142,7 +144,7 @@ impl AudioHandle {
     pub fn preload(
         &self,
         id: u64,
-        url: String,
+        url: HttpResource,
         cache_key: String,
         duration_hint: Option<Duration>,
         gain: f32,

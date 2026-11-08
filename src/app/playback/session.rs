@@ -8,10 +8,13 @@ impl NavidromeApp {
         let Some(snapshot) = self.session.snapshot(&self.state, &self.audio.state()) else {
             return;
         };
-        match self
-            .server_cache_writer
-            .submit(self.session.server_id(), snapshot)
-        {
+        let submitted = match self.session.source() {
+            Some(source) => self.server_cache_writer.submit_source(source, snapshot),
+            None => self
+                .server_cache_writer
+                .submit(self.session.server_id(), snapshot),
+        };
+        match submitted {
             Ok(()) => self.session.submitted(std::time::Instant::now()),
             Err(error) => log::warn!("could not queue playback session: {error}"),
         }
@@ -24,6 +27,7 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn save_playback_before_exit(&mut self) {
+        self.start_resolution.cancel();
         self.cancel_next_preload();
         self.finish_listening_event(false);
         self.save_session();
@@ -44,12 +48,9 @@ impl NavidromeApp {
             return;
         }
         self.config.playback_modes = self.state.playback_modes;
-        let cover = self
-            .state
-            .now_playing
-            .as_ref()
-            .and_then(|song| song.cover_art.clone());
-        self.ensure_cover(cover.as_deref(), true);
+        if let Some(song) = self.state.now_playing.clone() {
+            self.ensure_song_cover(&song, true);
+        }
         log::info!(
             "restored playback session; server={:?} queue={} index={:?} position={:.1}s",
             self.session.server_id(),

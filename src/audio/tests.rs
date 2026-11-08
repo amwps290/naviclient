@@ -58,7 +58,7 @@ fn preload_acceptance_preserves_current_playback_and_delivers_the_reservation() 
         panic!("expected one preload command");
     };
     assert_eq!(id, 42);
-    assert_eq!(url, "fixture");
+    assert_eq!(url.url(), "fixture");
     assert_eq!(cache_key, "next");
     assert_eq!(duration_hint, Some(Duration::from_secs(120)));
     assert_eq!(gain, 0.75);

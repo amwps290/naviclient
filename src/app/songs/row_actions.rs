@@ -18,6 +18,7 @@ enum RowPosition {
 pub(in crate::app) struct SongRowTarget {
     scope: SongScope,
     position: RowPosition,
+    source: Option<[u8; 16]>,
 }
 
 impl SongRowTarget {
@@ -26,13 +27,18 @@ impl SongRowTarget {
         scope: SongScope,
         index: usize,
     ) -> Option<Self> {
-        state.songs_for_scope(scope)?.get(index)?;
+        let song = state.songs_for_scope(scope)?.get(index)?;
+        let source = song.source.as_ref().map(|source| source.fingerprint());
         let position = if scope == SongScope::Queue {
             RowPosition::Queue(state.queue.entry_id(index)?)
         } else {
             RowPosition::List(index)
         };
-        Some(Self { scope, position })
+        Some(Self {
+            scope,
+            position,
+            source,
+        })
     }
 
     pub(in crate::app) fn resolve(self, state: &AppState) -> Option<(SongScope, usize)> {
@@ -40,7 +46,10 @@ impl SongRowTarget {
             RowPosition::Queue(entry) => state.queue.index_of(entry)?,
             RowPosition::List(index) => index,
         };
-        state.songs_for_scope(self.scope)?.get(index)?;
+        let song = state.songs_for_scope(self.scope)?.get(index)?;
+        if song.source.as_ref().map(|source| source.fingerprint()) != self.source {
+            return None;
+        }
         Some((self.scope, index))
     }
 

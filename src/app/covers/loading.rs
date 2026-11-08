@@ -10,14 +10,29 @@ const MAX_COVER_PREFETCH_BATCH: usize = 80;
 
 impl NavidromeApp {
     pub(in crate::app) fn ensure_cover(&mut self, cover_id: Option<&str>, want_palette: bool) {
+        let source = self.api.clone();
+        self.ensure_source_cover(source, cover_id, want_palette);
+    }
+
+    pub(in crate::app) fn ensure_song_cover(&mut self, song: &Song, want_palette: bool) {
+        let source = self.source_for_song(song).cloned();
+        self.ensure_source_cover(source, song.cover_art.as_deref(), want_palette);
+    }
+
+    fn ensure_source_cover(
+        &mut self,
+        api: Option<MusicSource>,
+        cover_id: Option<&str>,
+        want_palette: bool,
+    ) {
         let Some(id) = cover_id else { return };
-        if let Some(image) = self.state.covers.image(id) {
+        let Some(api) = api else { return };
+        if let Some(image) = self.state.covers.image(api.id(), id) {
             self.mark_cover_image_used(image);
         }
-        if !self.state.covers.request_needed(id, want_palette) {
+        if !self.state.covers.request_needed(api.id(), id, want_palette) {
             return;
         }
-        let Some(api) = self.api.clone() else { return };
         let url = match api.cover_url(id, COVER_REQUEST_SIZE) {
             Ok(url) => url,
             Err(error) => {
@@ -28,16 +43,16 @@ impl NavidromeApp {
                 return;
             }
         };
-        let Some(request) = self
-            .state
-            .covers
-            .begin(id, want_palette, &mut self.library_requests)
+        let Some(request) =
+            self.state
+                .covers
+                .begin(api.id(), id, want_palette, &mut self.library_requests)
         else {
             return;
         };
         let id = id.to_string();
         let config = self.config.clone();
-        let server_id = self.config.active_server_id().map(str::to_string);
+        let source = api.id().clone();
         let tx = self.tx.clone();
         let cover_slots = self.cover_slots.clone();
         self.spawn_future(async move {
@@ -45,11 +60,11 @@ impl NavidromeApp {
             // 每个任务都会在等待解码许可时持有完整字节，造成明显瞬时内存峰值。
             let _permit = cover_slots.acquire_owned().await;
             // 先查磁盘缓存，命中跳过网络；未命中走网络并回写缓存。
-            let result = match config::read_cover_cache(&config, server_id.as_deref(), &id) {
+            let result = match config::read_source_cover_cache(&config, &source, &id) {
                 Some(bytes) => Ok(bytes),
                 None => match api.get_bytes(&url).await {
                     Ok(bytes) => {
-                        config::write_cover_cache(&config, server_id.as_deref(), &id, &bytes);
+                        config::write_source_cover_cache(&config, &source, &id, &bytes);
                         Ok(bytes)
                     }
                     Err(error) => Err(error_message(error)),
@@ -75,11 +90,24 @@ impl NavidromeApp {
         if let Some(previous) = update.replaced {
             self.queue_cover_asset_release(previous);
         }
-        if let Some(image) = self.state.covers.image(request.id()) {
+        if let Some(image) = self.state.covers.image(request.source(), request.id()) {
             self.mark_cover_image_used(image);
         }
         if update.follow_up_palette {
-            self.ensure_cover(Some(request.id()), true);
+            let api = self.source_by_id(request.source()).cloned();
+            self.ensure_source_cover(api, Some(request.id()), true);
+        }
+    }
+
+    pub(in crate::app) fn prune_source_covers(&mut self) {
+        let sources = self
+            .api
+            .iter()
+            .chain(self.playback_source.iter())
+            .map(|api| api.id().clone())
+            .collect();
+        for image in self.state.covers.retain_sources(&sources) {
+            self.queue_cover_asset_release(image);
         }
     }
 

@@ -10,8 +10,7 @@ impl Render for NavidromeApp {
             .state
             .now_playing
             .as_ref()
-            .and_then(|song| song.cover_art.as_ref())
-            .and_then(|id| self.state.covers.image(id))
+            .and_then(|song| self.song_cover_image(song))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);

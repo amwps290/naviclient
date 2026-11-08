@@ -9,8 +9,8 @@ use super::{
     recommend, RecommendationCandidate, RecommendationGenerationContext, RecommendationKind,
     RecommendationRequest, RecommendedTrack,
 };
-use crate::api::OpenSubsonicProvider;
 use crate::models::{Artist, CapabilitySupport, Song};
+use crate::source::MusicSource;
 
 mod collection;
 
@@ -46,7 +46,7 @@ pub struct RadioGenerationContext {
 }
 
 pub async fn generate_radio(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     context: RadioGenerationContext,
 ) -> Result<Vec<RecommendedTrack>> {
     let (candidates, errors) = collection::collect(

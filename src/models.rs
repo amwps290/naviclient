@@ -8,13 +8,14 @@ mod queue;
 mod server;
 mod shortcuts;
 mod sort;
+pub(crate) mod source;
 
 pub use config::{Config, ServerProfile};
 pub use equalizer::EqSettings;
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
-    Album, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics, Playlist,
-    SearchResults, Song,
+    Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics,
+    Playlist, SearchResults, Song,
 };
 pub use playback::{
     PlayModes, PlaybackId, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,

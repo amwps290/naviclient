@@ -3,13 +3,13 @@ use std::time::{Duration, Instant};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
 use super::*;
-use crate::api::OpenSubsonicProvider;
 use crate::app::playback::occurrence::Selection;
 use crate::app::playback::session_state::SessionState;
 use crate::app::playback::start::{select_state, PreparedStart, StartError, StartTarget};
 use crate::app::songs::scope::SongScope;
 use crate::models::{PlaybackQueue, QueueEntry, QueueOrigin, Song, TranscodingQuality};
 use crate::playback_timeline::PlaybackTimeline;
+use crate::source::MusicSource;
 
 type StepSnapshot = (usize, Option<(Vec<usize>, Vec<usize>)>);
 
@@ -308,8 +308,13 @@ fn prepared(state: &AppState, step: QueueStep) -> PreparedStart {
         QueueStep::KeepHistory(index) => (index, None),
         QueueStep::WithHistory { index, history } => (index, Some(history)),
     };
-    let api = OpenSubsonicProvider::new("http://127.0.0.1:1", "fixture-user", "fixture-password")
-        .unwrap();
+    let api = MusicSource::opensubsonic(
+        "fixture-server",
+        "http://127.0.0.1:1",
+        "fixture-user",
+        "fixture-password",
+    )
+    .unwrap();
     let start = PreparedStart::prepare(
         StartTarget::existing(&state.queue, index).unwrap(),
         Some(&api),

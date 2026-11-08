@@ -8,12 +8,14 @@ use crate::app::songs::scope::SongScope;
 use crate::audio::PlaybackState;
 use crate::models::{PlayModes, PlaybackQueue, PlaybackSession, Song};
 use crate::playback_timeline::PlaybackTimeline;
+use crate::source::{ProviderKind, SourceId};
 
 const SESSION_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
 struct SessionServer {
     id: Option<String>,
     url: String,
+    source: Option<SourceId>,
 }
 
 pub(in crate::app) struct SessionState {
@@ -35,12 +37,30 @@ impl SessionState {
         self.server = server_url.map(|url| SessionServer {
             id: server_id.map(str::to_string),
             url: url.to_string(),
+            source: None,
         });
         self.clear_position();
     }
 
     pub(in crate::app) fn server_id(&self) -> Option<&str> {
         self.server.as_ref().and_then(|server| server.id.as_deref())
+    }
+
+    pub(in crate::app) fn bind_source(&mut self, source: SourceId, server_url: Option<&str>) {
+        let id = match source.provider {
+            ProviderKind::OpenSubsonic => source.profile_id.clone(),
+            ProviderKind::Bilibili => source.cache_namespace(),
+        };
+        self.server = Some(SessionServer {
+            id: Some(id),
+            url: server_url.unwrap_or_default().to_string(),
+            source: Some(source),
+        });
+        self.clear_position();
+    }
+
+    pub(in crate::app) fn source(&self) -> Option<&SourceId> {
+        self.server.as_ref()?.source.as_ref()
     }
 
     pub(in crate::app) fn clear_position(&mut self) {
@@ -86,15 +106,26 @@ impl SessionState {
     pub(in crate::app) fn restore(
         &mut self,
         state: &mut AppState,
-        session: PlaybackSession,
+        mut session: PlaybackSession,
     ) -> bool {
         if self
             .server
             .as_ref()
-            .is_none_or(|server| !session.matches_server(&server.url))
+            .is_none_or(|server| match server.source.as_ref() {
+                Some(source) => !session.matches_source(source, Some(&server.url)),
+                None => !session.matches_server(&server.url),
+            })
             || session.queue.is_empty()
         {
             return false;
+        }
+        if let Some(source) = self.source() {
+            if session.queue.iter().any(|song| !song.belongs_to(source)) {
+                return false;
+            }
+            for song in &mut session.queue {
+                song.source = Some(source.clone());
+            }
         }
         let restored = RestoredSession::prepare(session);
         self.resume_position = restored.apply(state);
@@ -107,9 +138,18 @@ impl SessionState {
         playback: &PlaybackState,
     ) -> Option<PlaybackSession> {
         let server = self.server.as_ref()?;
-        let (queue, queue_origins) = state.queue.snapshot();
+        let (mut queue, queue_origins) = state.queue.snapshot();
+        if let Some(source) = self.source() {
+            if queue.iter().any(|song| !song.belongs_to(source)) {
+                return None;
+            }
+            for song in &mut queue {
+                song.source = Some(source.clone());
+            }
+        }
         let (shuffle_played, shuffle_forward) = state.shuffle_history.snapshot();
         Some(PlaybackSession {
+            source: server.source.clone(),
             server_url: server.url.clone(),
             queue,
             queue_origins,

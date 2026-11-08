@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::models::Config;
+use crate::source::{ProviderKind, SourceId};
 
 pub(super) fn config_path() -> PathBuf {
     config_dir().join("config.json")
@@ -24,8 +25,20 @@ fn project_config_dir() -> Option<PathBuf> {
 /// 补偿套到 B 的同名曲目上），因此这些缓存必须按服务器隔离。
 /// 只保留 ASCII 字母数字与 `-`/`_`，避免出现路径分隔符。
 pub fn server_scope(server_id: Option<&str>) -> String {
-    let scope: String = server_id
-        .unwrap_or_default()
+    source_scope(&SourceId::new(
+        ProviderKind::OpenSubsonic,
+        server_id.unwrap_or_default(),
+    ))
+}
+
+/// New providers hash their full identity; OpenSubsonic keeps its original
+/// storage paths so existing sessions, loudness and caches remain readable.
+pub fn source_scope(source: &SourceId) -> String {
+    if source.provider != ProviderKind::OpenSubsonic {
+        return source.cache_namespace();
+    }
+    let scope: String = source
+        .profile_id
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
         .collect::<String>()

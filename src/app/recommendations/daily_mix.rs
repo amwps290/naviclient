@@ -27,6 +27,7 @@ impl NavidromeApp {
                 .state
                 .queue
                 .songs()
+                .filter(|song| self.browsing_owns_song(song))
                 .map(|song| song.id.as_str())
                 .collect::<HashSet<_>>();
             let songs = snapshot

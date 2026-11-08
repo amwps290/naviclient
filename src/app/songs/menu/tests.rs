@@ -104,6 +104,7 @@ fn playlist_menu_retains_its_original_order_and_owner_after_browsing_elsewhere()
     state.playlists.complete_detail(
         request,
         Ok(PlaylistDetails {
+            unavailable_count: 0,
             playlist,
             songs: vec![song("First"), song("Second"), song("Third")],
         }),

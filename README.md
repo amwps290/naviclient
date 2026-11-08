@@ -20,8 +20,10 @@ JavaScript runtime.
   servers whose capabilities cannot be probed.
 - Multiple saved servers with one-click switching: the sidebar shows which
   library you are browsing and the Settings page lists every server with its
-  address and account. Switching stops playback, saves the current queue, and
-  reconnects to the other server. Server state is fully isolated per entry:
+  address and account. Switching the browsing source keeps the current music
+  and queue playing. Starting music from another source saves the outgoing
+  session and commits the new queue after the audio command is accepted.
+  Server state is fully isolated per entry:
   play queue and position, measured loudness, genre cache, and cover cache each
   get their own namespace, so two servers with colliding song/cover ids can
   never see each other's data. Legacy single-server configs and caches are
@@ -31,6 +33,16 @@ JavaScript runtime.
   the current mode). Removing a server asks whether to also delete its local
   data (saved session, loudness and genre caches, stored credential)
 - Home, artists, albums, playlists, and search views
+- Bilibili account sign-in by QR code and browsing your own favorite folders,
+  usable without a Navidrome server. Folder playback loads every page and
+  expands videos in video/part order; play a selected part, all parts of a
+  video, or the whole folder, and append tracks to the source's queue.
+  Independent AAC-LC audio is selected by accessible declared bandwidth,
+  with backup addresses and bounded playback URL refresh. Video titles stay
+  primary; uploader and part information are shown separately. Credentials,
+  queues, history and artwork are isolated by source, and Bilibili audio uses
+  bounded temporary caches. HE-AAC, FLAC and Dolby playback, video output,
+  Bilibili search and favorite editing are not supported in this version.
 - Album cover art loaded from the Navidrome API
 - Native font discovery with a CJK-capable UI family selected per platform:
   Microsoft YaHei/JhengHei UI on Windows, PingFang on macOS, and
@@ -252,6 +264,39 @@ server URL, username, and password, then click **Save and Connect**. The
 settings window also provides Paste buttons beside each field if the system
 clipboard shortcut is unavailable.
 
+For Bilibili, open Server Settings, choose **Add Bilibili account**, scan with
+the Bilibili App and confirm, then choose **Browse favorites** beside the
+signed-in account. Open a folder and use **Play all**, double-click a part,
+or use the row menu to play all parts of that video. A Navidrome server is
+optional for this flow. Bilibili sessions use Linux Secret Service with DH
+encryption or Windows Credential Manager, with no plaintext fallback. A
+locked or unavailable credential store must be made available before signing in.
+
+For remote sign-in, close the player and run:
+
+```bash
+cargo run --locked -- --bilibili-login-web --port 8765
+```
+
+This mode binds to `0.0.0.0` and prints a temporary browser path. Replace
+`服务器IP` in the printed URL with the remote host address, then scan with
+the Bilibili App and confirm. Add `--proxy http://HOST:PORT` when required;
+the proxy applies only to this Bilibili account. The server expires after
+15 minutes. Restart the player after successful sign-in.
+
+To check a saved account from SSH without opening a window:
+
+```bash
+cargo run --locked -- --bilibili-check --decode
+```
+
+This verifies credential recovery, all pages and parts of the first nonempty
+folder, independent audio accessibility, PCM decoding and forward/backward
+seeks. Add `--play-seconds 3` to play three seconds on the host at 5% volume;
+the output check verifies device connection and playback progress. It cannot
+confirm what a remote user hears. Use `--account-index 1` to select an account
+when several are saved. No video media is requested.
+
 Config is stored in the platform config directory, e.g.:
 
 - Windows: `%APPDATA%\rs\navidrome\navidrome-client\config.json`
@@ -264,13 +309,17 @@ atomically replaced, so an interrupted save cannot leave a truncated JSON
 document. Listening history is isolated per server, bounded to the latest 1000
 attempts, and measures actual playback progress without counting seek jumps.
 
-Played audio is cached separately in the configured audio cache directory.
+OpenSubsonic audio is cached separately in the configured audio cache directory.
 The folder can be changed from Settings, completed tracks are reused without
 another download, partial original tracks resume through HTTP range requests
 when supported, and the oldest cache files are removed at startup when the
 cache exceeds 4 GiB. Album cover art bytes are also cached to disk under the
 same directory (`covers/`), capped at 256 MiB with oldest-first pruning, so
 restarts render grids instantly without re-downloading every cover.
+Bilibili uses a private temporary audio cache capped at 32 MiB per reader;
+larger audio continues through HTTP Range requests, and the temporary file
+is released with its reader. Signed playback addresses are resolved again
+after restart and are never stored in the saved queue.
 
 Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at

@@ -159,3 +159,46 @@ fn missing_scopes_and_invalid_rows_cannot_capture_a_target() {
         assert!(SongRowTarget::capture(&state, scope, index).is_none());
     }
 }
+
+#[test]
+fn old_source_row_event_cannot_select_the_same_id_in_the_new_browsing_source() {
+    let mut state = state();
+    let mut requests = crate::app::library::requests::LibraryRequests::default();
+    let request = state.search.begin(&mut requests);
+    state.search.complete(
+        request,
+        Ok(crate::models::SearchResults {
+            songs: vec![Song {
+                source: Some(crate::source::SourceId::new(
+                    crate::source::ProviderKind::OpenSubsonic,
+                    "old",
+                )),
+                ..song("Same id")
+            }],
+            ..Default::default()
+        }),
+    );
+    let target = SongRowTarget::capture(&state, SongScope::Search, 0).unwrap();
+    state.reset_browsing();
+    let request = state.search.begin(&mut requests);
+    state.search.complete(
+        request,
+        Ok(crate::models::SearchResults {
+            songs: vec![Song {
+                source: Some(crate::source::SourceId::new(
+                    crate::source::ProviderKind::OpenSubsonic,
+                    "current",
+                )),
+                ..song("Same id")
+            }],
+            ..Default::default()
+        }),
+    );
+    assert!(target.resolve(&state).is_none());
+    assert_eq!(
+        SongRowTarget::capture(&state, SongScope::Search, 0)
+            .unwrap()
+            .resolve(&state),
+        Some((SongScope::Search, 0))
+    );
+}

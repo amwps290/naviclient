@@ -16,7 +16,7 @@ use super::PlaybackState;
 const STALL_VISIBLE_AFTER: Duration = Duration::from_secs(3);
 
 struct TrackSource {
-    url: String,
+    url: crate::source::HttpResource,
     cache_key: String,
     gain: f32,
 }
@@ -52,7 +52,7 @@ impl Default for TrackState {
 impl TrackState {
     pub(super) fn begin_play(
         &mut self,
-        url: String,
+        url: crate::source::HttpResource,
         cache_key: String,
         duration: Option<Duration>,
         gain: f32,

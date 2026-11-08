@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::source::{ProviderKind, SourceId};
 use super::{PlayModes, Song};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +62,17 @@ pub struct PlaybackQueue {
 }
 
 impl PlaybackQueue {
+    /// Bind legacy entries before accepting a queue for one source. Validation
+    /// runs first, so a mixed queue is rejected without partially changing it.
+    pub fn bind_source(&mut self, source: &SourceId) -> bool {
+        if self.songs().any(|song| !song.belongs_to(source)) {
+            return false;
+        }
+        for entry in &mut self.entries {
+            entry.song.source = Some(source.clone());
+        }
+        true
+    }
     pub fn from_songs(songs: Vec<Song>, origin: QueueOrigin) -> Self {
         Self {
             entries: songs
@@ -161,7 +173,10 @@ impl PlaybackQueue {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlaybackSession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceId>,
     /// 归属服务器（切换服务器时不恢复其他服务器的会话）。
+    #[serde(default)]
     pub server_url: String,
     /// 播放队列快照。
     pub queue: Vec<Song>,
@@ -181,6 +196,15 @@ pub struct PlaybackSession {
 }
 
 impl PlaybackSession {
+    pub(crate) fn matches_source(&self, source: &SourceId, server_url: Option<&str>) -> bool {
+        if self.source.as_ref().is_some_and(|saved| saved != source) {
+            return false;
+        }
+        match source.provider {
+            ProviderKind::OpenSubsonic => server_url.is_some_and(|url| self.matches_server(url)),
+            ProviderKind::Bilibili => self.source.as_ref() == Some(source),
+        }
+    }
     /// Session loading and legacy adoption share the same server identity.
     /// Request construction accepts addresses without a scheme and strips a
     /// trailing slash, so their saved forms must still identify the same server.

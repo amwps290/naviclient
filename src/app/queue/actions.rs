@@ -2,6 +2,7 @@
 
 use super::edits::QueueRemoval;
 use super::logic::ShuffleHistory;
+use super::source_queue::SourceQueueEdit;
 use crate::app::playback::occurrence::Selection;
 use crate::app::playback::start::StartTarget;
 use crate::app::prelude::*;
@@ -14,6 +15,9 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
+        let Some(songs) = self.route_queue_edit(songs, SourceQueueEdit::InsertNext) else {
+            return;
+        };
         self.prepare_manual_queue_change();
         if self.state.edit_queue().insert_next(songs) {
             self.save_session();
@@ -64,6 +68,9 @@ impl NavidromeApp {
         if songs.is_empty() {
             return;
         }
+        let Some(songs) = self.route_queue_edit(songs, SourceQueueEdit::Append(origin)) else {
+            return;
+        };
         self.prepare_manual_queue_change();
         if self.state.edit_queue().append(songs, origin) {
             self.save_session();
@@ -117,6 +124,7 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn prepare_manual_queue_change(&mut self) {
+        self.start_resolution.cancel();
         self.cancel_recommendation_tasks();
         self.cancel_next_preload();
     }

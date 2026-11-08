@@ -9,6 +9,29 @@ use super::{
 };
 
 #[test]
+fn listening_updates_use_source_identity_even_when_another_sources_same_id_is_newer() {
+    use crate::source::{MediaKey, ProviderKind, SourceId};
+    let first = SourceId::new(ProviderKind::OpenSubsonic, "same-profile");
+    let second = SourceId::new(ProviderKind::Bilibili, "same-profile");
+    let mut history = ListeningHistory::default();
+    for source in [&first, &second] {
+        history.record_started(
+            Song {
+                source: Some(source.clone()),
+                id: "same-id".into(),
+                ..Song::default()
+            },
+            123,
+        );
+    }
+    assert!(history.update_latest_media(&MediaKey::new(first, "same-id"), 42, true));
+    assert_eq!(history.events[0].listened_seconds, 42);
+    assert!(history.events[0].completed);
+    assert_eq!(history.events[1].listened_seconds, 0);
+    assert!(!history.events[1].completed);
+}
+
+#[test]
 fn listening_history_tracks_attempts_updates_and_recent_unique_ids() {
     let song = |id: &str| Song {
         id: id.into(),

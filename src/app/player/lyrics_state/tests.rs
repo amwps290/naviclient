@@ -3,6 +3,13 @@ use gpui_kit::px;
 use super::*;
 use crate::models::LyricLine;
 
+fn media(id: &str) -> MediaKey {
+    MediaKey::new(
+        crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, "fixture"),
+        id,
+    )
+}
+
 fn lyrics(text: &str) -> Lyrics {
     Lyrics {
         lines: vec![LyricLine {
@@ -28,14 +35,14 @@ fn assert_follow_cleared(state: &LyricsState) {
 fn same_song_coalesces_pending_and_cached_loads_and_resets_follow() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let request = state.begin("a", &mut requests).unwrap();
+    let request = state.begin(&media("a"), &mut requests).unwrap();
     set_follow(&mut state);
-    assert_eq!(state.begin("a", &mut requests), None);
+    assert_eq!(state.begin(&media("a"), &mut requests), None);
     assert!(state.loading());
     assert_follow_cleared(&state);
     assert!(state.complete(request, Ok(lyrics("current"))));
     set_follow(&mut state);
-    assert_eq!(state.begin("a", &mut requests), None);
+    assert_eq!(state.begin(&media("a"), &mut requests), None);
     assert!(!state.loading());
     assert_eq!(state.lyrics(), Some(&lyrics("current")));
     assert_follow_cleared(&state);
@@ -45,9 +52,9 @@ fn same_song_coalesces_pending_and_cached_loads_and_resets_follow() {
 fn empty_success_is_cached_without_repeated_requests() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let request = state.begin("a", &mut requests).unwrap();
+    let request = state.begin(&media("a"), &mut requests).unwrap();
     assert!(state.complete(request, Ok(Lyrics::default())));
-    assert_eq!(state.begin("a", &mut requests), None);
+    assert_eq!(state.begin(&media("a"), &mut requests), None);
     assert_eq!(state.lyrics(), Some(&Lyrics::default()));
     assert!(state.error().is_none());
 }
@@ -56,13 +63,13 @@ fn empty_success_is_cached_without_repeated_requests() {
 fn failed_load_can_retry_and_duplicate_results_cannot_replace_it() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let failed = state.begin("a", &mut requests).unwrap();
+    let failed = state.begin(&media("a"), &mut requests).unwrap();
     assert!(state.complete(failed, Err("offline".into())));
     assert!(!state.loading());
     assert_eq!(state.error(), Some("offline"));
     assert!(!state.complete(failed, Ok(lyrics("duplicate"))));
     assert_eq!(state.error(), Some("offline"));
-    let retry = state.begin("a", &mut requests).unwrap();
+    let retry = state.begin(&media("a"), &mut requests).unwrap();
     assert_ne!(failed, retry);
     assert!(state.error().is_none());
     assert!(state.loading());
@@ -75,9 +82,9 @@ fn failed_load_can_retry_and_duplicate_results_cannot_replace_it() {
 fn returning_to_a_song_rejects_its_previous_success_and_failure() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let old_a = state.begin("a", &mut requests).unwrap();
-    let b = state.begin("b", &mut requests).unwrap();
-    let current_a = state.begin("a", &mut requests).unwrap();
+    let old_a = state.begin(&media("a"), &mut requests).unwrap();
+    let b = state.begin(&media("b"), &mut requests).unwrap();
+    let current_a = state.begin(&media("a"), &mut requests).unwrap();
     assert!(!state.complete(old_a, Ok(lyrics("old a"))));
     assert!(!state.complete(old_a, Err("old a error".into())));
     assert!(!state.complete(b, Ok(lyrics("b"))));
@@ -92,10 +99,10 @@ fn returning_to_a_song_rejects_its_previous_success_and_failure() {
 fn changing_songs_discards_cached_lyrics_and_follow_state() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let a = state.begin("a", &mut requests).unwrap();
+    let a = state.begin(&media("a"), &mut requests).unwrap();
     state.complete(a, Ok(lyrics("a")));
     set_follow(&mut state);
-    let b = state.begin("b", &mut requests).unwrap();
+    let b = state.begin(&media("b"), &mut requests).unwrap();
     assert!(state.lyrics().is_none());
     assert_follow_cleared(&state);
     assert!(state.complete(b, Ok(lyrics("b"))));
@@ -106,13 +113,13 @@ fn changing_songs_discards_cached_lyrics_and_follow_state() {
 fn stopping_invalidates_pending_lyrics_even_when_the_song_is_restarted() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let old = state.begin("a", &mut requests).unwrap();
+    let old = state.begin(&media("a"), &mut requests).unwrap();
     set_follow(&mut state);
     state.clear();
     assert_follow_cleared(&state);
     assert!(!state.loading());
     assert!(!state.complete(old, Ok(lyrics("stopped"))));
-    let current = state.begin("a", &mut requests).unwrap();
+    let current = state.begin(&media("a"), &mut requests).unwrap();
     assert!(!state.complete(old, Err("stopped error".into())));
     assert!(state.loading());
     assert!(state.complete(current, Ok(lyrics("restarted"))));
@@ -122,9 +129,9 @@ fn stopping_invalidates_pending_lyrics_even_when_the_song_is_restarted() {
 fn server_reset_rejects_old_lyrics_with_reused_song_ids() {
     let mut requests = LibraryRequests::default();
     let mut state = crate::app::AppState::default();
-    let old = state.lyrics.begin("a", &mut requests).unwrap();
+    let old = state.lyrics.begin(&media("a"), &mut requests).unwrap();
     state = crate::app::AppState::default();
-    let current = state.lyrics.begin("a", &mut requests).unwrap();
+    let current = state.lyrics.begin(&media("a"), &mut requests).unwrap();
     assert!(!state.lyrics.complete(old, Ok(lyrics("old server"))));
     assert!(!state.lyrics.complete(old, Err("old server error".into())));
     assert!(state.lyrics.loading());
@@ -136,8 +143,8 @@ fn server_reset_rejects_old_lyrics_with_reused_song_ids() {
 fn stale_and_duplicate_results_preserve_the_newer_follow_target() {
     let mut requests = LibraryRequests::default();
     let mut state = LyricsState::default();
-    let old = state.begin("a", &mut requests).unwrap();
-    let current = state.begin("b", &mut requests).unwrap();
+    let old = state.begin(&media("a"), &mut requests).unwrap();
+    let current = state.begin(&media("b"), &mut requests).unwrap();
     set_follow(&mut state);
     assert!(!state.complete(old, Err("stale".into())));
     assert_eq!(state.active_index, Some(2));
@@ -149,4 +156,22 @@ fn stale_and_duplicate_results_preserve_the_newer_follow_target() {
     assert_eq!(state.active_index, Some(2));
     assert_eq!(state.scroll_target, Some(px(-120.0)));
     assert_eq!(state.lyrics(), Some(&lyrics("current")));
+}
+
+#[test]
+fn same_song_id_from_another_source_requests_new_lyrics_and_rejects_old_reply() {
+    let mut requests = LibraryRequests::default();
+    let mut state = LyricsState::default();
+    let a = media("same");
+    let b = MediaKey::new(
+        crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, "other"),
+        "same",
+    );
+    let old = state.begin(&a, &mut requests).unwrap();
+    let current = state.begin(&b, &mut requests).unwrap();
+    assert!(!state.complete(old, Ok(lyrics("other source"))));
+    assert!(state.loading());
+    assert!(state.complete(current, Ok(lyrics("current source"))));
+    assert_eq!(state.lyrics(), Some(&lyrics("current source")));
+    assert!(state.begin(&a, &mut requests).is_some());
 }

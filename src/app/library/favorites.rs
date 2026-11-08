@@ -123,7 +123,13 @@ impl FavoritesState {
 
 impl NavidromeApp {
     pub(in crate::app) fn load_favorites(&mut self) {
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .api
+            .clone()
+            .filter(|api| api.capabilities().favorite_read)
+        else {
+            return;
+        };
         let request = self.state.favorites.begin_load(&mut self.library_requests);
         let tx = self.tx.clone();
         self.spawn_future(async move {
@@ -133,7 +139,13 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn toggle_favorite(&mut self, key: FavoriteKey) {
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .api
+            .clone()
+            .filter(|api| api.capabilities().favorite_write)
+        else {
+            return;
+        };
         let Some(change) = self
             .state
             .favorites

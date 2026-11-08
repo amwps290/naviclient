@@ -19,7 +19,7 @@ pub(super) struct ArmedTrack {
 
 pub(super) struct AutoTrack {
     pub(super) transition: Arc<Transition>,
-    pub(super) url: String,
+    pub(super) url: crate::source::HttpResource,
     pub(super) cache_key: String,
     pub(super) gain: f32,
     pub(super) info: TrackInfo,

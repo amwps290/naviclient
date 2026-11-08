@@ -12,8 +12,8 @@ use super::{
     recommend, CandidateSource, RecommendationCandidate, RecommendationGenerationContext,
     RecommendationKind, RecommendationRequest, RecommendedTrack,
 };
-use crate::api::OpenSubsonicProvider;
 use crate::models::Song;
+use crate::source::MusicSource;
 
 const AUTO_CONTINUE_TARGET: usize = 20;
 
@@ -25,7 +25,7 @@ pub struct AutoContinueGenerationContext {
 }
 
 pub async fn generate_auto_continue(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     context: AutoContinueGenerationContext,
 ) -> Result<Vec<RecommendedTrack>> {
     let AutoContinueGenerationContext { common, seeds } = context;

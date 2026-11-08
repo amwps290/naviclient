@@ -2,7 +2,7 @@
 
 use super::logic::should_scrobble;
 use super::occurrence::Selection;
-use super::start::{select_state, PreparedStart, StartError, StartTarget};
+use super::start::{select_state, PreparedStart, StartError, StartTarget, UnresolvedStart};
 use crate::app::prelude::*;
 use crate::app::queue::logic::ShuffleHistory;
 use crate::app::queue::navigation::QueueStep;
@@ -50,10 +50,23 @@ impl NavidromeApp {
         target: StartTarget,
         position: Duration,
         selection: Selection,
-    ) -> Option<PreparedStart> {
-        match PreparedStart::prepare(
+    ) -> Option<UnresolvedStart> {
+        let mut source = target
+            .source(self.api.as_ref(), self.playback_source.as_ref())
+            .cloned();
+        if let Some(api) = source
+            .as_ref()
+            .filter(|api| api.id().provider == crate::source::ProviderKind::Bilibili)
+        {
+            let Some(authorized) = self.available_source(api.id()) else {
+                self.notify_error(t!("Bilibili login expired. Sign in again."));
+                return None;
+            };
+            source = Some(authorized);
+        }
+        match UnresolvedStart::new(
             target,
-            self.api.as_ref(),
+            source.as_ref(),
             self.config.transcoding_quality,
             position,
             selection,
@@ -66,12 +79,44 @@ impl NavidromeApp {
         }
     }
 
-    pub(in crate::app) fn activate_playback_start(&mut self, mut start: PreparedStart) -> bool {
+    pub(in crate::app) fn activate_playback_start(&mut self, start: UnresolvedStart) -> bool {
+        self.start_resolution.cancel();
+        match start.try_resolve() {
+            Some(result) => match result
+                .map_err(StartError::Request)
+                .and_then(|resource| start.finish(resource))
+            {
+                Ok(start) => self.commit_playback_start(start),
+                Err(error) => {
+                    self.report_start_error(error);
+                    false
+                }
+            },
+            None => {
+                self.resolve_playback_start(start);
+                true
+            }
+        }
+    }
+
+    pub(in crate::app) fn commit_playback_start(&mut self, mut start: PreparedStart) -> bool {
         self.freeze_next_preload();
+        let source = start.source().clone();
+        let changing_source = self
+            .playback_source
+            .as_ref()
+            .is_none_or(|old| old.id() != source.id() || old.base_url() != source.base_url());
+        let old_session = changing_source
+            .then(|| self.session.snapshot(&self.state, &self.audio.state()))
+            .flatten();
+        let old_source = self.session.source().cloned();
         start.request.gain = self.song_gain(start.song());
-        let preload_id =
-            self.preload
-                .reusable_id(start.entry(), start.request.quality, start.request.position);
+        let preload_id = self.preload.reusable_resource_id(
+            start.entry(),
+            start.request.quality,
+            start.request.position,
+            &start.request.cache_key,
+        );
         let audio = self.audio.clone();
         let new_occurrence = start.new_occurrence();
         let effects = match start.commit(&mut self.state, &mut self.session, |request| {
@@ -97,9 +142,38 @@ impl NavidromeApp {
         if effects.finished_listening {
             self.persist_listening_history();
         }
-        self.ensure_cover(effects.song.cover_art.as_deref(), true);
+        if changing_source {
+            if let Some(snapshot) = old_session {
+                if let Some(owner) = old_source.as_ref() {
+                    if let Err(error) = self.server_cache_writer.submit_source(owner, snapshot) {
+                        log::warn!("could not queue outgoing playback session: {error}");
+                    }
+                }
+            }
+            self.persist_loudness();
+        }
+        if self.api.as_ref().is_some_and(|api| api.id() == source.id()) {
+            self.playback_server = self.state.connection.server().cloned();
+        }
+        self.playback_source = Some(source);
+        let playback_id = self.playback_source.as_ref().map(|api| api.id().clone());
+        if self.config.playback_source != playback_id {
+            self.config.playback_source = playback_id;
+            if let Err(error) = config::save(&self.config) {
+                self.notify_error(t!(
+                    "Config save failed: %{error}",
+                    error = format!("{error:#}")
+                ));
+            }
+        }
+        if changing_source {
+            self.load_playback_source_cache();
+            self.prune_source_covers();
+        }
+        self.ensure_song_cover(&effects.song, true);
         self.load_lyrics(&effects.song);
         self.report_now_playing(&effects.song, effects.position);
+        self.save_session();
         log::info!(
             "queue playback started; song_id={} quality={} position_ms={}",
             effects.song.id,
@@ -109,7 +183,7 @@ impl NavidromeApp {
         true
     }
 
-    fn report_start_error(&mut self, error: StartError) {
+    pub(in crate::app) fn report_start_error(&mut self, error: StartError) {
         match error {
             StartError::NoServer => self.notify_error(t!("Configure a server before playing")),
             StartError::Request(error) => self.notify_error(t!(
@@ -126,7 +200,13 @@ impl NavidromeApp {
 
     /// Report once per playback occurrence; retries retain the reporting state.
     pub(in crate::app) fn report_now_playing(&mut self, song: &Song, position: Duration) {
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .playback_source
+            .clone()
+            .filter(|api| song.belongs_to(api.id()) && api.capabilities().scrobble)
+        else {
+            return;
+        };
         if !self.state.occurrence.claim_report(&song.id) {
             return;
         }
@@ -148,7 +228,13 @@ impl NavidromeApp {
         if !should_scrobble(&playback) {
             return;
         }
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .playback_source
+            .clone()
+            .filter(|api| api.capabilities().scrobble)
+        else {
+            return;
+        };
         if !self.state.occurrence.claim_scrobble(&song_id) {
             return;
         }
@@ -164,7 +250,13 @@ impl NavidromeApp {
         let Some(song) = self.state.now_playing.clone() else {
             return;
         };
-        let Some(api) = self.api.clone() else { return };
+        let Some(api) = self
+            .playback_source
+            .clone()
+            .filter(|api| song.belongs_to(api.id()) && api.capabilities().scrobble)
+        else {
+            return;
+        };
         if !self.state.occurrence.claim_scrobble(&song.id) {
             return;
         }
@@ -187,11 +279,12 @@ impl NavidromeApp {
             self.persist_listening_history();
         }
         self.session.clear_position();
-        self.ensure_cover(song.cover_art.as_deref(), true);
+        self.ensure_song_cover(song, true);
         self.load_lyrics(song);
     }
 
     pub(in crate::app) fn seek_playback(&mut self, position: Duration) {
+        self.start_resolution.cancel();
         self.reconnect.cancel();
         self.cancel_next_preload();
         let playback = self.audio.state();

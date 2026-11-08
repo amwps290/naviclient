@@ -2,6 +2,10 @@ use gpui_kit::{hsla, ImageFormat};
 
 use super::*;
 
+fn source() -> SourceId {
+    SourceId::new(crate::source::ProviderKind::OpenSubsonic, "fixture")
+}
+
 fn image() -> Arc<GpuiImage> {
     Arc::new(GpuiImage::from_bytes(
         ImageFormat::Png,
@@ -21,18 +25,18 @@ fn decoded(image: Option<Arc<GpuiImage>>, palette: Option<(Hsla, Hsla)>) -> Deco
 fn requests_coalesce_per_id_and_cache_original_handles_and_palette() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
-    let a = cache.begin("a", true, &mut requests).unwrap();
-    assert!(cache.begin("a", false, &mut requests).is_none());
-    let b = cache.begin("b", false, &mut requests).unwrap();
+    let a = cache.begin(&source(), "a", true, &mut requests).unwrap();
+    assert!(cache.begin(&source(), "a", false, &mut requests).is_none());
+    let b = cache.begin(&source(), "b", false, &mut requests).unwrap();
     let cover = image();
     let update = cache
         .complete(&a, Ok(decoded(Some(cover.clone()), Some(palette()))))
         .unwrap();
     assert!(update.replaced.is_none());
     assert!(!update.follow_up_palette);
-    assert!(Arc::ptr_eq(cache.image("a").unwrap(), &cover));
-    assert_eq!(cache.palette("a"), Some(palette()));
-    assert!(cache.begin("a", true, &mut requests).is_none());
+    assert!(Arc::ptr_eq(cache.image(&source(), "a").unwrap(), &cover));
+    assert_eq!(cache.palette(&source(), "a"), Some(palette()));
+    assert!(cache.begin(&source(), "a", true, &mut requests).is_none());
     assert!(cache
         .complete(&b, Ok(decoded(Some(cover.clone()), None)))
         .is_some());
@@ -44,9 +48,15 @@ fn requests_coalesce_per_id_and_cache_original_handles_and_palette() {
 fn server_reset_rejects_old_success_and_failure_without_consuming_new_request() {
     let mut requests = LibraryRequests::default();
     let mut state = crate::app::AppState::default();
-    let old = state.covers.begin("same-id", true, &mut requests).unwrap();
+    let old = state
+        .covers
+        .begin(&source(), "same-id", true, &mut requests)
+        .unwrap();
     state = crate::app::AppState::default();
-    let current = state.covers.begin("same-id", true, &mut requests).unwrap();
+    let current = state
+        .covers
+        .begin(&source(), "same-id", true, &mut requests)
+        .unwrap();
     assert!(state
         .covers
         .complete(&old, Ok(decoded(Some(image()), Some(palette()))))
@@ -55,28 +65,28 @@ fn server_reset_rejects_old_success_and_failure_without_consuming_new_request() 
         .covers
         .complete(&old, Err("old failure".into()))
         .is_none());
-    assert!(state.covers.image("same-id").is_none());
-    assert!(state.covers.palette("same-id").is_none());
+    assert!(state.covers.image(&source(), "same-id").is_none());
+    assert!(state.covers.palette(&source(), "same-id").is_none());
     assert!(state
         .covers
         .complete(&current, Ok(decoded(Some(image()), None)))
         .is_some());
-    assert!(state.covers.image("same-id").is_some());
+    assert!(state.covers.image(&source(), "same-id").is_some());
 }
 
 #[test]
 fn pending_grid_request_remembers_palette_demand_and_duplicates_cannot_consume_follow_up() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
-    let grid = cache.begin("a", false, &mut requests).unwrap();
-    assert!(cache.begin("a", true, &mut requests).is_none());
-    assert!(cache.begin("a", false, &mut requests).is_none());
+    let grid = cache.begin(&source(), "a", false, &mut requests).unwrap();
+    assert!(cache.begin(&source(), "a", true, &mut requests).is_none());
+    assert!(cache.begin(&source(), "a", false, &mut requests).is_none());
     let cover = image();
     let update = cache
         .complete(&grid, Ok(decoded(Some(cover.clone()), None)))
         .unwrap();
     assert!(update.follow_up_palette);
-    let follow_up = cache.begin("a", true, &mut requests).unwrap();
+    let follow_up = cache.begin(&source(), "a", true, &mut requests).unwrap();
     assert!(cache
         .complete(&grid, Ok(decoded(Some(image()), None)))
         .is_none());
@@ -88,41 +98,41 @@ fn pending_grid_request_remembers_palette_demand_and_duplicates_cannot_consume_f
         .unwrap();
     assert!(!update.follow_up_palette);
     assert!(update.replaced.is_none());
-    assert!(Arc::ptr_eq(cache.image("a").unwrap(), &cover));
-    assert_eq!(cache.palette("a"), Some(palette()));
-    assert!(!cache.request_needed("a", true));
+    assert!(Arc::ptr_eq(cache.image(&source(), "a").unwrap(), &cover));
+    assert_eq!(cache.palette(&source(), "a"), Some(palette()));
+    assert!(!cache.request_needed(&source(), "a", true));
 }
 
 #[test]
 fn completed_grid_image_can_later_request_palette() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
-    let grid = cache.begin("a", false, &mut requests).unwrap();
+    let grid = cache.begin(&source(), "a", false, &mut requests).unwrap();
     let update = cache
         .complete(&grid, Ok(decoded(Some(image()), None)))
         .unwrap();
     assert!(!update.follow_up_palette);
-    assert!(!cache.request_needed("a", false));
-    assert!(cache.request_needed("a", true));
-    let follow_up = cache.begin("a", true, &mut requests).unwrap();
+    assert!(!cache.request_needed(&source(), "a", false));
+    assert!(cache.request_needed(&source(), "a", true));
+    let follow_up = cache.begin(&source(), "a", true, &mut requests).unwrap();
     cache.complete(&follow_up, Ok(decoded(None, Some(palette()))));
-    assert!(!cache.request_needed("a", true));
+    assert!(!cache.request_needed(&source(), "a", true));
 }
 
 #[test]
 fn recognized_image_with_failed_palette_extraction_does_not_loop() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
-    let request = cache.begin("a", true, &mut requests).unwrap();
+    let request = cache.begin(&source(), "a", true, &mut requests).unwrap();
     // The PNG signature is recognized, but the image is too short to extract color.
     let result = crate::app::covers::artwork::decode_cover(b"\x89PNG\r\n\x1a\n".to_vec(), true);
     assert!(result.image.is_some());
     assert!(result.palette.is_none());
     let update = cache.complete(&request, Ok(result)).unwrap();
     assert!(!update.follow_up_palette);
-    assert!(cache.image("a").is_some());
-    assert!(!cache.request_needed("a", true));
-    assert!(cache.begin("a", true, &mut requests).is_none());
+    assert!(cache.image(&source(), "a").is_some());
+    assert!(!cache.request_needed(&source(), "a", true));
+    assert!(cache.begin(&source(), "a", true, &mut requests).is_none());
 }
 
 #[test]
@@ -133,14 +143,14 @@ fn failed_and_empty_decodes_do_not_create_entries_or_retry_repeatedly() {
         ("failed", Err("offline".into())),
         ("empty", Ok(decoded(None, None))),
     ] {
-        let request = cache.begin(id, false, &mut requests).unwrap();
-        assert!(cache.begin(id, true, &mut requests).is_none());
+        let request = cache.begin(&source(), id, false, &mut requests).unwrap();
+        assert!(cache.begin(&source(), id, true, &mut requests).is_none());
         let update = cache.complete(&request, result).unwrap();
         assert!(!update.follow_up_palette);
-        assert!(cache.image(id).is_none());
-        assert!(cache.palette(id).is_none());
-        assert!(!cache.request_needed(id, true));
-        assert!(cache.begin(id, false, &mut requests).is_none());
+        assert!(cache.image(&source(), id).is_none());
+        assert!(cache.palette(&source(), id).is_none());
+        assert!(!cache.request_needed(&source(), id, true));
+        assert!(cache.begin(&source(), id, false, &mut requests).is_none());
         assert!(cache
             .complete(&request, Ok(decoded(Some(image()), Some(palette()))))
             .is_none());
@@ -154,7 +164,9 @@ fn failure_cache_stays_bounded_and_evicted_ids_can_retry() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
     for i in 0..=MAX_FAILED_COVERS {
-        let request = cache.begin(&i.to_string(), false, &mut requests).unwrap();
+        let request = cache
+            .begin(&source(), &i.to_string(), false, &mut requests)
+            .unwrap();
         cache.complete(&request, Err("failed".into()));
         // Duplicate failures must not alter FIFO ordering or consume capacity.
         assert!(cache.complete(&request, Err("duplicate".into())).is_none());
@@ -162,12 +174,12 @@ fn failure_cache_stays_bounded_and_evicted_ids_can_retry() {
     assert_eq!(cache.failed.len(), MAX_FAILED_COVERS);
     assert_eq!(cache.failed_order.len(), MAX_FAILED_COVERS);
     assert!(cache.entries.is_empty());
-    assert!(cache.begin("1", false, &mut requests).is_none());
-    let retry = cache.begin("0", false, &mut requests).unwrap();
+    assert!(cache.begin(&source(), "1", false, &mut requests).is_none());
+    let retry = cache.begin(&source(), "0", false, &mut requests).unwrap();
     assert!(cache
         .complete(&retry, Ok(decoded(Some(image()), None)))
         .is_some());
-    assert!(!cache.request_needed("0", false));
+    assert!(!cache.request_needed(&source(), "0", false));
 }
 
 #[test]
@@ -175,7 +187,7 @@ fn replacement_returns_old_handle_but_identical_image_ids_are_not_released() {
     let mut requests = LibraryRequests::default();
     for same_bytes in [true, false] {
         let mut cache = CoverCache::default();
-        let grid = cache.begin("a", false, &mut requests).unwrap();
+        let grid = cache.begin(&source(), "a", false, &mut requests).unwrap();
         let original = image();
         cache.complete(&grid, Ok(decoded(Some(original.clone()), None)));
         let mut bytes = original.bytes.clone();
@@ -184,7 +196,7 @@ fn replacement_returns_old_handle_but_identical_image_ids_are_not_released() {
             bytes.push(1);
         }
         let replacement = Arc::new(GpuiImage::from_bytes(ImageFormat::Png, bytes));
-        let request = cache.begin("a", true, &mut requests).unwrap();
+        let request = cache.begin(&source(), "a", true, &mut requests).unwrap();
         let update = cache
             .complete(
                 &request,
@@ -196,7 +208,10 @@ fn replacement_returns_old_handle_but_identical_image_ids_are_not_released() {
         } else {
             assert!(Arc::ptr_eq(update.replaced.as_ref().unwrap(), &original));
         }
-        assert!(Arc::ptr_eq(cache.image("a").unwrap(), &replacement));
+        assert!(Arc::ptr_eq(
+            cache.image(&source(), "a").unwrap(),
+            &replacement
+        ));
     }
 }
 
@@ -204,12 +219,60 @@ fn replacement_returns_old_handle_but_identical_image_ids_are_not_released() {
 fn palette_without_image_still_requests_image_and_failed_follow_up_preserves_palette() {
     let mut requests = LibraryRequests::default();
     let mut cache = CoverCache::default();
-    let request = cache.begin("a", true, &mut requests).unwrap();
+    let request = cache.begin(&source(), "a", true, &mut requests).unwrap();
     cache.complete(&request, Ok(decoded(None, Some(palette()))));
-    assert!(cache.image("a").is_none());
-    assert!(cache.request_needed("a", false));
-    let follow_up = cache.begin("a", false, &mut requests).unwrap();
+    assert!(cache.image(&source(), "a").is_none());
+    assert!(cache.request_needed(&source(), "a", false));
+    let follow_up = cache.begin(&source(), "a", false, &mut requests).unwrap();
     cache.complete(&follow_up, Err("download failed".into()));
-    assert_eq!(cache.palette("a"), Some(palette()));
-    assert!(!cache.request_needed("a", false));
+    assert_eq!(cache.palette(&source(), "a"), Some(palette()));
+    assert!(!cache.request_needed(&source(), "a", false));
+}
+
+#[test]
+fn same_cover_id_keeps_source_images_palettes_and_pending_results_separate() {
+    let mut requests = LibraryRequests::default();
+    let mut cache = CoverCache::default();
+    let playing = SourceId::new(crate::source::ProviderKind::OpenSubsonic, "playing");
+    let browsing = SourceId::new(crate::source::ProviderKind::Bilibili, "browsing");
+    let old = cache.begin(&playing, "same", true, &mut requests).unwrap();
+    let current = cache
+        .begin(&browsing, "same", false, &mut requests)
+        .unwrap();
+    cache.complete(&old, Ok(decoded(Some(image()), Some(palette()))));
+    assert!(cache.image(&browsing, "same").is_none());
+    assert!(cache.palette(&browsing, "same").is_none());
+    cache.complete(&current, Err("failed browser image".into()));
+    assert!(cache.image(&playing, "same").is_some());
+    assert_eq!(cache.palette(&playing, "same"), Some(palette()));
+    assert!(cache
+        .begin(&playing, "another", false, &mut requests)
+        .is_some());
+    assert!(cache
+        .retain_sources(&HashSet::from([playing.clone()]))
+        .is_empty());
+    assert!(cache
+        .complete(&current, Ok(decoded(Some(image()), None)))
+        .is_none());
+    assert!(!cache.request_needed(&playing, "same", true));
+    assert!(cache.request_needed(&browsing, "same", false));
+}
+
+#[test]
+fn retiring_another_source_cannot_release_a_shared_image_still_used_by_playback() {
+    let mut cache = CoverCache::default();
+    let mut requests = LibraryRequests::default();
+    let playing = source();
+    let other = SourceId::new(crate::source::ProviderKind::Bilibili, "other");
+    for source in [&playing, &other] {
+        let request = cache
+            .begin(source, "same-image", false, &mut requests)
+            .unwrap();
+        cache.complete(&request, Ok(decoded(Some(image()), None)));
+    }
+    assert!(cache
+        .retain_sources(&HashSet::from([playing.clone()]))
+        .is_empty());
+    assert!(cache.image(&playing, "same-image").is_some());
+    assert!(cache.image(&other, "same-image").is_none());
 }

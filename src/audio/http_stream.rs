@@ -13,8 +13,10 @@ use super::error::{classify_io, failure_io, FailureError, StreamFailure};
 use super::stream_cache::{BufferProgress, StreamCache};
 use super::stream_control::StreamControl;
 use super::stream_response::{
-    is_transcoded_stream, request_range, stream_endpoint, StreamResponse,
+    initial_resource_response, is_transcoded_stream, request_resource_range, stream_endpoint,
+    StreamResponse,
 };
+use crate::source::HttpResource;
 
 const HTTP_READ_RETRIES: usize = 3;
 const TRANSCODE_END_RETRIES: usize = 1;
@@ -26,7 +28,7 @@ pub(super) fn near_estimated_end(position: u64, estimated_len: u64) -> bool {
 pub(super) struct HttpRangeReader {
     control: Arc<StreamControl>,
     client: Client,
-    url: String,
+    url: HttpResource,
     response: Option<StreamResponse>,
     response_position: u64,
     position: u64,
@@ -49,6 +51,7 @@ impl HttpRangeReader {
         Self::open_controlled(client, url, cache_dir, cache_key, StreamControl::new(false))
     }
 
+    #[cfg(test)]
     pub(super) fn open_controlled(
         client: Client,
         url: String,
@@ -56,10 +59,26 @@ impl HttpRangeReader {
         cache_key: &str,
         control: Arc<StreamControl>,
     ) -> Result<Self> {
+        Self::open_resource(client, url.into(), cache_dir, cache_key, control)
+    }
+
+    pub(super) fn open_resource(
+        client: Client,
+        url: HttpResource,
+        cache_dir: &Path,
+        cache_key: &str,
+        control: Arc<StreamControl>,
+    ) -> Result<Self> {
         control.check()?;
-        let mut cache = StreamCache::open(cache_dir, cache_key, control.clone())?;
+        let mut cache = StreamCache::open_with_policy(
+            cache_dir,
+            cache_key,
+            control.clone(),
+            url.cache_policy(),
+        )?;
         if cache.complete() {
             let len = cache.cached_len();
+            let mime_type = url.mime_hint().map(str::to_owned);
             return Ok(Self {
                 control,
                 client,
@@ -71,18 +90,25 @@ impl HttpRangeReader {
                 range_supported: true,
                 decoder_seekable: true,
                 length_is_estimate: false,
-                mime_type: None,
+                mime_type,
                 cache,
             });
         }
 
-        let response = request_range(&client, &url, 0).context("failed to request audio stream")?;
+        let (client, url, response) =
+            initial_resource_response(client, url).context("failed to request audio stream")?;
         control.check()?;
         let range_supported = response.range_supported();
         let len = response.len();
-        let length_is_estimate = is_transcoded_stream(&url);
+        let length_is_estimate = url.length_is_estimate() || is_transcoded_stream(&url);
         let decoder_seekable = range_supported && len.is_some() && !length_is_estimate;
-        let mime_type = response.mime_type().map(str::to_owned);
+        let mime_type = match response.mime_type() {
+            None | Some("application/octet-stream") => url
+                .mime_hint()
+                .map(str::to_owned)
+                .or_else(|| response.mime_type().map(str::to_owned)),
+            mime => mime.map(str::to_owned),
+        };
         cache.prepare_partial(len, range_supported);
 
         log::info!(
@@ -134,7 +160,7 @@ impl HttpRangeReader {
             "reopening audio HTTP stream; endpoint={} byte_position={position}",
             stream_endpoint(&self.url)
         );
-        let response = request_range(&self.client, &self.url, position)
+        let response = request_resource_range(&self.client, &self.url, position)
             .and_then(|response| {
                 if !self.length_is_estimate {
                     response.validate_length(self.len)?;
@@ -324,5 +350,7 @@ pub(super) fn io_error(error: anyhow::Error) -> io::Error {
     }
 }
 
+#[cfg(test)]
+pub(super) mod resource_tests;
 #[cfg(test)]
 pub(super) mod tests;

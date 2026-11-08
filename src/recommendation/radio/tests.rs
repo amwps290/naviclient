@@ -194,8 +194,8 @@ fn partial_source_failures_keep_successful_results_and_repeat_the_same_ranking()
     }
 }
 
-fn api(server: &Server) -> OpenSubsonicProvider {
-    OpenSubsonicProvider::new(&server.url(""), "fixture", "fixture").unwrap()
+fn api(server: &Server) -> MusicSource {
+    MusicSource::opensubsonic("fixture-server", &server.url(""), "fixture", "fixture").unwrap()
 }
 
 fn endpoint(request: &Request) -> &str {

@@ -1,5 +1,67 @@
 use super::*;
 
+#[test]
+fn new_source_storage_never_adopts_legacy_files_or_shares_a_server_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = SourceId::new(ProviderKind::Bilibili, "same-profile");
+    let legacy = ServerCache::new(dir.path().into(), Some("same-profile"));
+    let bilibili = ServerCache::for_source(dir.path().into(), &source);
+    let mut saved = session(45.0);
+    legacy.save(CacheKind::Session, &saved).unwrap();
+    fs::write(
+        legacy.legacy_path(CacheKind::Session),
+        serde_json::to_vec(&saved).unwrap(),
+    )
+    .unwrap();
+    assert!(source_session(&bilibili, &source, None).is_none());
+    assert!(legacy.legacy_path(CacheKind::Session).exists());
+    assert!(bilibili
+        .load::<HashMap<String, (f32, f32)>>(CacheKind::Loudness)
+        .is_none());
+    saved.source = Some(source.clone());
+    saved.server_url.clear();
+    legacy
+        .save_snapshot(&CacheSnapshot::scoped(source.clone(), saved.clone()))
+        .unwrap();
+    assert_eq!(
+        source_session(&bilibili, &source, None)
+            .unwrap()
+            .position_secs,
+        45.0
+    );
+    assert_ne!(
+        legacy.path(CacheKind::Session),
+        bilibili.path(CacheKind::Session)
+    );
+    assert_eq!(
+        legacy
+            .load::<PlaybackSession>(CacheKind::Session)
+            .unwrap()
+            .server_url,
+        session(45.0).server_url
+    );
+    assert!(source_session(
+        &bilibili,
+        &SourceId::new(ProviderKind::Bilibili, "other"),
+        None
+    )
+    .is_none());
+}
+
+#[test]
+fn source_adapter_preserves_exact_legacy_open_subsonic_cache_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = SourceId::new(ProviderKind::OpenSubsonic, "SRV-A/");
+    let legacy = ServerCache::new(dir.path().into(), Some("SRV-A/"));
+    let adapter = ServerCache::for_source(dir.path().into(), &source);
+    for kind in CacheKind::ALL {
+        assert_eq!(legacy.path(kind), adapter.path(kind));
+    }
+    legacy.save(CacheKind::Session, &session(45.0)).unwrap();
+    let restored = source_session(&adapter, &source, Some(&session(45.0).server_url)).unwrap();
+    assert_eq!(restored.position_secs, 45.0);
+}
+
 use crate::models::{PlayModes, RepeatMode, Song};
 
 const SERVER_URL: &str = "https://music.example";

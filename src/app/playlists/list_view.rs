@@ -9,6 +9,7 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let bilibili = self.browsing_bilibili();
         let columns = self.content_columns(window);
         let p = palette(cx);
         let playlist_list = cover_grid(
@@ -23,11 +24,19 @@ impl NavidromeApp {
                         (!crate::playlist::can_edit(playlist, &self.config.username))
                             .then_some(playlist.owner.as_deref())
                             .flatten();
-                    let details = playlist_card_subtitle(
-                        playlist.song_count.unwrap_or_default(),
-                        playlist.duration,
-                        shared_owner,
-                    );
+                    let details = if bilibili {
+                        t!(
+                            "%{count} videos",
+                            count = playlist.song_count.unwrap_or_default()
+                        )
+                        .to_string()
+                    } else {
+                        playlist_card_subtitle(
+                            playlist.song_count.unwrap_or_default(),
+                            playlist.duration,
+                            shared_owner,
+                        )
+                    };
                     v_flex()
                         .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
                         .min_w_0()
@@ -71,18 +80,19 @@ impl NavidromeApp {
                     .gap_3()
                     .flex_wrap()
                     .child(div().flex_1().min_w(px(240.0)).child(self.page_header(
-                        t!("Playlists"),
-                        t!(
-                            "%{count} playlists",
-                            count = self.state.playlists.items().len()
-                        ),
+                        if bilibili { t!("My Bilibili favorites") } else { t!("Playlists") },
+                        if bilibili {
+                            t!("%{count} favorite folders", count = self.state.playlists.items().len())
+                        } else {
+                            t!("%{count} playlists", count = self.state.playlists.items().len())
+                        },
                         cx,
                     )))
                     .child(
                         h_flex()
                             .items_center()
                             .gap_1()
-                            .child(
+                            .when(!bilibili, |this| this.child(
                                 Button::new("new-playlist")
                                     .label(t!("New playlist"))
                                     .primary()
@@ -91,8 +101,8 @@ impl NavidromeApp {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.name_playlist(None, vec![], window, cx)
                                     })),
-                            )
-                            .child(
+                            ))
+                            .when(!bilibili, |this| this.child(
                                 Button::new("import-playlist")
                                     .label(t!("Import playlist"))
                                     .outline()
@@ -101,10 +111,10 @@ impl NavidromeApp {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_import_dialog(window, cx);
                                     })),
-                            )
+                            ))
                             .child(self.header_refresh_button(
                                 "refresh-playlists",
-                                t!("Refresh playlists"),
+                                if bilibili { t!("Refresh favorites") } else { t!("Refresh playlists") },
                                 self.state.playlists.list_loading(),
                                 cx,
                                 |this, _cx| this.load_playlists(),
@@ -115,8 +125,15 @@ impl NavidromeApp {
                 self.state.playlists.items().is_empty() && self.state.playlists.list_loading(),
                 |this| this.child(self.render_album_skeleton_grid(window, cx)),
             )
+            .when_some(self.state.playlists.list_error(), |this, error| {
+                this.child(
+                    div().text_sm().text_color(palette(cx).text_secondary).child(error.to_string()),
+                )
+            })
             .when(
-                self.state.playlists.items().is_empty() && !self.state.playlists.list_loading(),
+                self.state.playlists.items().is_empty()
+                    && !self.state.playlists.list_loading()
+                    && self.state.playlists.list_error().is_none(),
                 |this| {
                     this.child(
                         v_flex()
@@ -136,16 +153,14 @@ impl NavidromeApp {
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(t!("No playlists are available.")),
+                                    .child(if bilibili { t!("No Bilibili favorites yet") } else { t!("No playlists are available.") }),
                             )
                             .child(
                                 div()
                                     .max_w(px(420.0))
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(t!(
-                                        "Create a playlist or import one to organize your music."
-                                    )),
+                                    .child(if bilibili { t!("Save videos to your favorites in Bilibili, then refresh here.") } else { t!("Create a playlist or import one to organize your music.") }),
                             ),
                     )
                 },

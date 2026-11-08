@@ -81,7 +81,19 @@ fn repeated_now_playing_entry_retains_the_original_return_page_and_pending_lyric
             ..Default::default()
         };
         let mut requests = LibraryRequests::default();
-        let request = state.lyrics.begin("song", &mut requests).unwrap();
+        let request = state
+            .lyrics
+            .begin(
+                &crate::source::MediaKey::new(
+                    crate::source::SourceId::new(
+                        crate::source::ProviderKind::OpenSubsonic,
+                        "fixture",
+                    ),
+                    "song",
+                ),
+                &mut requests,
+            )
+            .unwrap();
         let expected_return = if view == View::NowPlaying {
             View::Search
         } else {
@@ -222,7 +234,19 @@ fn now_playing_transitions_reset_follow_without_discarding_cached_lyrics_or_erro
     for succeeded in [false, true] {
         let mut state = AppState::default();
         let mut requests = LibraryRequests::default();
-        let request = state.lyrics.begin("song", &mut requests).unwrap();
+        let request = state
+            .lyrics
+            .begin(
+                &crate::source::MediaKey::new(
+                    crate::source::SourceId::new(
+                        crate::source::ProviderKind::OpenSubsonic,
+                        "fixture",
+                    ),
+                    "song",
+                ),
+                &mut requests,
+            )
+            .unwrap();
         assert!(state.lyrics.complete(
             request,
             if succeeded {

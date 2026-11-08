@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use reqwest::blocking::Client;
 
-use super::decoder::{play_url, PreparedStream};
+use super::decoder::{play_resource, PreparedStream};
 use super::error::{FailureError, StreamFailure};
 use super::preparation_state::{PreparationKind, PreparationState, PreparationToken};
 use super::stream_control::StreamControl;
 
 pub(super) struct StreamRequest {
-    pub(super) url: String,
+    pub(super) url: crate::source::HttpResource,
     pub(super) cache_key: String,
     pub(super) cache_dir: PathBuf,
     pub(super) duration: Option<Duration>,
@@ -160,9 +160,9 @@ impl Preparation {
         self.spawn_with(
             token,
             move |control| {
-                play_url(
+                play_resource(
                     client,
-                    &request.url,
+                    request.url,
                     &request.cache_dir,
                     &request.cache_key,
                     request.duration,

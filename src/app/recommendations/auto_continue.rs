@@ -40,8 +40,14 @@ impl NavidromeApp {
         {
             return;
         }
-        let Some(api) = self.api.clone() else { return };
-        let Some(server_id) = self.config.active_server_id().map(str::to_string) else {
+        let Some(api) = self
+            .playback_source
+            .clone()
+            .filter(|api| api.capabilities().recommendations)
+        else {
+            return;
+        };
+        let Some(server_id) = self.session.server_id().map(str::to_string) else {
             return;
         };
         let Some(request) = self.state.auto_continue.begin(
@@ -60,9 +66,8 @@ impl NavidromeApp {
             .cloned()
             .collect::<Vec<_>>();
         let capabilities = self
-            .state
-            .connection
-            .server()
+            .playback_server
+            .as_ref()
             .map(|server| server.capabilities)
             .unwrap_or_default();
         let common = self.recommendation_generation_context(
@@ -89,7 +94,7 @@ impl NavidromeApp {
             return;
         };
         if !request.matches(
-            self.config.active_server_id(),
+            self.session.server_id(),
             self.config.auto_continue,
             self.state.playback_modes,
             self.state.queue_index,

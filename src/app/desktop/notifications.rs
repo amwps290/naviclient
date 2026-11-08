@@ -58,7 +58,7 @@ impl NavidromeApp {
         match self.desktop.track_notification_update(
             self.config.show_track_notifications,
             self.audio.progress().active,
-            self.config.active_server_id(),
+            self.session.server_id(),
             self.state.now_playing.as_ref().map(|song| song.id.as_str()),
         ) {
             TrackNotificationUpdate::Unchanged => return,
@@ -71,10 +71,12 @@ impl NavidromeApp {
         let Some(song) = self.state.now_playing.as_ref() else {
             return;
         };
+        let source = song.source.as_ref().or_else(|| self.session.source());
         let cover = song
             .cover_art
             .as_deref()
-            .map(|id| config::cover_cache_path(&self.config, self.config.active_server_id(), id));
+            .zip(source)
+            .map(|(id, source)| config::source_cover_cache_path(&self.config, source, id));
         self.track_notifier.track_changed(
             &song.title,
             &notify::notification_body(&song.artist, &song.album),

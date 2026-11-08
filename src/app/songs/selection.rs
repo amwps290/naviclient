@@ -19,6 +19,20 @@ pub(in crate::app) struct SongSelection {
 }
 
 impl SongSelection {
+    pub(in crate::app) fn retain_playback_scopes(&mut self) {
+        let retained = |scope| matches!(scope, SongScope::Queue | SongScope::History);
+        if self.cursor.is_some_and(|(scope, _)| !retained(scope)) {
+            self.cursor = None;
+        }
+        if self
+            .multi
+            .as_ref()
+            .is_some_and(|multi| !retained(multi.scope))
+        {
+            self.multi = None;
+        }
+    }
+
     pub(in crate::app) fn cursor(&self) -> Option<(SongScope, usize)> {
         self.cursor
     }

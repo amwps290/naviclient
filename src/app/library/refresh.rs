@@ -9,6 +9,10 @@ impl NavidromeApp {
             return;
         }
         self.refresh_connection();
+        if self.browsing_bilibili() {
+            self.load_playlists();
+            return;
+        }
         self.load_artists();
         self.load_albums();
         self.load_genres();
@@ -56,6 +60,9 @@ impl NavidromeApp {
 
     /// 从歌曲元数据打开艺术家页；缺少 artist_id 时无操作。
     pub(in crate::app) fn open_song_artist(&mut self, song: &Song) {
+        if !self.browsing_owns_song(song) {
+            return;
+        }
         if let Some(artist) = artist_for_song(song) {
             self.open_artist(artist);
         }
@@ -63,6 +70,9 @@ impl NavidromeApp {
 
     /// 从歌曲元数据打开专辑页；缺少 album_id 时无操作。
     pub(in crate::app) fn open_song_album(&mut self, song: &Song) {
+        if !self.browsing_owns_song(song) {
+            return;
+        }
         if let Some(album) = album_for_song(song) {
             self.open_album(album);
         }

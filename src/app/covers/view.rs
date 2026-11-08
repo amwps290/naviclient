@@ -20,13 +20,35 @@ impl NavidromeApp {
         shadows: Vec<gpui_kit::BoxShadow>,
     ) -> gpui_kit::AnyElement {
         let cover = cover_id
-            .and_then(|id| self.state.covers.image(id))
+            .and_then(|id| self.browsing_cover_image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
         img(cover)
             .size(px(size))
             // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
+            .aspect_square()
+            .object_fit(ObjectFit::Cover)
+            .flex_none()
+            .rounded(px(radius))
+            .shadow(shadows)
+            .into_any_element()
+    }
+
+    pub(in crate::app) fn render_song_cover_styled(
+        &self,
+        song: &Song,
+        size: f32,
+        radius: f32,
+        shadows: Vec<gpui_kit::BoxShadow>,
+    ) -> gpui_kit::AnyElement {
+        let cover = self
+            .song_cover_image(song)
+            .cloned()
+            .unwrap_or_else(|| self.default_cover.clone());
+        self.mark_cover_image_used(&cover);
+        img(cover)
+            .size(px(size))
             .aspect_square()
             .object_fit(ObjectFit::Cover)
             .flex_none()
@@ -43,8 +65,11 @@ impl NavidromeApp {
         tonearm_engaged: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let cover = cover_id
-            .and_then(|id| self.state.covers.image(id))
+        let cover = self
+            .state
+            .now_playing
+            .as_ref()
+            .and_then(|song| self.song_cover_image(song))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);

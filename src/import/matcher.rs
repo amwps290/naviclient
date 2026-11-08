@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use crate::api::OpenSubsonicProvider;
 use crate::models::Song;
+use crate::source::MusicSource;
 
 use super::scoring::{best_match, strip_parenthetical};
 use super::{ImportedTrack, MatchedSongs, TrackMatch};
@@ -20,10 +20,7 @@ const MATCH_ATTEMPTS: usize = 2;
 
 /// 用曲库搜索匹配单首：先“标题 + 主艺人”，没结果或全不过线再退化
 /// 到仅标题（艺人 tag 常有繁简/别名差异）。
-pub async fn match_track(
-    api: &OpenSubsonicProvider,
-    track: &ImportedTrack,
-) -> Result<Option<Song>> {
+pub async fn match_track(api: &MusicSource, track: &ImportedTrack) -> Result<Option<Song>> {
     let title = strip_parenthetical(&track.title);
     let primary = track
         .artists
@@ -45,10 +42,7 @@ pub async fn match_track(
     Ok(best)
 }
 
-async fn match_track_with_retry(
-    api: &OpenSubsonicProvider,
-    track: &ImportedTrack,
-) -> Result<Option<Song>> {
+async fn match_track_with_retry(api: &MusicSource, track: &ImportedTrack) -> Result<Option<Song>> {
     let mut last_error = None;
     for attempt in 0..MATCH_ATTEMPTS {
         match match_track(api, track).await {
@@ -65,7 +59,7 @@ async fn match_track_with_retry(
 /// 匹配整张歌单。按索引取模分给 WORKERS 个任务并发执行，结果写回与
 /// `tracks` 对齐的槽位；每完成一首回调一次当前进度数。
 pub async fn match_playlist<F>(
-    api: &OpenSubsonicProvider,
+    api: &MusicSource,
     tracks: &[ImportedTrack],
     progress: F,
 ) -> Result<MatchedSongs>

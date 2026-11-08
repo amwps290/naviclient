@@ -1,7 +1,7 @@
 //! Home listening feature: resume the current song, or else the latest album.
 
 use crate::app::prelude::*;
-use crate::app::style::cover_tint::{tint_background, TintSurface};
+use crate::app::style::cover_tint::{cover_tint, tint_background, TintSurface};
 
 #[derive(Clone)]
 enum FeatureTarget {
@@ -106,11 +106,40 @@ impl NavidromeApp {
     ) -> Option<gpui_kit::AnyElement> {
         let content = self.home_feature_content()?;
         let p = palette(cx);
-        let tint = self.tint_for_cover(TintSurface::HomeFeature, content.cover_id.as_deref(), cx);
+        let tint = if matches!(content.target, FeatureTarget::NowPlaying) {
+            cover_tint(
+                TintSurface::HomeFeature,
+                self.now_playing_cover_palette(),
+                cx.theme().background,
+                cx.theme().is_dark(),
+            )
+        } else {
+            self.tint_for_cover(TintSurface::HomeFeature, content.cover_id.as_deref(), cx)
+        };
         let art_size = if compact {
             tokens::HERO_COVER_COMPACT
         } else {
             tokens::HERO_COVER
+        };
+        let artwork = if let Some(song) = self
+            .state
+            .now_playing
+            .as_ref()
+            .filter(|_| matches!(content.target, FeatureTarget::NowPlaying))
+        {
+            self.render_song_cover_styled(
+                song,
+                art_size,
+                tokens::radius::COVER,
+                cover_shadow(false, cx),
+            )
+        } else {
+            self.render_cover_styled(
+                content.cover_id.as_deref(),
+                art_size,
+                tokens::radius::COVER,
+                cover_shadow(false, cx),
+            )
         };
         let target_cover = content.target.clone();
         let target_play = content.target.clone();
@@ -139,12 +168,7 @@ impl NavidromeApp {
                             this.open_feature(&target_cover);
                             cx.notify();
                         }))
-                        .child(self.render_cover_styled(
-                            content.cover_id.as_deref(),
-                            art_size,
-                            tokens::radius::COVER,
-                            cover_shadow(false, cx),
-                        )),
+                        .child(artwork),
                 )
                 .child(
                     v_flex()

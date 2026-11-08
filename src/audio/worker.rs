@@ -30,7 +30,7 @@ pub(super) mod playback;
 #[derive(Debug)]
 pub(super) enum Command {
     Play {
-        url: String,
+        url: crate::source::HttpResource,
         cache_key: String,
         duration_hint: Option<Duration>,
         start_position: Duration,
@@ -40,7 +40,7 @@ pub(super) enum Command {
     },
     Preload {
         id: u64,
-        url: String,
+        url: crate::source::HttpResource,
         cache_key: String,
         duration_hint: Option<Duration>,
         gain: f32,

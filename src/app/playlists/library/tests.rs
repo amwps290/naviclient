@@ -19,6 +19,7 @@ fn song(id: &str, cover: Option<&str>) -> Song {
 
 fn details(id: &str) -> PlaylistDetails {
     PlaylistDetails {
+        unavailable_count: 0,
         playlist: playlist(id),
         songs: vec![
             song("a", None),

@@ -51,6 +51,7 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) queue_drawer_tab: QueueDrawerTab,
     pub(in crate::app) now_playing: Option<Song>,
     pub(in crate::app) now_playing_quality: Option<TranscodingQuality>,
+    pub(in crate::app) now_playing_audio_quality: Option<crate::source::AudioQuality>,
     pub(in crate::app) lyrics: LyricsState,
     pub(in crate::app) covers: CoverCache,
     pub(in crate::app) status: String,
@@ -68,6 +69,31 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) listening: ListeningState,
     /// 本地测量响度、所属服务器和播放增益选择。
     pub(in crate::app) loudness: LoudnessCache,
+}
+
+impl AppState {
+    /// Replace page-owned data while retaining the playback occurrence, queue,
+    /// lyrics, history, output state and source-qualified artwork requests.
+    pub(in crate::app) fn reset_browsing(&mut self) {
+        self.connection = ServerConnection::default();
+        self.view = View::Home;
+        self.artists = ArtistLibrary::default();
+        self.albums = PagedCollection::default();
+        self.home_albums = HomeAlbums::default();
+        self.daily_mix = DailyMixState::default();
+        self.genres = GenreLibrary::default();
+        self.search = SearchState::default();
+        self.collapsed_sections = HashSet::from(["random".to_string()]);
+        self.artist_details = ArtistDetails::default();
+        self.album_details = AlbumDetails::default();
+        self.library_playback = LibraryPlayback::default();
+        self.playlists = PlaylistLibrary::default();
+        self.favorites = FavoritesState::default();
+        self.hovered_item = None;
+        self.song_info = None;
+        self.view_before_now_playing = View::Home;
+        self.song_selection.retain_playback_scopes();
+    }
 }
 
 impl Default for AppState {
@@ -97,6 +123,7 @@ impl Default for AppState {
             queue_drawer_tab: QueueDrawerTab::default(),
             now_playing: None,
             now_playing_quality: None,
+            now_playing_audio_quality: None,
             lyrics: LyricsState::default(),
             covers: CoverCache::default(),
             status: t!("Not connected").to_string(),
@@ -113,3 +140,6 @@ impl Default for AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

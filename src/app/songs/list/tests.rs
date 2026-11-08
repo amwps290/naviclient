@@ -85,6 +85,7 @@ fn scoped_lists_read_the_current_state_including_queue_and_history() {
     state.playlists.complete_detail(
         playlist_request,
         Ok(crate::playlist::PlaylistDetails {
+            unavailable_count: 0,
             playlist: Playlist::default(),
             songs: vec![song("Playlist")],
         }),

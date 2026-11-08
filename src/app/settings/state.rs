@@ -33,6 +33,7 @@ pub(in crate::app) enum ShortcutRecording {
 
 #[derive(Default)]
 pub(in crate::app) struct SettingsUi {
+    pub(in crate::app) bilibili_login: super::bilibili_state::LoginState,
     pub(in crate::app) open: bool,
     pub(in crate::app) section: SettingsSection,
     recording: Option<ShortcutRecording>,
@@ -48,6 +49,10 @@ pub(in crate::app) struct SettingsUi {
 }
 
 impl SettingsUi {
+    pub(in crate::app) fn close(&mut self) {
+        self.open = false;
+        self.bilibili_login.cancel();
+    }
     /// The visible form and Save/Cancel actions must address the same profile.
     /// An obsolete explicit edit target must never fall back to another server.
     pub(in crate::app) fn server_form_target<'a>(

@@ -210,36 +210,45 @@ impl NavidromeApp {
                                         cx,
                                     )),
                             )
-                            .when(!song.album.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .text_size(px(tokens::META))
-                                        .text_color(p.text_secondary)
-                                        .child(self.song_album_link(
-                                            SharedString::from(format!(
-                                                "now-playing-album-{}",
-                                                song.id
+                            .when(
+                                !song.album.is_empty() || song.bilibili_part.is_some(),
+                                |this| {
+                                    this.child(
+                                        div()
+                                            .text_size(px(tokens::META))
+                                            .text_color(p.text_secondary)
+                                            .child(self.song_album_link(
+                                                SharedString::from(format!(
+                                                    "now-playing-album-{}",
+                                                    song.id
+                                                )),
+                                                song.album.clone(),
+                                                song,
+                                                cx,
                                             )),
-                                            song.album.clone(),
-                                            song,
-                                            cx,
-                                        )),
+                                    )
+                                },
+                            )
+                            .when(song.bilibili_part.is_none(), |this| {
+                                this.child(
+                                    capsule_button("now-playing-song-radio")
+                                        .icon(PlayerIcon::Play)
+                                        .label(if radio_loading {
+                                            t!("Building song radio…")
+                                        } else {
+                                            t!("Start song radio")
+                                        })
+                                        .disabled(
+                                            self.source_for_song(song).is_none_or(|api| {
+                                                !api.capabilities().recommendations
+                                            }) || radio_loading,
+                                        )
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.start_song_radio(radio_seed.clone());
+                                            cx.notify();
+                                        })),
                                 )
-                            })
-                            .child(
-                                capsule_button("now-playing-song-radio")
-                                    .icon(PlayerIcon::Play)
-                                    .label(if radio_loading {
-                                        t!("Building song radio…")
-                                    } else {
-                                        t!("Start song radio")
-                                    })
-                                    .disabled(self.api.is_none() || radio_loading)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.start_song_radio(radio_seed.clone());
-                                        cx.notify();
-                                    })),
-                            ),
+                            }),
                     ),
             )
             .child(

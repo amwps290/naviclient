@@ -32,7 +32,11 @@ impl NavidromeApp {
                     .small()
                     .selected(self.state.settings.open)
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings.open = !this.state.settings.open;
+                        if this.state.settings.open {
+                            this.state.settings.close();
+                        } else {
+                            this.state.settings.open = true;
+                        }
                         if this.state.settings.open {
                             this.refresh_output_devices(cx);
                         } else {

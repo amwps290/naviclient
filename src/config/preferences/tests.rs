@@ -75,3 +75,32 @@ fn legacy_global_settings_upgrade_playback_modes_and_normalize_volume() {
         assert_eq!(restored.password, "secret");
     }
 }
+
+#[test]
+fn bilibili_only_settings_load_without_creating_a_subsonic_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    fs::write(
+        &path,
+        r#"{"sources":[{"provider":"bilibili","id":"bili-account","credential_key":"credential-store/bili-account"}]}"#,
+    ).unwrap();
+    let restored = read_config_at(&path);
+    assert!(restored.servers.is_empty());
+    assert!(restored.active_profile().is_none());
+    assert_eq!(
+        restored.active_source,
+        Some(crate::source::SourceId::new(
+            crate::source::ProviderKind::Bilibili,
+            "bili-account"
+        ))
+    );
+    let json = serde_json::to_value(&restored).unwrap();
+    assert_eq!(
+        json["sources"][0]["credential_key"],
+        "credential-store/bili-account"
+    );
+    assert!(json["sources"][0].get("password").is_none());
+    assert!(json["sources"][0].get("cookie").is_none());
+    super::super::json::write_json_atomic(&path, &restored, "config").unwrap();
+    assert_eq!(serde_json::to_value(read_config_at(&path)).unwrap(), json);
+}

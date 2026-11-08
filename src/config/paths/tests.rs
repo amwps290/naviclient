@@ -24,3 +24,17 @@ fn custom_audio_cache_directories_own_the_cover_subdirectory() {
     let default_config = Config::default();
     assert_eq!(audio_cache_dir(&default_config), default_audio_cache_dir());
 }
+
+#[test]
+fn source_scopes_keep_legacy_server_paths_and_separate_other_providers() {
+    use crate::source::{ProviderKind, SourceId};
+    let legacy = SourceId::new(ProviderKind::OpenSubsonic, "Server-A/old");
+    let bilibili = SourceId::new(ProviderKind::Bilibili, "Server-A/old");
+    assert_eq!(source_scope(&legacy), "server-aold");
+    assert_eq!(source_scope(&legacy), server_scope(Some("Server-A/old")));
+    assert_ne!(source_scope(&legacy), source_scope(&bilibili));
+    assert_ne!(
+        source_scope(&bilibili),
+        source_scope(&SourceId::new(ProviderKind::Bilibili, "Server-Aold"))
+    );
+}

@@ -8,10 +8,11 @@ impl NavidromeApp {
         let Some(api) = self.api.clone() else { return };
         let request = self.state.playlists.begin_list(&mut self.library_requests);
         let tx = self.tx.clone();
-        self.spawn_future(async move {
+        let task = self.runtime.spawn(async move {
             let result = api.playlists().await.map_err(error_message);
             let _ = tx.send(Msg::Playlists { request, result });
         });
+        self.state.playlists.attach_list(task.abort_handle());
     }
 
     pub(in crate::app) fn finish_playlists(
@@ -59,10 +60,11 @@ impl NavidromeApp {
             return;
         };
         let tx = self.tx.clone();
-        self.spawn_future(async move {
+        let task = self.runtime.spawn(async move {
             let result = api.playlist(&playlist_id).await.map_err(error_message);
             let _ = tx.send(Msg::PlaylistSongs { request, result });
         });
+        self.state.playlists.attach_detail(task.abort_handle());
     }
 
     pub(in crate::app) fn finish_playlist_detail(
@@ -75,6 +77,7 @@ impl NavidromeApp {
         };
         match result {
             Ok(details) => {
+                let unavailable = details.unavailable_count;
                 let cover = details.playlist.cover_art.clone();
                 let covers = details
                     .songs
@@ -86,6 +89,12 @@ impl NavidromeApp {
                     .clear_song_selection_for_scope(SongScope::PlaylistDetail);
                 self.ensure_cover(cover.as_deref(), true);
                 self.preload_covers(covers);
+                if unavailable > 0 {
+                    self.notify_warning(t!(
+                        "Skipped %{count} unavailable favorites",
+                        count = unavailable
+                    ));
+                }
             }
             Err(error) => {
                 let error = error.to_string();

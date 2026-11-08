@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn signed_audio_refresh_has_one_attempt_and_keeps_the_failure_position() {
+    let mut reconnect = PlaybackReconnect::default();
+    let occurrence = PlaybackId::new();
+    let now = Instant::now();
+    let position = Duration::from_secs(75);
+    assert!(matches!(
+        reconnect.schedule_resource_refresh(occurrence, position, now),
+        ReconnectDecision::Retry { attempt: 1, .. }
+    ));
+    assert_eq!(
+        reconnect.poll(
+            now + Duration::from_secs(2),
+            Some(occurrence),
+            true,
+            &PlaybackState::default()
+        ),
+        ReconnectPoll::Retry(ReconnectAttempt {
+            attempt: 1,
+            position
+        })
+    );
+    assert_eq!(
+        reconnect.schedule_resource_refresh(occurrence, position, now + Duration::from_secs(2)),
+        ReconnectDecision::Exhausted
+    );
+    assert_eq!(
+        reconnect.poll(
+            now + Duration::from_secs(20),
+            Some(occurrence),
+            true,
+            &PlaybackState::default()
+        ),
+        ReconnectPoll::Idle
+    );
+}
+
+#[test]
 fn reconnect_only_retries_network_and_server_failures() {
     // 解码失败、本地输出问题重试也不会变好，直接交给用户。
     for kind in [

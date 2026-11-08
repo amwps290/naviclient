@@ -103,13 +103,13 @@ impl NavidromeApp {
                         })
                         .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
                         .when(!compact_columns, |this| {
-                            this.child(
-                                div()
-                                    .flex_1()
-                                    .flex_grow(2.0)
-                                    .max_w(px(180.0))
-                                    .child(t!("Artist")),
-                            )
+                            this.child(div().flex_1().flex_grow(2.0).max_w(px(180.0)).child(
+                                if self.browsing_bilibili() {
+                                    t!("Uploader")
+                                } else {
+                                    t!("Artist")
+                                },
+                            ))
                         })
                         .child(
                             div()
@@ -147,7 +147,17 @@ impl NavidromeApp {
         } else {
             t!("Favorite selected")
         };
-        let add_disabled = self.state.playlists.editing() || self.api.is_none();
+        let selected_owner = self
+            .state
+            .selected_song_iter(scope)
+            .all(|song| self.browsing_owns_song(song));
+        let capabilities = self
+            .api
+            .as_ref()
+            .map(MusicSource::capabilities)
+            .unwrap_or_default();
+        let add_disabled =
+            self.state.playlists.editing() || !selected_owner || !capabilities.playlist_write;
         raised_surface(
             h_flex()
                 .h(px(44.0))
@@ -200,28 +210,39 @@ impl NavidromeApp {
                     cx.notify();
                 })),
         )
-        .child(
-            Button::new(SharedString::from(format!("multi-playlist-{scope}")))
-                .label(t!("Add to playlist…"))
-                .disabled(add_disabled)
-                .ghost()
-                .small()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    let ids = this.state.selected_song_ids(scope);
-                    this.choose_playlist(ids, window, cx);
-                })),
-        )
-        .child(
-            Button::new(SharedString::from(format!("multi-favorite-{scope}")))
-                .icon(favorite_icon)
-                .tooltip(favorite_label)
-                .ghost()
-                .small()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.favorite_selected(scope);
-                    cx.notify();
-                })),
-        )
+        .when(capabilities.playlist_write, |this| {
+            this.child(
+                Button::new(SharedString::from(format!("multi-playlist-{scope}")))
+                    .label(t!("Add to playlist…"))
+                    .disabled(add_disabled)
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this
+                            .state
+                            .selected_song_iter(scope)
+                            .all(|song| this.browsing_owns_song(song))
+                        {
+                            let ids = this.state.selected_song_ids(scope);
+                            this.choose_playlist(ids, window, cx);
+                        }
+                    })),
+            )
+        })
+        .when(capabilities.favorite_write, |this| {
+            this.child(
+                Button::new(SharedString::from(format!("multi-favorite-{scope}")))
+                    .icon(favorite_icon)
+                    .tooltip(favorite_label)
+                    .disabled(!selected_owner || !capabilities.favorite_write)
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.favorite_selected(scope);
+                        cx.notify();
+                    })),
+            )
+        })
         .child(
             Button::new(SharedString::from(format!("multi-clear-{scope}")))
                 .icon(AppIcon::Close)

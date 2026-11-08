@@ -62,9 +62,13 @@ fn play_after_end_or_failure_starts_at_zero_instead_of_the_worker_terminal_posit
             duration: Some(Duration::from_secs(180)),
             ..Default::default()
         });
-        let api =
-            OpenSubsonicProvider::new("http://127.0.0.1:1", "fixture-user", "fixture-password")
-                .unwrap();
+        let api = MusicSource::opensubsonic(
+            "fixture-server",
+            "http://127.0.0.1:1",
+            "fixture-user",
+            "fixture-password",
+        )
+        .unwrap();
         assert_eq!(
             apply_playback_request(&fixture.audio, PlaybackRequest::Play, true, || {
                 let position = session.start_position(state.now_playing.as_ref());
@@ -402,7 +406,16 @@ fn stop_finishes_partial_listening_immediately_and_retains_the_queue_for_a_fresh
     let (mut state, mut session) = listening_state();
     let entry = state.queue.entry_id(0);
     let mut requests = LibraryRequests::default();
-    let lyrics = state.lyrics.begin("fixture-song", &mut requests).unwrap();
+    let lyrics = state
+        .lyrics
+        .begin(
+            &crate::source::MediaKey::new(
+                crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, "fixture"),
+                "fixture-song",
+            ),
+            &mut requests,
+        )
+        .unwrap();
     assert!(state.lyrics.loading());
     let fixture = fixture(true, false);
     fixture.audio.stop();
@@ -476,8 +489,13 @@ fn rejected_replacement_after_removal_stops_the_old_occurrence_and_keeps_the_sur
         QueueRemoval::PlayReplacement(0)
     );
     let target = StartTarget::existing(&state.queue, 0).unwrap();
-    let api = OpenSubsonicProvider::new("http://127.0.0.1:1", "fixture-user", "fixture-password")
-        .unwrap();
+    let api = MusicSource::opensubsonic(
+        "fixture-server",
+        "http://127.0.0.1:1",
+        "fixture-user",
+        "fixture-password",
+    )
+    .unwrap();
     let prepared = PreparedStart::prepare(
         target,
         Some(&api),

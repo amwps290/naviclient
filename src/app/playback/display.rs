@@ -10,6 +10,26 @@ pub(in crate::app) struct PlaybackTechnicalInfo {
     pub(in crate::app) tooltip: String,
 }
 
+pub(in crate::app) fn bilibili_technical_info(
+    quality: Option<&crate::source::AudioQuality>,
+) -> PlaybackTechnicalInfo {
+    PlaybackTechnicalInfo {
+        format: "AAC-LC".into(),
+        tooltip: quality
+            .and_then(|quality| quality.bandwidth)
+            .map(|bandwidth| {
+                t!(
+                    "Independent AAC-LC audio · declared bandwidth %{bandwidth} bit/s",
+                    bandwidth = bandwidth
+                )
+                .to_string()
+            })
+            .unwrap_or_else(|| {
+                t!("Independent audio · quality will be resolved on playback").to_string()
+            }),
+    }
+}
+
 pub(in crate::app) fn playback_technical_info(
     song: &Song,
     quality: TranscodingQuality,

@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use md5::{Digest, Md5};
 
 use super::stream_control::StreamControl;
+use crate::source::CachePolicy;
 
 const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
@@ -107,16 +108,52 @@ pub(super) struct StreamCache {
     complete: bool,
     logged_bucket: u64,
     progress: Arc<BufferProgress>,
+    temporary_limit: Option<u64>,
 }
 
 impl StreamCache {
     /// Probe completed files before any network request. Partial files are
     /// opened only after a successful response supplies its resume policy.
+    #[cfg(test)]
     pub(super) fn open(
         cache_dir: &Path,
         cache_key: &str,
         control: Arc<StreamControl>,
     ) -> Result<Self> {
+        Self::open_with_policy(cache_dir, cache_key, control, CachePolicy::Persistent)
+    }
+
+    pub(super) fn open_with_policy(
+        cache_dir: &Path,
+        cache_key: &str,
+        control: Arc<StreamControl>,
+        policy: CachePolicy,
+    ) -> Result<Self> {
+        if let CachePolicy::Temporary { max_bytes } = policy {
+            let file = if max_bytes == 0 {
+                None
+            } else {
+                tempfile::tempfile()
+                    .map_err(|error| {
+                        log::warn!(
+                            "temporary audio cache is unavailable, continuing without it: {error}"
+                        );
+                        error
+                    })
+                    .ok()
+            };
+            return Ok(Self {
+                control,
+                file,
+                complete_path: PathBuf::new(),
+                partial_path: PathBuf::new(),
+                cached_len: 0,
+                complete: false,
+                logged_bucket: 0,
+                progress: Arc::new(BufferProgress::new(0, None)),
+                temporary_limit: Some(max_bytes),
+            });
+        }
         let (complete_path, mut partial_path) = cache_paths(cache_dir, cache_key);
         let file = OpenOptions::new().read(true).open(&complete_path).ok();
         let cached_len = match file.as_ref() {
@@ -148,6 +185,7 @@ impl StreamCache {
                 cached_len,
                 complete.then_some(cached_len),
             )),
+            temporary_limit: None,
         })
     }
 
@@ -168,6 +206,9 @@ impl StreamCache {
         self.progress
             .total_bytes
             .store(len.unwrap_or(0), Ordering::Relaxed);
+        if self.temporary_limit.is_some() {
+            return;
+        }
         let cache_dir = self.partial_path.parent().unwrap_or_else(|| Path::new("."));
         self.file = fs::create_dir_all(cache_dir)
             .and_then(|()| {
@@ -264,6 +305,17 @@ impl StreamCache {
         if self.complete || start != self.cached_len || bytes.is_empty() {
             return;
         }
+        let bytes = if let Some(limit) = self.temporary_limit {
+            let remaining = limit.saturating_sub(self.cached_len);
+            &bytes[..bytes
+                .len()
+                .min(usize::try_from(remaining).unwrap_or(usize::MAX))]
+        } else {
+            bytes
+        };
+        if bytes.is_empty() {
+            return;
+        }
         let Some(file) = self.file.as_mut() else {
             return;
         };
@@ -307,6 +359,12 @@ impl StreamCache {
 
 impl Drop for StreamCache {
     fn drop(&mut self) {
+        if self.temporary_limit.is_some() {
+            // tempfile() owns an anonymous/private file; closing it releases
+            // the bytes and never publishes a persistent .audio/.part path.
+            self.file.take();
+            return;
+        }
         if self.complete {
             return;
         }

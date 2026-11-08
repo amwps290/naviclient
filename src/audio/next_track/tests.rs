@@ -19,7 +19,7 @@ fn rate() -> SampleRate {
 fn request(id: u64, key: &str, gain: f32) -> PreloadRequest {
     PreloadRequest {
         id,
-        url: format!("http://127.0.0.1:1/{key}"),
+        url: format!("http://127.0.0.1:1/{key}").into(),
         cache_key: key.into(),
         duration: Some(Duration::from_secs(12)),
         gain,
@@ -243,7 +243,7 @@ fn committed_boundary_reports_metadata_once_and_does_not_rearm() {
     assert_eq!(event.boundary, Duration::from_millis(100));
     assert_eq!(event.loudness_peak, 0.25);
     assert!((event.loudness_db - 20.0 * 0.25_f32.log10()).abs() < 0.01);
-    assert_eq!(next.url, "http://127.0.0.1:1/song:128");
+    assert_eq!(next.url.url(), "http://127.0.0.1:1/song:128");
     assert_eq!(next.cache_key, "song:128");
     assert_eq!(next.gain, 2.0);
     assert_eq!(next.info.duration, Some(Duration::from_secs(12)));

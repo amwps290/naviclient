@@ -4,10 +4,13 @@ use md5::{Digest, Md5};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
+use super::source::{ProviderKind, SourceId, SourceProfile};
 use super::{
     AlbumSort, ArtistSort, EqSettings, GlobalShortcutSettings, LanguagePreference, PlayModes,
     ShortcutSettings, ThemePreference, TranscodingQuality, VolumeNormalization,
 };
+
+mod sources;
 
 /// 一台配置好的服务端。`id` 由地址与用户名派生，用作缓存命名空间。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,13 +98,25 @@ fn normalize_server_url(url: &str) -> String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// 当前激活服务器的地址/账号镜像，保留用于旧配置兼容。
+    #[serde(default)]
     pub server_url: String,
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
     #[serde(default)]
     pub servers: Vec<ServerProfile>,
     #[serde(default)]
     pub active_server: Option<String>,
+    /// Source profiles share existing OpenSubsonic credential references.
+    #[serde(default, deserialize_with = "sources::deserialize_profiles")]
+    pub sources: Vec<SourceProfile>,
+    /// Browsing source; playback will keep its own source context.
+    #[serde(default, deserialize_with = "sources::deserialize_active")]
+    pub active_source: Option<SourceId>,
+    /// Last accepted playback owner, independent of the selected browsing source.
+    #[serde(default, deserialize_with = "sources::deserialize_active")]
+    pub playback_source: Option<SourceId>,
     #[serde(default)]
     pub theme: ThemePreference,
     #[serde(default)]
@@ -148,6 +163,9 @@ impl Default for Config {
             password: String::new(),
             servers: Vec::new(),
             active_server: None,
+            sources: Vec::new(),
+            active_source: None,
+            playback_source: None,
             theme: ThemePreference::Light,
             language: LanguagePreference::System,
             cache_dir: None,
@@ -172,7 +190,12 @@ impl Default for Config {
 
 impl Config {
     pub fn sync_active_profile(&mut self) {
-        if self.servers.is_empty() {
+        let has_bilibili = self.sources.iter().any(
+            |source| matches!(source, SourceProfile::Bilibili { id, .. } if !id.trim().is_empty()),
+        );
+        let configured_legacy =
+            !self.server_url.trim().is_empty() && !self.username.trim().is_empty();
+        if self.servers.is_empty() && (!has_bilibili || configured_legacy) {
             let profile = ServerProfile::new(&self.server_url, &self.username, &self.password);
             self.active_server = Some(profile.id.clone());
             self.servers.push(profile);
@@ -182,12 +205,26 @@ impl Config {
             .as_ref()
             .is_some_and(|id| self.servers.iter().any(|profile| &profile.id == id));
         if !active_exists {
-            self.active_server = Some(self.servers[0].id.clone());
+            self.active_server = self.servers.first().map(|profile| profile.id.clone());
         }
-        if let Some(profile) = self.active_profile().cloned() {
-            self.server_url = profile.url;
-            self.username = profile.username;
-            self.password = profile.password;
+        self.sync_sources();
+        if self
+            .active_source
+            .as_ref()
+            .is_some_and(|source| source.provider == ProviderKind::OpenSubsonic)
+        {
+            if let Some(profile) = self.active_profile().cloned() {
+                self.server_url = profile.url;
+                self.username = profile.username;
+                self.password = profile.password;
+            }
+        } else if self
+            .active_profile()
+            .is_some_and(|profile| profile.password_in_keyring)
+        {
+            // Credential migration must remove the last server's plaintext
+            // mirror even when the user is browsing another provider.
+            self.password.clear();
         }
     }
 
@@ -201,6 +238,14 @@ impl Config {
     }
 
     pub fn switch_to(&mut self, id: &str) -> bool {
+        if !self.servers.iter().any(|server| server.id == id) {
+            return false;
+        }
+        self.sync_sources();
+        self.switch_source(&SourceId::new(ProviderKind::OpenSubsonic, id))
+    }
+
+    fn activate_server(&mut self, id: &str) -> bool {
         let Some(profile) = self
             .servers
             .iter()
@@ -209,10 +254,12 @@ impl Config {
         else {
             return false;
         };
+        self.active_source = Some(SourceId::new(ProviderKind::OpenSubsonic, &profile.id));
         self.active_server = Some(profile.id);
         self.server_url = profile.url;
         self.username = profile.username;
         self.password = profile.password;
+        self.sync_sources();
         true
     }
 
@@ -298,17 +345,38 @@ impl Config {
     }
 
     pub fn remove_server(&mut self, id: &str) -> bool {
-        if self.servers.len() <= 1 {
+        let has_bilibili = self.sources.iter().any(
+            |source| matches!(source, SourceProfile::Bilibili { id, .. } if !id.trim().is_empty()),
+        );
+        if self.servers.len() <= 1 && !has_bilibili {
             return false;
         }
         let Some(index) = self.servers.iter().position(|profile| profile.id == id) else {
             return false;
         };
         let was_active = self.active_server.as_deref() == Some(id);
+        let browsing_bilibili = self
+            .active_source
+            .as_ref()
+            .filter(|source| source.provider == ProviderKind::Bilibili)
+            .cloned();
         self.servers.remove(index);
         if was_active {
-            let next = self.servers[index.min(self.servers.len() - 1)].id.clone();
-            self.switch_to(&next);
+            if let Some(next) = self
+                .servers
+                .get(index.min(self.servers.len().saturating_sub(1)))
+            {
+                let next = next.id.clone();
+                self.switch_to(&next);
+            } else {
+                self.active_server = None;
+                self.server_url.clear();
+                self.username.clear();
+                self.password.clear();
+            }
+        }
+        if let Some(source) = browsing_bilibili {
+            self.active_source = Some(source);
         }
         self.sync_active_profile();
         true

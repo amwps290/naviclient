@@ -17,7 +17,7 @@ mod queue;
 mod recommendations;
 mod search;
 mod server;
-mod settings;
+pub(crate) mod settings;
 mod shell;
 mod shortcuts;
 mod songs;
@@ -31,19 +31,28 @@ pub(crate) use library::favorites::FavoriteChange;
 pub(crate) use library::paged_collection::PageRequest;
 pub(crate) use library::playback::LibraryPlaybackRequest;
 pub(crate) use library::requests::LibraryRequest;
+pub(crate) use playback::resolution_state::PlaybackResolveRequest;
 pub(crate) use recommendations::auto_continue_state::AutoContinueRequest;
 pub(crate) use recommendations::daily_mix_state::DailyMixRequest;
 pub(crate) use recommendations::radio_state::RadioRequest;
 pub(crate) use style::theme::apply_app_theme;
 
 pub struct NavidromeApp {
+    bilibili_accounts: HashMap<crate::source::SourceId, settings::bilibili_state::AccountStatus>,
+    bilibili_proxy_input: Entity<InputState>,
     runtime: Runtime,
-    api: Option<OpenSubsonicProvider>,
+    api: Option<MusicSource>,
+    /// Browsing requests use `api`; transport and reporting retain this handle.
+    playback_source: Option<MusicSource>,
+    playback_server: Option<ServerInfo>,
     config: Config,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     audio: AudioHandle,
     preload: PreloadState,
+    start_resolution: playback::resolution_state::ResolutionState<playback::start::UnresolvedStart>,
+    preload_resolution:
+        playback::resolution_state::ResolutionState<playback::resolution::PreloadPlan>,
     media_session: MediaSession,
     global_shortcuts: GlobalShortcutManager,
     default_cover: Arc<GpuiImage>,

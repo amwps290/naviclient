@@ -4,25 +4,21 @@ use crate::app::prelude::*;
 
 impl NavidromeApp {
     pub(in crate::app) fn load_lyrics(&mut self, song: &Song) {
-        let Some(request) = self
-            .state
-            .lyrics
-            .begin(&song.id, &mut self.library_requests)
+        let Some(api) = self
+            .source_for_song(song)
+            .cloned()
+            .filter(|api| api.capabilities().lyrics)
         else {
+            self.state.lyrics.clear();
             return;
         };
-        let Some(api) = self.api.clone() else {
-            self.state.lyrics.complete(
-                request,
-                Err(t!("Configure a server to load lyrics").to_string()),
-            );
+        let media = crate::source::MediaKey::new(api.id().clone(), &song.id);
+        let Some(request) = self.state.lyrics.begin(&media, &mut self.library_requests) else {
             return;
         };
-
         let structured_lyrics = self
-            .state
-            .connection
-            .server()
+            .playback_server
+            .as_ref()
             .map(|server| server.capabilities.structured_lyrics)
             .unwrap_or_default();
         let song = song.clone();

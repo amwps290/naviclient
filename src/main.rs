@@ -8,6 +8,8 @@ mod api;
 mod app;
 mod assets;
 mod audio;
+mod bilibili_check;
+mod bilibili_login_web;
 mod config;
 mod global_shortcuts;
 #[cfg(test)]
@@ -22,6 +24,7 @@ mod playlist;
 pub mod recommendation;
 mod secrets;
 mod single_instance;
+pub mod source;
 #[cfg(test)]
 mod test_support;
 mod tray;
@@ -101,6 +104,12 @@ fn init_logging() -> anyhow::Result<std::path::PathBuf> {
 const APP_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 fn main() {
+    if bilibili_check::try_run() {
+        return;
+    }
+    if bilibili_login_web::try_run() {
+        return;
+    }
     match init_logging() {
         Ok(path) => log::info!("application starting; log_file={}", path.display()),
         Err(error) => eprintln!("failed to initialize file logging: {error:#}"),

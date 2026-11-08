@@ -5,8 +5,8 @@ use tokio::task::JoinSet;
 use super::super::candidates::genre_seeds;
 use super::super::{CandidateSource, RecommendationCandidate};
 use super::album_plan::AlbumRequest;
-use crate::api::OpenSubsonicProvider;
 use crate::models::Song;
+use crate::source::MusicSource;
 
 const MAX_ALBUM_TRACKS: usize = 12;
 const MAX_GENRE_SEEDS: usize = 2;
@@ -16,7 +16,7 @@ const REQUEST_CONCURRENCY: usize = 4;
 mod tests;
 
 pub(super) async fn collect_album_candidates(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     plan: Vec<AlbumRequest>,
 ) -> Vec<RecommendationCandidate> {
     let mut candidates = Vec::new();
@@ -54,7 +54,7 @@ pub(super) async fn collect_album_candidates(
 }
 
 pub(super) async fn collect_similar_candidates(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seeds: &[Song],
 ) -> Vec<RecommendationCandidate> {
     let mut candidates = Vec::new();
@@ -84,7 +84,7 @@ pub(super) async fn collect_similar_candidates(
 }
 
 pub(super) async fn collect_genre_candidates(
-    api: OpenSubsonicProvider,
+    api: MusicSource,
     seeds: &[Song],
 ) -> Vec<RecommendationCandidate> {
     let genres = genre_seeds(seeds, MAX_GENRE_SEEDS);

@@ -254,6 +254,7 @@ impl NavidromeApp {
         let keys: Vec<FavoriteKey> = self
             .state
             .selected_song_iter(scope)
+            .filter(|song| self.browsing_owns_song(song))
             .map(|song| FavoriteKey::new(FavoriteKind::Song, &song.id))
             .collect();
         let remove = keys.iter().all(|key| self.state.favorites.is_starred(key));
@@ -287,11 +288,12 @@ impl NavidromeApp {
         let lookahead = ((viewport / row_height) as usize).saturating_mul(2).max(40);
         let last = first.saturating_add(lookahead).min(songs.len());
         // 先收集需要加载的封面 id，避免在借用期间修改 self。
-        let pending: Vec<String> = songs
+        let pending: Vec<Song> = songs
             .iter()
             .skip(first)
             .take(last - first)
-            .filter_map(|song| song.cover_art.clone())
+            .filter(|song| song.cover_art.is_some())
+            .cloned()
             .collect();
         if pending.is_empty() {
             return;
@@ -300,8 +302,8 @@ impl NavidromeApp {
             "queued {} visible song covers; rows={first}..{last}",
             pending.len()
         );
-        for cover in pending {
-            self.ensure_cover(Some(&cover), false);
+        for song in pending {
+            self.ensure_song_cover(&song, false);
         }
     }
 }
