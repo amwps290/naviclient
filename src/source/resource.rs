@@ -4,12 +4,16 @@
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use md5::{Digest, Md5};
 use reqwest::header::HeaderMap;
 
 use super::MediaKey;
+use crate::models::network::NetworkRoute;
+
+pub(crate) mod clients;
+pub(crate) mod timing;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CachePolicy {
@@ -18,6 +22,32 @@ pub enum CachePolicy {
     /// A private scratch file, released with the reader. Only this many bytes
     /// of a contiguous prefix may be retained; further reads use HTTP Range.
     Temporary { max_bytes: u64 },
+}
+
+/// Server-calibrated deadlines. Wall time catches suspension on platforms whose
+/// monotonic clock stops during sleep; monotonic time still catches expiry if
+/// the wall clock moves backwards. A forward wall-clock jump may renew early.
+#[derive(Clone, Copy)]
+pub struct ResourceExpiry {
+    monotonic: Instant,
+    wall: SystemTime,
+}
+
+impl ResourceExpiry {
+    pub(crate) fn from_lifetime(
+        received: Instant,
+        wall_received: SystemTime,
+        lifetime: Duration,
+    ) -> Option<Self> {
+        Some(Self {
+            monotonic: received.checked_add(lifetime)?,
+            wall: wall_received.checked_add(lifetime)?,
+        })
+    }
+
+    pub(crate) fn expired_at(self, now: Instant, wall_now: SystemTime) -> bool {
+        self.monotonic <= now || self.wall <= wall_now
+    }
 }
 
 #[derive(Clone)]
@@ -32,8 +62,9 @@ struct HttpResourceData {
     cache_policy: CachePolicy,
     mime_hint: Option<String>,
     length_is_estimate: bool,
-    proxy: Option<String>,
+    route: NetworkRoute,
     backups: Vec<HttpResource>,
+    expires_at: Option<ResourceExpiry>,
 }
 
 impl HttpResource {
@@ -45,8 +76,9 @@ impl HttpResource {
                 cache_policy: CachePolicy::Persistent,
                 mime_hint: None,
                 length_is_estimate: false,
-                proxy: None,
+                route: NetworkRoute::System,
                 backups: Vec::new(),
+                expires_at: None,
             }),
         }
     }
@@ -56,14 +88,30 @@ impl HttpResource {
         self
     }
 
-    pub fn with_proxy(mut self, proxy: Option<String>) -> Self {
-        Arc::make_mut(&mut self.inner).proxy = proxy;
+    pub fn with_route(mut self, route: NetworkRoute) -> Self {
+        Arc::make_mut(&mut self.inner).route = route;
         self
     }
 
     pub fn with_backups(mut self, backups: Vec<HttpResource>) -> Self {
         Arc::make_mut(&mut self.inner).backups = backups;
         self
+    }
+
+    /// Deadlines calibrated to the server's remaining address lifetime.
+    pub fn with_expiry(mut self, expires_at: Option<ResourceExpiry>) -> Self {
+        Arc::make_mut(&mut self.inner).expires_at = expires_at;
+        self
+    }
+
+    pub fn expires_at(&self) -> Option<Instant> {
+        self.inner.expires_at.map(|expiry| expiry.monotonic)
+    }
+
+    pub fn expired_at(&self, now: Instant, wall_now: SystemTime) -> bool {
+        self.inner
+            .expires_at
+            .is_some_and(|expiry| expiry.expired_at(now, wall_now))
     }
 
     pub fn backups(&self) -> &[HttpResource] {
@@ -105,8 +153,8 @@ impl HttpResource {
         &self.inner.headers
     }
 
-    pub fn proxy(&self) -> Option<&str> {
-        self.inner.proxy.as_deref()
+    pub fn route(&self) -> &NetworkRoute {
+        &self.inner.route
     }
 }
 
@@ -135,7 +183,14 @@ impl fmt::Debug for HttpResource {
         f.debug_struct("HttpResource")
             .field("url", &"[redacted]")
             .field("headers", &"[redacted]")
-            .field("proxy", &self.proxy().map(|_| "[redacted]"))
+            .field(
+                "route",
+                &match self.route() {
+                    NetworkRoute::System => "system",
+                    NetworkRoute::Direct => "direct",
+                    NetworkRoute::Proxy(_) => "proxy [redacted]",
+                },
+            )
             .field("cache_policy", &self.cache_policy())
             .field("mime_hint", &self.mime_hint())
             .field("length_is_estimate", &self.length_is_estimate())
@@ -162,7 +217,6 @@ pub struct PlaybackResource {
     pub backups: Vec<HttpResource>,
     pub quality: AudioQuality,
     pub duration: Option<Duration>,
-    pub expires_at: Option<SystemTime>,
 }
 
 impl PlaybackResource {

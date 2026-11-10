@@ -2,6 +2,8 @@
 
 use super::edit::{PasswordStorage, ServerForm};
 use crate::app::prelude::*;
+use crate::app::settings::state::{ServerDialog, SettingsDialog};
+use crate::models::network::SourceConnection;
 
 impl NavidromeApp {
     pub(in crate::app) fn server_form(&self, cx: &Context<Self>) -> ServerForm {
@@ -13,14 +15,26 @@ impl NavidromeApp {
         )
     }
 
+    /// Save the server dialog: a new server is created and connected, an
+    /// existing one is updated. The dialog closes once the change is saved.
     pub(in crate::app) fn save_settings(&mut self, cx: &Context<Self>) {
-        let Some(target) = self.state.settings.server_form_target(&self.config) else {
+        let Some(SettingsDialog::Server(dialog)) = self.state.settings.dialog.clone() else {
             return;
         };
-        let Some(edit) =
-            self.server_form(cx)
-                .prepare(&self.config, &target.id, &target.resolved_password())
-        else {
+        let form = self.server_form(cx);
+        let edit = match dialog.target.as_deref() {
+            None => form.prepare_new(&self.config),
+            Some(_) => {
+                let Some(target) = self.state.settings.server_form_target(&self.config) else {
+                    return;
+                };
+                let password = target.resolved_password();
+                let id = target.id.clone();
+                form.prepare(&self.config, &id, &password)
+            }
+        };
+        let Some(edit) = edit else {
+            self.notify_error(t!("Enter the server address and account"));
             return;
         };
         let reconnect = edit.requires_reconnect();
@@ -29,6 +43,8 @@ impl NavidromeApp {
         }
 
         let profile = edit.profile();
+        let source =
+            crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, &profile.id);
         let storage = if profile.password.is_empty() {
             if edit.delete_existing_password() {
                 secrets::delete_password(&profile.id);
@@ -49,22 +65,35 @@ impl NavidromeApp {
                 }
             }
         };
-        self.config = edit.finish(storage);
-        let saved = match config::save(&self.config) {
-            Ok(()) => true,
-            Err(error) => {
-                let message =
-                    t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
-                self.state.status = message.clone();
-                self.notify_error(message);
-                false
+        let mut next = edit.finish(storage);
+        let route_changed = next.source_connection(&source) != dialog.connection;
+        if let Err(error) = next.set_source_connection(&source, dialog.connection.clone()) {
+            self.notify_error(error.message());
+            return;
+        }
+        let reconnect =
+            reconnect || (route_changed && next.active_source.as_ref() == Some(&source));
+        if let Err(error) = config::save(&next) {
+            let message =
+                t!("Config save failed: %{error}", error = format!("{error:#}")).to_string();
+            self.state.status = message.clone();
+            self.notify_error(message);
+            return;
+        }
+        self.config = next;
+        self.state.settings.dismiss_dialog();
+        if route_changed {
+            self.cancel_source_playback_work(&source);
+            if self
+                .playback_source
+                .as_ref()
+                .is_some_and(|api| api.id() == &source)
+            {
+                self.playback_source = self.available_source(&source);
             }
-        };
+        }
         if reconnect {
             self.reconnect_active_server();
-        } else if saved {
-            self.state.settings.editing_server = None;
-            self.notify_success(t!("Saved"));
         }
     }
 
@@ -76,25 +105,6 @@ impl NavidromeApp {
             return;
         };
         self.fill_server_inputs(&profile, window, cx);
-    }
-
-    /// 放弃编辑：输入框恢复为表单目标条目的已保存值并收起表单。
-    /// 未配置的条目没有可恢复的内容，调用方负责不显示取消按钮。
-    pub(in crate::app) fn cancel_server_edit(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(profile) = self
-            .state
-            .settings
-            .server_form_target(&self.config)
-            .cloned()
-        {
-            self.fill_server_inputs(&profile, window, cx);
-        }
-        self.state.settings.editing_server = None;
-        cx.notify();
     }
 
     /// 从指定条目填充表单的四个输入框（打开编辑与取消恢复共用）。
@@ -118,25 +128,40 @@ impl NavidromeApp {
             .update(cx, |input, cx| input.set_value(password, window, cx));
     }
 
-    /// 打开指定条目的编辑表单。不切换服务器：修另一台的地址账号
-    /// 不该把当前正在浏览/播放的库换掉。
-    pub(in crate::app) fn begin_edit_server(
+    /// Open the server dialog for a saved server, or for a new one when
+    /// `id` is `None`. Editing never switches the browsing source.
+    pub(in crate::app) fn open_server_dialog(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(profile) = self
-            .config
-            .servers
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
-            return;
+        let (profile, connection) = match id {
+            Some(id) => {
+                let Some(profile) = self
+                    .config
+                    .servers
+                    .iter()
+                    .find(|profile| profile.id == id)
+                    .cloned()
+                else {
+                    return;
+                };
+                let source =
+                    crate::source::SourceId::new(crate::source::ProviderKind::OpenSubsonic, id);
+                (profile, self.config.source_connection(&source))
+            }
+            None => (ServerProfile::new("", "", ""), SourceConnection::System),
         };
-        self.state.settings.editing_server = Some(id.to_string());
         self.fill_server_inputs(&profile, window, cx);
-        cx.notify();
+        self.state
+            .settings
+            .open_dialog(SettingsDialog::Server(ServerDialog {
+                target: id.map(str::to_owned),
+                connection,
+            }));
+        self.show_settings_dialog(window, cx);
+        self.server_input
+            .update(cx, |input, cx| input.focus(window, cx));
     }
 }

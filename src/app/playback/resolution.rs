@@ -49,7 +49,26 @@ impl NavidromeApp {
         else {
             return;
         };
+        // Settle the old track before committing this accepted intent. Keep
+        // advancement deferred until its success or failure is known.
+        self.handle_playback_end_for_intent(true);
+        start.settle_intent(&mut self.state.occurrence);
         if let Err(error) = &result {
+            if start.intent().reconnecting() {
+                let decision = self.reconnect.resolution_failed(
+                    self.state.occurrence.id(),
+                    error.retry_failure,
+                    std::time::Instant::now(),
+                );
+                if self.report_reconnect_decision(
+                    error.retry_failure,
+                    decision,
+                    PLAYBACK_RECONNECT_ATTEMPTS,
+                    self.audio.progress().position,
+                ) {
+                    return;
+                }
+            }
             if error.login_expired {
                 self.expire_bilibili_account(start.source.id());
             }
@@ -64,15 +83,21 @@ impl NavidromeApp {
                 return;
             }
         }
+        let reconnecting = start.intent().reconnecting();
         match result
             .map_err(|error| StartError::Request(anyhow::anyhow!(error.message)))
             .and_then(|resource| start.finish(resource))
         {
             Ok(start) => {
-                self.commit_playback_start(start);
+                if !self.commit_playback_start(start) && reconnecting {
+                    self.reconnect.cancel();
+                }
             }
             Err(error) => {
                 self.cancel_next_preload();
+                if reconnecting {
+                    self.reconnect.cancel();
+                }
                 self.report_start_error(error);
             }
         }
@@ -80,7 +105,7 @@ impl NavidromeApp {
 
     pub(in crate::app) fn resolve_next_preload(&mut self, index: usize) {
         let Some(api) = self.playback_source.as_ref().and_then(|api| {
-            if api.id().provider == crate::source::ProviderKind::Bilibili {
+            if api.playback_policy().authorized_session {
                 self.available_source(api.id())
             } else {
                 Some(api.clone())
@@ -176,7 +201,7 @@ async fn resolve_with_timeout(
     configured: TranscodingQuality,
 ) -> Result<crate::source::PlaybackResource, PlaybackResolveError> {
     tokio::time::timeout(
-        Duration::from_secs(30),
+        crate::source::resource::timing::START_RESOLUTION_TIMEOUT,
         api.resolve_playback(song, configured),
     )
     .await
@@ -184,22 +209,30 @@ async fn resolve_with_timeout(
         message: t!("Audio resource resolution timed out. Retry playback.").to_string(),
         unavailable: false,
         login_expired: false,
+        retry_failure: Some(StreamFailure::Timeout),
     })?
-    .map_err(|error| {
-        use crate::source::bilibili::client::BilibiliError;
-        let protocol = error.downcast_ref::<BilibiliError>();
-        PlaybackResolveError {
-            unavailable: matches!(
-                protocol,
-                Some(
-                    BilibiliError::Unavailable
-                        | BilibiliError::PermissionDenied
-                        | BilibiliError::RegionRestricted
-                        | BilibiliError::UnsupportedAudio
-                )
-            ),
-            login_expired: matches!(protocol, Some(BilibiliError::NotAuthenticated)),
-            message: error_message(error),
-        }
-    })
+    .map_err(resolution_error)
 }
+
+fn resolution_error(error: anyhow::Error) -> PlaybackResolveError {
+    use crate::source::playback::{classify_resolution_error, ResolutionFailure};
+    let failure = classify_resolution_error(&error);
+    PlaybackResolveError {
+        unavailable: failure == ResolutionFailure::Unavailable,
+        login_expired: failure == ResolutionFailure::SessionExpired,
+        retry_failure: match failure {
+            ResolutionFailure::Network => Some(StreamFailure::Connect),
+            ResolutionFailure::Timeout => Some(StreamFailure::Timeout),
+            ResolutionFailure::Http(status) if status == 408 || status >= 500 => {
+                Some(StreamFailure::Http(status))
+            }
+            // Risk control, authentication and authoritative item failures
+            // must not become a rapid automatic API retry loop.
+            _ => None,
+        },
+        message: error_message(error),
+    }
+}
+
+#[cfg(test)]
+mod tests;

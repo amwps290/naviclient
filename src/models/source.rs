@@ -92,6 +92,7 @@ pub enum SourceProfile {
         account_id: Option<u64>,
         #[serde(default)]
         credential_key: Option<String>,
+        /// Legacy inline address, migrated into Config::network when loaded.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         proxy: Option<String>,
     },
@@ -124,7 +125,28 @@ pub struct SourceCapabilities {
     pub transcoding: bool,
 }
 
+/// Playback policy, separate from library operations and account identity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlaybackPolicy {
+    pub refreshable_addresses: bool,
+    pub authorized_session: bool,
+    pub skip_unavailable: bool,
+    pub stop_on_rate_limit: bool,
+}
+
 impl ProviderKind {
+    pub fn playback_policy(self) -> PlaybackPolicy {
+        match self {
+            Self::OpenSubsonic => PlaybackPolicy::default(),
+            Self::Bilibili => PlaybackPolicy {
+                refreshable_addresses: true,
+                authorized_session: true,
+                skip_unavailable: true,
+                stop_on_rate_limit: true,
+            },
+        }
+    }
+
     pub fn capabilities(self) -> SourceCapabilities {
         match self {
             Self::OpenSubsonic => SourceCapabilities {

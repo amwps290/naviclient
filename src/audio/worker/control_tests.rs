@@ -152,6 +152,44 @@ fn transport_commands_update_preparation_intent_and_acknowledge_only_during_peri
 }
 
 #[test]
+fn immediately_ready_play_obeys_its_initial_pause_without_a_second_command() {
+    for paused in [false, true] {
+        let cache = TestCache::new();
+        let (mut worker, _tx, mut source) = worker(&cache);
+        arm(&mut worker);
+        let ready = worker
+            .handle_command(command(
+                Command::Play {
+                    url: "http://fixture.test/audio".into(),
+                    cache_key: "armed".into(),
+                    duration_hint: Some(Duration::from_millis(100)),
+                    gain: 1.0,
+                    start: crate::audio::PlaybackStart {
+                        paused,
+                        preload_id: Some(7),
+                        ..Default::default()
+                    },
+                },
+                1,
+            ))
+            .expect("armed output is immediately ready");
+        worker.attach_output(ready);
+        worker.poll_next_and_publish();
+        assert_eq!(worker.output.device.player.is_paused(), paused);
+        let state = worker.state.lock().unwrap().clone();
+        assert!(state.active && state.output_connected);
+        assert_eq!(state.paused, paused);
+        assert_eq!(state.command_serial, 1);
+        if paused {
+            assert!(source.by_ref().take(960).all(|sample| sample == 0.0));
+            assert_eq!(worker.output.device.player.get_pos(), Duration::ZERO);
+            worker.handle_command(command(Command::Resume, 2));
+        }
+        assert!(source.take(4800).any(|sample| sample == 0.5));
+    }
+}
+
+#[test]
 fn preference_commands_keep_transport_acknowledgements_and_share_the_existing_equalizer_handle() {
     let cache = TestCache::new();
     let (mut worker, _tx, _source) = worker(&cache);

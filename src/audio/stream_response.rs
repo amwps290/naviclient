@@ -2,6 +2,7 @@
 
 use std::io::{self, Read};
 
+use crate::models::network::NetworkRoute;
 use crate::source::HttpResource;
 use anyhow::{anyhow, Result};
 use reqwest::blocking::{Client, Response};
@@ -11,6 +12,7 @@ use rust_i18n::t;
 use url::Url;
 
 use super::error::{classify_reqwest, failure_io, FailureError, StreamFailure};
+use super::stream_control::StreamControl;
 
 #[derive(Debug, PartialEq, Eq)]
 struct ByteRange {
@@ -190,38 +192,13 @@ impl Read for StreamResponse {
     }
 }
 
-/// Headers are applied per request. A dedicated client prevents a redirect
-/// carrying provider-specific headers into a different origin.
+/// Header-bearing resources reuse a bounded pool with same-origin redirects.
 pub(super) fn resource_client(client: Client, resource: &HttpResource) -> Result<Client> {
-    if resource.headers().is_empty() && resource.proxy().is_none() {
+    // The worker client follows the system proxy, like a default route.
+    if resource.headers().is_empty() && *resource.route() == NetworkRoute::System {
         return Ok(client);
     }
-    let origin = Url::parse(resource.url())
-        .map_err(|_| anyhow!("invalid audio resource address"))?
-        .origin();
-    let mut builder = Client::builder()
-        .no_proxy()
-        // Preserve the explicitly supplied provider Referer on same-origin
-        // redirects instead of replacing it with the signed CDN address.
-        .referer(false)
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(12))
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() < 10 && attempt.url().origin() == origin {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }));
-    if let Some(proxy) = resource.proxy() {
-        builder = builder
-            .no_proxy()
-            .proxy(reqwest::Proxy::all(proxy).map_err(|_| anyhow!("invalid audio proxy address"))?);
-    }
-    builder
-        .build()
-        .map_err(reqwest::Error::without_url)
-        .map_err(Into::into)
+    crate::source::resource::clients::blocking(resource)
 }
 
 /// Select a backup only before a reader exposes bytes. Once decoding starts,
@@ -229,16 +206,31 @@ pub(super) fn resource_client(client: Client, resource: &HttpResource) -> Result
 pub(super) fn initial_resource_response(
     client: Client,
     resource: HttpResource,
+    control: &StreamControl,
 ) -> Result<(Client, HttpResource, StreamResponse)> {
     let mut last_error = None;
-    for candidate in std::iter::once(&resource).chain(resource.backups()).take(3) {
+    let deadline =
+        std::time::Instant::now() + crate::source::resource::timing::INITIAL_CONNECTION_BUDGET;
+    for candidate in std::iter::once(&resource).chain(resource.backups()).take(9) {
+        control.check()?;
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        // Reserve a full request timeout. Shortening a successful request's
+        // total timeout here would also cut off its subsequently streamed body.
+        if remaining < crate::source::resource::timing::STREAM_TIMEOUT {
+            break;
+        }
         let attempt = resource_client(client.clone(), candidate).and_then(|client| {
             request_resource_range(&client, candidate, 0)
                 .map(|response| (client, candidate.clone().with_backups(Vec::new()), response))
         });
         match attempt {
             Ok(result) => return Ok(result),
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                if super::error::classify_anyhow(&error) == StreamFailure::Http(429) {
+                    return Err(error);
+                }
+                last_error = Some(error);
+            }
         }
     }
     Err(last_error.unwrap_or_else(|| anyhow!("no audio addresses available")))
@@ -254,6 +246,12 @@ pub(super) fn request_resource_range(
     resource: &HttpResource,
     position: u64,
 ) -> Result<StreamResponse> {
+    if resource.expired_at(std::time::Instant::now(), std::time::SystemTime::now()) {
+        return Err(anyhow!(FailureError::new(
+            StreamFailure::ResourceExpired,
+            t!("A fresh playback address is required. Retry playback."),
+        )));
+    }
     let url = resource.url();
     let response = client
         .get(url)

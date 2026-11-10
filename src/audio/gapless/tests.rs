@@ -288,8 +288,7 @@ impl Engine {
             "a".into(),
             Some(Duration::from_secs(12)),
             1.0,
-            Duration::ZERO,
-            None,
+            Default::default(),
         );
         wait_for(|| audio.state().fully_buffered);
         Self {
@@ -409,8 +408,7 @@ fn explicit_play_after_pause_starts_the_new_stream_with_playing_intent() {
         "b".into(),
         Some(Duration::from_secs(12)),
         1.0,
-        Duration::ZERO,
-        None,
+        Default::default(),
     );
     engine.pump_until(|state| state.fully_buffered && !state.paused);
     assert_eq!(
@@ -431,8 +429,7 @@ fn selecting_then_seeking_twice_and_pausing_rebuilds_the_selected_track_at_accum
         "b".into(),
         Some(Duration::from_secs(12)),
         1.0,
-        Duration::ZERO,
-        None,
+        Default::default(),
     );
     let song = crate::models::Song {
         duration: Some(12),
@@ -517,8 +514,10 @@ fn manual_skip_reuses_the_armed_track_without_a_second_decoder() {
         "b".into(),
         Some(Duration::from_secs(12)),
         0.5,
-        Duration::ZERO,
-        Some(1),
+        crate::audio::PlaybackStart {
+            preload_id: Some(1),
+            ..Default::default()
+        },
     );
     engine.pump_until(|state| state.active && prepared_control.fully_decoded());
     assert_eq!(

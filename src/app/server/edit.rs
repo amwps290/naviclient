@@ -90,6 +90,42 @@ impl ServerForm {
     }
 }
 
+impl ServerForm {
+    /// A server added from the dialog exists only once its details are saved,
+    /// and becomes the browsing source because adding it means using it.
+    pub(in crate::app) fn prepare_new(self, config: &Config) -> Option<ServerEdit> {
+        if self.url.is_empty() || self.username.is_empty() {
+            return None;
+        }
+        let mut updated = config.clone();
+        let base = ServerProfile::id_for(&self.url, &self.username);
+        let mut stored_id = base.clone();
+        let mut serial = 2;
+        while updated
+            .servers
+            .iter()
+            .any(|profile| profile.id == stored_id)
+        {
+            stored_id = format!("{base}-{serial}");
+            serial += 1;
+        }
+        updated.servers.push(ServerProfile {
+            id: stored_id.clone(),
+            name: self.name,
+            ..ServerProfile::new(&self.url, &self.username, &self.password)
+        });
+        if !updated.switch_to(&stored_id) {
+            return None;
+        }
+        Some(ServerEdit {
+            config: updated,
+            stored_id,
+            reconnect: true,
+            delete_existing_password: false,
+        })
+    }
+}
+
 impl ServerEdit {
     pub(in crate::app) fn profile(&self) -> &ServerProfile {
         self.config

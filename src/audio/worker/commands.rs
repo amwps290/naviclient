@@ -64,13 +64,12 @@ impl PlaybackWorker {
                 url,
                 cache_key,
                 duration_hint,
-                start_position,
+                start,
                 gain,
-                preload_id,
             } => {
-                let queued = self
-                    .next_track
-                    .begin_play(preload_id, &cache_key, start_position);
+                let queued =
+                    self.next_track
+                        .begin_play(start.preload_id, &cache_key, start.position);
                 log::info!(
                     "play requested; endpoint={} duration_hint_ms={:?} gain={gain}",
                     stream_endpoint(&url),
@@ -81,11 +80,12 @@ impl PlaybackWorker {
                     cache_key.clone(),
                     duration_hint,
                     gain,
-                    start_position,
+                    start.position,
                 );
                 let token =
                     self.preparation
                         .begin(PreparationKind::Play, start_position, Instant::now());
+                self.preparation.set_paused(start.paused);
                 self.output.device.player.stop();
                 self.output.device.player.clear();
                 publish_track(
@@ -97,7 +97,7 @@ impl PlaybackWorker {
                 );
                 let preloaded =
                     self.next_track
-                        .take_prepared(preload_id, &cache_key, start_position);
+                        .take_prepared(start.preload_id, &cache_key, start_position);
                 if let Some(queued) = queued {
                     queued.info.control.promote();
                     self.preparation.complete(token);

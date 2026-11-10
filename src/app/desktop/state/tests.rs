@@ -162,33 +162,22 @@ fn tray_sync_reports_initial_state_and_each_actual_pause_change() {
 #[test]
 fn tray_shows_play_when_idle_stopped_or_worker_closed_and_pause_while_preparing() {
     use crate::audio::test_transport::Fixture;
-    use std::time::Duration;
 
     let mut fixture = Fixture::new(PlaybackState::default());
     let mut state = DesktopState::default();
     assert_eq!(state.tray_paused_update(&fixture.audio.state()), Some(true));
-    fixture.audio.play(
-        "test".into(),
-        "song".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    fixture
+        .audio
+        .play("test".into(), "song".into(), None, 1.0, Default::default());
     assert_eq!(
         state.tray_paused_update(&fixture.audio.state()),
         Some(false)
     );
     fixture.audio.stop();
     assert_eq!(state.tray_paused_update(&fixture.audio.state()), Some(true));
-    fixture.audio.play(
-        "test".into(),
-        "song".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    fixture
+        .audio
+        .play("test".into(), "song".into(), None, 1.0, Default::default());
     assert_eq!(
         state.tray_paused_update(&fixture.audio.state()),
         Some(false)
@@ -200,21 +189,15 @@ fn tray_shows_play_when_idle_stopped_or_worker_closed_and_pause_while_preparing(
 #[test]
 fn accepted_start_and_buffering_do_not_record_a_track_notification() {
     use crate::audio::test_transport::Fixture;
-    use std::time::Duration;
 
     let fixture = Fixture::new(PlaybackState {
         output_connected: true,
         ..playing(false)
     });
     let mut state = DesktopState::default();
-    fixture.audio.play(
-        "test".into(),
-        "next".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    fixture
+        .audio
+        .play("test".into(), "next".into(), None, 1.0, Default::default());
     assert_eq!(
         state.track_notification_update(true, fixture.audio.progress().active, None, Some("next")),
         CancelPending

@@ -26,6 +26,8 @@ pub enum StreamFailure {
     Output,
     /// 本地播放准备无法启动，例如系统线程资源不足。
     Preparation,
+    /// A signed address expired before a new HTTP range request.
+    ResourceExpired,
 }
 
 impl StreamFailure {
@@ -40,6 +42,7 @@ impl StreamFailure {
             Self::Decode => t!("Cannot decode this track"),
             Self::Output => t!("Audio output failed"),
             Self::Preparation => t!("Audio preparation failed"),
+            Self::ResourceExpired => t!("Audio playback address expired"),
         }
     }
 
@@ -60,6 +63,7 @@ impl StreamFailure {
             Self::Decode => t!("Client: the received data is not decodable audio."),
             Self::Output => t!("Local: the audio device failed; unrelated to the network."),
             Self::Preparation => t!("Local: audio could not be prepared. Retry playback or restart the app."),
+            Self::ResourceExpired => t!("A fresh playback address is required. Retry playback."),
         }
     }
 

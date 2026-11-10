@@ -250,7 +250,7 @@ fn restored_cookie_cannot_inject_headers_and_proxy_cannot_embed_credentials() {
         "http://127.0.0.1:7890?password=secret",
     ] {
         assert!(matches!(
-            BilibiliClient::new(Some(proxy)),
+            BilibiliClient::new(&crate::models::network::NetworkRoute::Proxy(proxy.into())),
             Err(BilibiliError::InvalidProxy)
         ));
     }

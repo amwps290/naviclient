@@ -129,6 +129,176 @@ pub(in crate::audio) fn resource(url: String) -> HttpResource {
 }
 
 #[test]
+fn proxied_public_audio_follows_cdn_redirects_through_the_same_proxy() {
+    let proxy = Fixture::new(|target, headers| {
+        assert!(!headers.contains_key("cookie"));
+        assert!(!headers.contains_key("referer"));
+        match target {
+            "http://music.invalid/audio" => b"HTTP/1.1 302 Found\r\nLocation: http://cdn.invalid/audio\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            "http://cdn.invalid/audio" => b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 0-4/5\r\nConnection: close\r\n\r\naudio".to_vec(),
+            _ => panic!("unexpected proxy request: {target}"),
+        }
+    });
+    let cache = TestCache::new();
+    let http = HttpResource::new("http://music.invalid/audio").with_route(
+        crate::models::network::NetworkRoute::Proxy(proxy.url().trim_end_matches("/audio").into()),
+    );
+    let mut reader = HttpRangeReader::open_resource(
+        client(),
+        http,
+        &cache.0,
+        "proxy-redirect",
+        StreamControl::new(false),
+    )
+    .unwrap();
+    let mut bytes = [0; 5];
+    reader.read_exact(&mut bytes).unwrap();
+    assert_eq!(&bytes, b"audio");
+    assert_eq!(proxy.requests().len(), 2);
+}
+
+#[test]
+fn expired_address_keeps_cached_bytes_but_does_not_issue_another_range() {
+    let fixture = Fixture::audio(b"audio".to_vec());
+    let cache = TestCache::new();
+    let http = resource(fixture.url()).with_cache_policy(CachePolicy::Temporary { max_bytes: 2 });
+    let mut reader = HttpRangeReader::open_resource(
+        client(),
+        http,
+        &cache.0,
+        "expiry",
+        StreamControl::new(false),
+    )
+    .unwrap();
+    let mut bytes = [0; 2];
+    reader.read_exact(&mut bytes).unwrap();
+    // Simulate suspension: the monotonic deadline is still an hour away, but
+    // the wall clock has already passed the address's calibrated lifetime.
+    reader.url =
+        reader
+            .url
+            .clone()
+            .with_expiry(crate::source::resource::ResourceExpiry::from_lifetime(
+                std::time::Instant::now(),
+                std::time::SystemTime::now() - Duration::from_secs(7200),
+                Duration::from_secs(3600),
+            ));
+    reader.seek(SeekFrom::Start(0)).unwrap();
+    reader.read_exact(&mut bytes).unwrap();
+    assert_eq!(&bytes, b"au");
+    reader.seek(SeekFrom::Start(4)).unwrap();
+    let error = reader.read_exact(&mut bytes[..1]).unwrap_err();
+    assert_eq!(classify_io(&error), StreamFailure::ResourceExpired);
+    assert_eq!(fixture.requests().len(), 1);
+}
+
+#[test]
+fn cancelling_a_failed_initial_request_stops_before_the_backup() {
+    let control = StreamControl::new(false);
+    let request_control = control.clone();
+    let primary = Fixture::new(move |_, _| {
+        request_control.cancel();
+        b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+    });
+    let backup = Fixture::audio(b"audio".to_vec());
+    let cache = TestCache::new();
+    let http = resource(primary.url()).with_backups(vec![resource(backup.url())]);
+    let error = match HttpRangeReader::open_resource(client(), http, &cache.0, "cancelled", control)
+    {
+        Ok(_) => panic!("opened a cancelled resource"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.root_cause().to_string(),
+        "audio preparation cancelled"
+    );
+    assert_eq!(primary.requests().len(), 1);
+    assert!(backup.requests().is_empty());
+}
+
+#[test]
+fn initial_rate_limit_stops_before_opening_backups() {
+    let primary = Fixture::new(|_, _| {
+        b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+    });
+    let backup = Fixture::audio(b"audio".to_vec());
+    let cache = TestCache::new();
+    let http = resource(primary.url()).with_backups(vec![resource(backup.url())]);
+    let error = match HttpRangeReader::open_resource(
+        client(),
+        http,
+        &cache.0,
+        "limited",
+        StreamControl::new(false),
+    ) {
+        Ok(_) => panic!("opened a rate-limited resource"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        super::super::error::classify_anyhow(&error),
+        StreamFailure::Http(429)
+    );
+    assert_eq!(primary.requests().len(), 1);
+    assert!(backup.requests().is_empty());
+}
+
+#[test]
+fn fourth_address_is_available_when_the_first_three_fail() {
+    let fixture = Fixture::new(|path, _| {
+        if path == "/good" {
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 1\r\nContent-Range: bytes 0-0/1\r\nConnection: close\r\n\r\na".to_vec()
+        } else {
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+        }
+    });
+    let cache = TestCache::new();
+    let http = resource(fixture.url()).with_backups(
+        ["bad2", "bad3", "good"]
+            .map(|path| resource(fixture.url().replace("/audio", &format!("/{path}"))))
+            .to_vec(),
+    );
+    let mut reader = HttpRangeReader::open_resource(
+        client(),
+        http,
+        &cache.0,
+        "backups",
+        StreamControl::new(false),
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"a");
+    assert_eq!(fixture.requests().len(), 4);
+}
+
+#[test]
+fn resource_follows_same_origin_redirect_without_using_the_signed_address_as_referer() {
+    let fixture = Fixture::new(|path, headers| {
+        assert_eq!(headers["referer"], "https://www.bilibili.com/");
+        assert!(!headers.contains_key("cookie"));
+        if path.starts_with("/audio?") {
+            b"HTTP/1.1 302 Found\r\nLocation: /redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+        } else {
+            assert_eq!(path, "/redirected");
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 1\r\nContent-Range: bytes 0-0/1\r\nConnection: close\r\n\r\na".to_vec()
+        }
+    });
+    let cache = TestCache::new();
+    let mut reader = HttpRangeReader::open_resource(
+        client(),
+        resource(format!("{}?signature=private", fixture.url())),
+        &cache.0,
+        "redirect",
+        StreamControl::new(false),
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"a");
+    assert_eq!(fixture.requests().len(), 2);
+}
+
+#[test]
 fn resource_headers_survive_ranges_and_do_not_enter_the_shared_client() {
     let fixture = Fixture::audio(b"audio".to_vec());
     let cache = TestCache::new();

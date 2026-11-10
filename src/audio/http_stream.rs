@@ -95,8 +95,8 @@ impl HttpRangeReader {
             });
         }
 
-        let (client, url, response) =
-            initial_resource_response(client, url).context("failed to request audio stream")?;
+        let (client, url, response) = initial_resource_response(client, url, &control)
+            .context("failed to request audio stream")?;
         control.check()?;
         let range_supported = response.range_supported();
         let len = response.len();

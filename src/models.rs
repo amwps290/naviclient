@@ -2,6 +2,7 @@ mod config;
 mod equalizer;
 mod listening;
 mod media;
+pub(crate) mod network;
 mod playback;
 mod preferences;
 mod queue;

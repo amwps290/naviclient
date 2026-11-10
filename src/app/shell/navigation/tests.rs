@@ -49,7 +49,6 @@ fn browsing_navigation_closes_only_settings_and_preserves_drawer_selection_and_f
         };
         state.settings.open = true;
         state.settings.section = SettingsSection::Shortcuts;
-        state.settings.editing_server = Some("server".into());
         let recording = ShortcutRecording::Global(ShortcutAction::TogglePlayback);
         state.settings.start_recording(recording);
         state.song_selection.toggle(SongScope::History, 1, 3);
@@ -61,7 +60,6 @@ fn browsing_navigation_closes_only_settings_and_preserves_drawer_selection_and_f
         assert_eq!(state.view, view);
         assert!(!state.settings.open);
         assert_eq!(state.settings.section, SettingsSection::Shortcuts);
-        assert_eq!(state.settings.editing_server.as_deref(), Some("server"));
         assert_eq!(state.settings.recording(), Some(recording));
         assert!(state.queue_drawer_open);
         assert_eq!(state.queue_drawer_tab, QueueDrawerTab::History);

@@ -608,14 +608,9 @@ fn buffering_and_failed_start_do_not_create_listening_events() {
     let song = song("next");
     let occurrence = PlaybackId::new();
     let now = Instant::now();
-    fixture.audio.play(
-        "test".into(),
-        "next".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    fixture
+        .audio
+        .play("test".into(), "next".into(), None, 1.0, Default::default());
     assert_eq!(
         state.observe(
             Some(&song),

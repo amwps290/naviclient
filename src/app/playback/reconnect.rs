@@ -25,13 +25,31 @@ enum ReconnectPhase {
 
 struct RetryContext {
     occurrence: PlaybackId,
-    attempt: u8,
+    kind: RetryKind,
+    network_attempts: u8,
+    resource_refresh_attempts: u8,
     position: Duration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum RetryKind {
+    Network,
+    ResourceRefresh,
+}
+
+impl RetryContext {
+    fn attempt(&self) -> u8 {
+        match self.kind {
+            RetryKind::Network => self.network_attempts,
+            RetryKind::ResourceRefresh => self.resource_refresh_attempts,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::app) struct ReconnectAttempt {
     pub(in crate::app) attempt: u8,
+    pub(in crate::app) kind: RetryKind,
     pub(in crate::app) position: Duration,
 }
 
@@ -57,6 +75,10 @@ impl PlaybackReconnect {
         self.phase = ReconnectPhase::Idle;
     }
 
+    pub(in crate::app) fn pending(&self) -> bool {
+        self.context().is_some()
+    }
+
     pub(in crate::app) fn schedule(
         &mut self,
         occurrence: PlaybackId,
@@ -70,6 +92,7 @@ impl PlaybackReconnect {
             position,
             now,
             PLAYBACK_RECONNECT_ATTEMPTS,
+            RetryKind::Network,
         )
     }
 
@@ -81,7 +104,62 @@ impl PlaybackReconnect {
         position: Duration,
         now: Instant,
     ) -> ReconnectDecision {
-        self.schedule_with_budget(occurrence, Some(StreamFailure::Connect), position, now, 1)
+        self.schedule_with_budget(
+            occurrence,
+            Some(StreamFailure::Connect),
+            position,
+            now,
+            1,
+            RetryKind::ResourceRefresh,
+        )
+    }
+
+    /// Known expiry is routine renewal, with no backoff or reconnect toast.
+    pub(in crate::app) fn schedule_expired_resource(
+        &mut self,
+        occurrence: PlaybackId,
+        position: Duration,
+        now: Instant,
+    ) -> ReconnectDecision {
+        let decision = self.schedule_resource_refresh(occurrence, position, now);
+        if let ReconnectDecision::Retry { attempt, .. } = decision {
+            if let ReconnectPhase::Waiting { at, .. } = &mut self.phase {
+                *at = now;
+            }
+            ReconnectDecision::Retry {
+                attempt,
+                delay: Duration::ZERO,
+            }
+        } else {
+            decision
+        }
+    }
+
+    pub(in crate::app) fn update_position(&mut self, position: Duration) {
+        match &mut self.phase {
+            ReconnectPhase::Waiting { context, .. } | ReconnectPhase::Recovering(context) => {
+                context.position = position;
+            }
+            ReconnectPhase::Idle => {}
+        }
+    }
+
+    /// API resolution is part of an already dispatched reconnect. A transport
+    /// failure spends the network budget, retaining any URL-refresh attempts.
+    pub(in crate::app) fn resolution_failed(
+        &mut self,
+        occurrence: Option<PlaybackId>,
+        failure: Option<StreamFailure>,
+        now: Instant,
+    ) -> ReconnectDecision {
+        let ReconnectPhase::Recovering(context) = &self.phase else {
+            return ReconnectDecision::DoNotRetry;
+        };
+        if occurrence != Some(context.occurrence) {
+            self.cancel();
+            return ReconnectDecision::DoNotRetry;
+        }
+        self.schedule(context.occurrence, failure, context.position, now)
     }
 
     fn schedule_with_budget(
@@ -91,17 +169,36 @@ impl PlaybackReconnect {
         position: Duration,
         now: Instant,
         budget: u8,
+        kind: RetryKind,
     ) -> ReconnectDecision {
-        let previous = self
+        let (network_attempts, resource_refresh_attempts) = self
             .context()
             .filter(|context| context.occurrence == occurrence)
-            .map_or(0, |context| context.attempt);
+            .map_or((0, 0), |context| {
+                (context.network_attempts, context.resource_refresh_attempts)
+            });
+        let refreshing = kind == RetryKind::ResourceRefresh;
+        let previous = if refreshing {
+            resource_refresh_attempts
+        } else {
+            network_attempts
+        };
         let decision = reconnect_decision(failure, previous, budget);
         self.phase = match decision {
             ReconnectDecision::Retry { attempt, delay } => ReconnectPhase::Waiting {
                 context: RetryContext {
                     occurrence,
-                    attempt,
+                    kind,
+                    network_attempts: if refreshing {
+                        network_attempts
+                    } else {
+                        attempt
+                    },
+                    resource_refresh_attempts: if refreshing {
+                        attempt
+                    } else {
+                        resource_refresh_attempts
+                    },
                     position,
                 },
                 at: now + delay,
@@ -129,7 +226,8 @@ impl PlaybackReconnect {
         match std::mem::take(&mut self.phase) {
             ReconnectPhase::Waiting { context, at } if now >= at => {
                 let attempt = ReconnectAttempt {
-                    attempt: context.attempt,
+                    attempt: context.attempt(),
+                    kind: context.kind,
                     position: context.position,
                 };
                 self.phase = ReconnectPhase::Recovering(context);

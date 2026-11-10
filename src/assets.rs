@@ -62,6 +62,9 @@ embedded_icons! {
     "trash.svg",
     "pencil.svg",
     "keyboard.svg",
+    "globe.svg",
+    "ellipsis.svg",
+    "tv.svg",
 }
 
 pub struct Assets;
@@ -103,6 +106,9 @@ pub enum AppIcon {
     Trash,
     Pencil,
     Keyboard,
+    Globe,
+    More,
+    Video,
 }
 
 #[derive(Clone, Copy)]
@@ -153,6 +159,9 @@ impl IconNamed for AppIcon {
             Self::Trash => "icons/trash.svg",
             Self::Pencil => "icons/pencil.svg",
             Self::Keyboard => "icons/keyboard.svg",
+            Self::Globe => "icons/globe.svg",
+            Self::More => "icons/ellipsis.svg",
+            Self::Video => "icons/tv.svg",
         }
         .into()
     }
@@ -226,6 +235,9 @@ mod tests {
             super::AppIcon::Refresh,
             super::AppIcon::Eq,
             super::AppIcon::Keyboard,
+            super::AppIcon::Globe,
+            super::AppIcon::More,
+            super::AppIcon::Video,
         ] {
             let path = icon.path();
             let loaded = Assets.load(&path).expect("asset lookup should not error");

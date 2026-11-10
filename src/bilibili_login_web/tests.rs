@@ -17,7 +17,7 @@ async fn remote_page_requires_exact_random_route_and_never_exposes_credentials()
                 stream,
                 "/randomroute/",
                 state.clone(),
-                BilibiliClient::new(None).unwrap(),
+                BilibiliClient::new(&crate::models::network::NetworkRoute::Direct).unwrap(),
                 None,
             )
             .await

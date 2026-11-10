@@ -21,10 +21,21 @@ pub struct OpenSubsonicProvider {
     base_url: String,
     username: String,
     password: String,
+    route: crate::models::network::NetworkRoute,
 }
 
 impl OpenSubsonicProvider {
+    #[cfg(test)]
     pub fn new(server_url: &str, username: &str, password: &str) -> Result<Self> {
+        Self::with_route(server_url, username, password, Default::default())
+    }
+
+    pub fn with_route(
+        server_url: &str,
+        username: &str,
+        password: &str,
+        route: crate::models::network::NetworkRoute,
+    ) -> Result<Self> {
         let base_url = if server_url.contains("://") {
             server_url.trim_end_matches('/').to_string()
         } else {
@@ -36,10 +47,14 @@ impl OpenSubsonicProvider {
             return Err(anyhow!(t!("server URL must use http or https")));
         }
 
+        let builder =
+            reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(10));
+        let client = crate::source::resource::clients::route_async(builder, &route)
+            .map_err(|_| anyhow!(t!("Enter a valid proxy address.")))?
+            .build()?;
         Ok(Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()?,
+            client,
+            route,
             base_url,
             username: username.to_string(),
             password: password.to_string(),
@@ -48,6 +63,10 @@ impl OpenSubsonicProvider {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    pub(crate) fn route(&self) -> &crate::models::network::NetworkRoute {
+        &self.route
     }
 
     fn auth_params(&self) -> (String, String) {

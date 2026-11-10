@@ -10,11 +10,12 @@ pub(in crate::app) fn configured_source(config: &Config, id: &SourceId) -> Optio
                 .servers
                 .iter()
                 .find(|server| server.id == id.profile_id && server.is_configured())?;
-            MusicSource::opensubsonic(
+            MusicSource::opensubsonic_with_route(
                 &server.id,
                 &server.url,
                 &server.username,
                 &server.resolved_password(),
+                config.route_for(id).ok()?,
             )
             .ok()
         }
@@ -27,9 +28,7 @@ impl NavidromeApp {
         if id.provider == crate::source::ProviderKind::OpenSubsonic {
             return configured_source(&self.config, id);
         }
-        let crate::source::SourceProfile::Bilibili {
-            account_id, proxy, ..
-        } = self
+        let crate::source::SourceProfile::Bilibili { account_id, .. } = self
             .config
             .sources
             .iter()
@@ -45,7 +44,14 @@ impl NavidromeApp {
         if *account_id != Some(session.account_id()) {
             return None;
         }
-        crate::source::bilibili::BilibiliProvider::new(id.clone(), session.clone(), proxy.clone())
+        let route = self.config.route_for(id).ok()?;
+        if let Some(MusicSource::Bilibili(provider)) = self.source_by_id(id) {
+            return provider
+                .with_session(session.clone(), route)
+                .ok()
+                .map(MusicSource::Bilibili);
+        }
+        crate::source::bilibili::BilibiliProvider::new(id.clone(), session.clone(), route)
             .ok()
             .map(MusicSource::Bilibili)
     }
@@ -64,6 +70,9 @@ impl NavidromeApp {
             return;
         }
         if self.available_source(id).is_none() {
+            self.notify_error(t!(
+                "Bilibili account is not ready. Check its connection settings."
+            ));
             return;
         }
         self.prepare_server_change();
@@ -131,6 +140,20 @@ impl NavidromeApp {
             .as_ref()
             .map(|api| api.id().cache_namespace())
             .unwrap_or_default()
+    }
+
+    /// Retire pending work carrying old source credentials or network settings while leaving already playing audio intact.
+    pub(in crate::app) fn cancel_source_playback_work(&mut self, source: &SourceId) {
+        self.start_resolution.cancel_source(source);
+        self.preload_resolution.cancel_source(source);
+        if self
+            .playback_source
+            .as_ref()
+            .is_some_and(|api| api.id() == source)
+        {
+            self.cancel_next_preload();
+            self.reconnect.cancel();
+        }
     }
 
     pub(in crate::app) fn retire_playback_source(&mut self, source: &SourceId) {

@@ -100,7 +100,7 @@ impl Fixture {
             id: SourceId::new(ProviderKind::Bilibili, "test"),
             client: BilibiliClient::local(self.origin.clone()),
             session: session(),
-            proxy: None,
+            route: crate::models::network::NetworkRoute::Direct,
         }
     }
 }

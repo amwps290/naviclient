@@ -12,11 +12,17 @@ pub(in crate::app) struct SettingsSectionPresentation {
 impl SettingsSection {
     pub(in crate::app) fn presentation(self) -> SettingsSectionPresentation {
         let (title, description, navigation_id, icon) = match self {
-            Self::Servers => (
-                t!("Servers"),
-                t!("Manage server connections and library access."),
-                "settings-nav-servers",
+            Self::Sources => (
+                t!("Music sources"),
+                t!("Manage music sources, accounts, and their network connections."),
+                "settings-nav-sources",
                 AppIcon::Server,
+            ),
+            Self::Proxies => (
+                t!("Proxies"),
+                t!("Save proxies here, then choose a connection for each music source."),
+                "settings-nav-proxies",
+                AppIcon::Globe,
             ),
             Self::Playback => (
                 t!("Playback"),

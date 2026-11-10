@@ -74,8 +74,10 @@ fn selection_discards_previous_track_diagnostics_and_preserves_device_informatio
         "next".into(),
         Some(Duration::from_secs(10)),
         1.0,
-        Duration::from_secs(20),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(20),
+            ..Default::default()
+        },
     );
     let serial = rx.recv().unwrap().serial.unwrap();
     let projected = audio.state();
@@ -103,6 +105,33 @@ fn selection_discards_previous_track_diagnostics_and_preserves_device_informatio
 }
 
 #[test]
+fn paused_start_is_one_command_and_a_later_resume_wins() {
+    let (audio, rx) = handle(playing());
+    assert!(audio.play(
+        "test".into(),
+        "next".into(),
+        Some(Duration::from_secs(10)),
+        1.0,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(5),
+            paused: true,
+            ..Default::default()
+        },
+    ));
+    let projected = audio.state();
+    assert!(projected.active && projected.paused);
+    assert_eq!(projected.position, Duration::from_secs(5));
+    assert!(matches!(
+        rx.recv().unwrap().command,
+        Command::Play { start, .. } if start.paused
+    ));
+    assert!(rx.try_recv().is_err());
+    audio.resume();
+    assert!(!audio.state().paused);
+    assert!(matches!(rx.recv().unwrap().command, Command::Resume));
+}
+
+#[test]
 fn commands_after_selection_use_selected_bounds_and_latest_pause_intent() {
     let (audio, rx) = handle(playing());
     audio.play(
@@ -110,8 +139,10 @@ fn commands_after_selection_use_selected_bounds_and_latest_pause_intent() {
         "next".into(),
         None,
         1.0,
-        Duration::from_secs(50),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(50),
+            ..Default::default()
+        },
     );
     audio.pause();
     audio.seek(Duration::from_secs(200));
@@ -169,14 +200,7 @@ fn untracked_commands_do_not_discard_pending_seek_and_diagnostics_keep_updating(
 fn failed_delivery_does_not_leave_an_invented_preparing_state() {
     let (audio, rx) = handle(PlaybackState::default());
     drop(rx);
-    let accepted = audio.play(
-        "test".into(),
-        "next".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    let accepted = audio.play("test".into(), "next".into(), None, 1.0, Default::default());
     assert!(!accepted);
     assert!(!audio.state().active);
 }
@@ -184,14 +208,7 @@ fn failed_delivery_does_not_leave_an_invented_preparing_state() {
 #[test]
 fn worker_exit_exposes_initialization_failure_instead_of_retaining_pending_play() {
     let (audio, _rx) = handle(PlaybackState::default());
-    audio.play(
-        "test".into(),
-        "next".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    audio.play("test".into(), "next".into(), None, 1.0, Default::default());
     assert!(audio.state().active);
     audio.state.lock().unwrap().error = Some("output unavailable".into());
     drop(WorkerGuard(audio.state.clone()));
@@ -210,8 +227,10 @@ fn progress_waits_for_replacement_and_its_following_commands_then_for_output() {
         "next".into(),
         None,
         1.0,
-        Duration::from_secs(5),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(5),
+            ..Default::default()
+        },
     );
     let play = rx.recv().unwrap().serial.unwrap();
     audio.pause();
@@ -292,7 +311,7 @@ fn pending_seeks_supply_inactive_baselines_and_only_completed_output_is_active()
 #[test]
 fn preparation_failure_publishes_no_active_progress_and_retains_its_error() {
     let (audio, rx) = handle(playing());
-    audio.play("test".into(), "bad".into(), None, 1.0, Duration::ZERO, None);
+    audio.play("test".into(), "bad".into(), None, 1.0, Default::default());
     let serial = rx.recv().unwrap().serial.unwrap();
     *audio.state.lock().unwrap() = PlaybackState {
         command_serial: serial,
@@ -310,14 +329,7 @@ fn preparation_failure_publishes_no_active_progress_and_retains_its_error() {
 fn sequence_wrap_does_not_confuse_default_worker_state_with_an_acknowledgement() {
     let (audio, rx) = handle(PlaybackState::default());
     audio.transport.lock().unwrap().serial = u64::MAX;
-    audio.play(
-        "test".into(),
-        "next".into(),
-        None,
-        1.0,
-        Duration::ZERO,
-        None,
-    );
+    audio.play("test".into(), "next".into(), None, 1.0, Default::default());
     assert_eq!(rx.recv().unwrap().serial, Some(1));
     assert!(audio.state().active);
 }

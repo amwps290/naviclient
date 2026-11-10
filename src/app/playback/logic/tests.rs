@@ -60,8 +60,10 @@ fn scrobble_waits_for_output_beyond_a_pending_start_or_seek_target() {
         "song".into(),
         Some(Duration::from_secs(120)),
         1.0,
-        Duration::from_secs(70),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(70),
+            ..Default::default()
+        },
     );
     assert!(!should_scrobble(&fixture.audio.progress()));
     let playback = PlaybackState {

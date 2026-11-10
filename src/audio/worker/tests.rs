@@ -89,8 +89,7 @@ fn assert_pending_http_cancelled(shutdown: bool) {
         "late-stream".into(),
         None,
         1.0,
-        Duration::ZERO,
-        None,
+        Default::default(),
     );
     wait_for(|| partial.exists());
     assert!(audio.state().active);

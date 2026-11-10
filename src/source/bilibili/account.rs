@@ -1,17 +1,20 @@
 //! Account metadata transactions shared by native and remote login.
 
 use super::auth::{Account, AuthSession};
+use crate::models::network::NetworkRoute;
 use crate::models::Config;
 use crate::secrets::source_credentials::{validate_reference, CredentialError};
 use crate::source::{ProviderKind, SourceId, SourceProfile};
 
 /// Startup and SSH diagnostics share the same strict, read-only restore path.
-pub(crate) async fn restore_session(profile: &SourceProfile) -> anyhow::Result<AuthSession> {
+pub(crate) async fn restore_session(
+    profile: &SourceProfile,
+    route: &NetworkRoute,
+) -> anyhow::Result<AuthSession> {
     use crate::secrets::source_credentials::{CredentialStore, SystemStore};
     let SourceProfile::Bilibili {
         account_id: Some(account_id),
         credential_key: Some(key),
-        proxy,
         ..
     } = profile
     else {
@@ -20,7 +23,7 @@ pub(crate) async fn restore_session(profile: &SourceProfile) -> anyhow::Result<A
     validate_reference(&profile.id(), *account_id, key)?;
     let secret = SystemStore.load(key).await?;
     let session = AuthSession::decode_secret(secret, *account_id)?;
-    super::client::BilibiliClient::new(proxy.as_deref())?
+    super::client::BilibiliClient::new(route)?
         .verify_account(&session)
         .await?;
     Ok(session)
@@ -38,6 +41,7 @@ pub(crate) fn prepare_config(
     account: &Account,
     session: &AuthSession,
     key: &str,
+    // An explicit address (remote login `--proxy`) replaces the source route.
     proxy: Option<String>,
 ) -> Result<(Config, Option<String>), CredentialError> {
     validate_reference(source, account.id, key)?;
@@ -72,6 +76,7 @@ pub(crate) fn prepare_config(
     } else {
         next.sources.push(profile);
     }
+    next.sync_network();
     Ok((next, old_key))
 }
 

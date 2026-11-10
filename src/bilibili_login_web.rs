@@ -105,7 +105,9 @@ fn credential_message(error: CredentialError) -> &'static str {
 }
 fn protocol_message(error: BilibiliError) -> &'static str {
     match error {
-        BilibiliError::InvalidProxy => "请输入有效的 HTTP 代理地址，或省略 --proxy。",
+        BilibiliError::InvalidProxy => {
+            "请输入有效的代理地址（HTTP、HTTPS 或 SOCKS5），或省略 --proxy。"
+        }
         BilibiliError::Network | BilibiliError::Http(_) => {
             "无法连接 B 站，请检查网络或代理后重试。"
         }
@@ -328,7 +330,16 @@ pub(crate) fn try_run() -> bool {
 }
 
 async fn run(port: u16, proxy: Option<String>) -> Result<(), &'static str> {
-    let client = BilibiliClient::new(proxy.as_deref()).map_err(protocol_message)?;
+    let proxy = proxy
+        .map(|proxy| crate::models::network::normalize_proxy(&proxy))
+        .transpose()
+        .map_err(|_| protocol_message(BilibiliError::InvalidProxy))?;
+    let route = proxy
+        .clone()
+        .map_or(crate::models::network::NetworkRoute::System, |proxy| {
+            crate::models::network::NetworkRoute::Proxy(proxy)
+        });
+    let client = BilibiliClient::new(&route).map_err(protocol_message)?;
     SystemStore.check(false).await.map_err(credential_message)?;
     let listener = TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
         .await

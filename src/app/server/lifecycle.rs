@@ -16,7 +16,6 @@ impl NavidromeApp {
     pub(in crate::app) fn reconnect_active_server(&mut self) {
         self.state.reset_browsing();
         self.playlist_ui.reset();
-        self.state.settings.editing_server = None;
         self.import_ui.reset();
         self.state.albums_sort = self.config.albums_sort;
         self.state.artists.set_sort(self.config.artists_sort);
@@ -36,7 +35,20 @@ impl NavidromeApp {
                 }
                 self.refresh_library();
             } else {
-                self.state.status = t!("Verifying Bilibili account…").to_string();
+                self.state.status = match self
+                    .config
+                    .active_source
+                    .as_ref()
+                    .and_then(|source| self.bilibili_accounts.get(source))
+                {
+                    Some(crate::app::settings::bilibili_state::AccountStatus::Failed(error)) => {
+                        error.message().to_string()
+                    }
+                    Some(crate::app::settings::bilibili_state::AccountStatus::Checking {
+                        ..
+                    }) => t!("Verifying Bilibili account…").to_string(),
+                    _ => t!("Sign in to Bilibili").to_string(),
+                };
             }
             return;
         }
@@ -64,11 +76,29 @@ impl NavidromeApp {
             .active_profile()
             .map(|profile| profile.resolved_password())
             .unwrap_or_default();
-        match MusicSource::opensubsonic(
+        let route = match self
+            .config
+            .active_source
+            .as_ref()
+            .map(|source| self.config.route_for(source))
+            .transpose()
+        {
+            Ok(route) => route.unwrap_or_default(),
+            Err(_) => {
+                self.api = None;
+                self.notify_error(t!(
+                    "The selected proxy is missing. Choose a proxy or direct connection."
+                ));
+                self.state.settings.open = true;
+                return;
+            }
+        };
+        match MusicSource::opensubsonic_with_route(
             self.config.active_server.as_deref().unwrap_or_default(),
             &self.config.server_url,
             &self.config.username,
             &password,
+            route,
         ) {
             Ok(api) => {
                 self.api = Some(api);

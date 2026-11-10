@@ -4,6 +4,7 @@ use anyhow::{ensure, Result};
 
 use super::{AudioQuality, HttpResource, MediaKey, PlaybackResource, ProviderKind, SourceId};
 use crate::api::OpenSubsonicProvider;
+use crate::models::network::NetworkRoute;
 use crate::models::{Song, TranscodingQuality};
 use crate::playback_timeline::song_duration_hint;
 
@@ -15,10 +16,20 @@ pub struct OpenSubsonicAdapter {
 
 impl OpenSubsonicAdapter {
     pub fn new(profile_id: &str, url: &str, username: &str, password: &str) -> Result<Self> {
+        Self::with_route(profile_id, url, username, password, Default::default())
+    }
+
+    pub fn with_route(
+        profile_id: &str,
+        url: &str,
+        username: &str,
+        password: &str,
+        route: NetworkRoute,
+    ) -> Result<Self> {
         ensure!(!profile_id.trim().is_empty(), "source profile ID is empty");
         Ok(Self {
             id: SourceId::new(ProviderKind::OpenSubsonic, profile_id),
-            provider: OpenSubsonicProvider::new(url, username, password)?,
+            provider: OpenSubsonicProvider::with_route(url, username, password, route)?,
         })
     }
 
@@ -47,6 +58,7 @@ impl OpenSubsonicAdapter {
             self.provider
                 .stream_url(&song.id, effective.max_bit_rate())?,
         )
+        .with_route(self.provider.route().clone())
         .with_estimated_length(estimated)
         .with_mime_hint(if estimated {
             Some("audio/mpeg".into())
@@ -75,7 +87,6 @@ impl OpenSubsonicAdapter {
                 ..AudioQuality::default()
             },
             duration: song_duration_hint(song),
-            expires_at: None,
         })
     }
 }

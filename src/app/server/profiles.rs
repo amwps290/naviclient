@@ -42,24 +42,6 @@ impl NavidromeApp {
         self.sync_server_inputs(window, cx);
     }
 
-    /// 新增一台空白服务器并立即切过去，方便直接填地址账号。
-    pub(in crate::app) fn add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.prepare_server_change();
-        let id = self.config.add_server();
-        if let Err(error) = config::save(&self.config) {
-            self.notify_error(t!(
-                "Config save failed: %{error}",
-                error = format!("{error:#}")
-            ));
-        }
-        log::info!("added server entry; id={id}");
-        self.reconnect_active_server();
-        self.sync_server_inputs(window, cx);
-        // 新条目直接展开表单：新增的意图就是填写连接信息。
-        self.state.settings.editing_server = Some(id);
-        self.state.status = t!("Enter the address and account for the new server").to_string();
-    }
-
     /// 删除一台服务器；正在使用的条目被删除时自动切到相邻条目。
     /// clean_data = true 时一并清理这台服务器的全部作用域缓存与系统
     /// 凭据库条目；凭据删除不可恢复，重新添加同一台
@@ -85,11 +67,11 @@ impl NavidromeApp {
         else {
             return;
         };
-        if removing_active && self.config.servers.len() > 1 {
+        if removing_active {
             self.prepare_server_change();
         }
         if !self.config.remove_server(id) {
-            self.notify_error(t!("Keep at least one server configured"));
+            self.notify_error(t!("Keep at least one music source configured"));
             return;
         }
         self.retire_playback_source(&crate::source::SourceId::new(
@@ -118,10 +100,6 @@ impl NavidromeApp {
             ));
         }
         log::info!("removed server entry; id={id}");
-        // 正在编辑的条目被删掉：表单不能指向不存在的 id。
-        if self.state.settings.editing_server.as_deref() == Some(id) {
-            self.state.settings.editing_server = None;
-        }
         if removing_active {
             self.reconnect_active_server();
             self.sync_server_inputs(window, cx);

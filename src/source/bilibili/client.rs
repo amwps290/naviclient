@@ -1,6 +1,7 @@
 //! Fixed-origin, bounded account requests. Transport errors are redacted.
 
 use super::auth::AuthSession;
+use crate::models::network::NetworkRoute;
 use reqwest::{header, Client, Response};
 use rust_i18n::t;
 use serde::de::DeserializeOwned;
@@ -13,6 +14,7 @@ pub const REFERER: &str = "https://www.bilibili.com/";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BilibiliError {
     Network,
+    Timeout,
     Http(u16),
     Api(i64),
     InvalidResponse,
@@ -25,6 +27,7 @@ pub enum BilibiliError {
     RegionRestricted,
     RateLimited,
     UnsupportedAudio,
+    ResourceExpired,
     LimitExceeded,
 }
 
@@ -37,10 +40,11 @@ impl fmt::Display for BilibiliError {
                 Self::Network => {
                     t!("Cannot reach Bilibili. Check the connection or proxy and retry.")
                 }
+                Self::Timeout => t!("Bilibili request timed out. Retry playback."),
                 Self::InvalidResponse => {
                     t!("Bilibili returned an invalid response. Refresh and retry.")
                 }
-                Self::InvalidProxy => t!("Enter a valid HTTP proxy address, or leave it empty."),
+                Self::InvalidProxy => t!("Enter a valid proxy address."),
                 Self::NotAuthenticated => t!("Bilibili login expired. Sign in again."),
                 Self::AccountMismatch => {
                     t!("Scan with the same Bilibili account, or add a new account.")
@@ -51,6 +55,9 @@ impl fmt::Display for BilibiliError {
                 Self::RegionRestricted => t!("Bilibili content is unavailable in this region."),
                 Self::RateLimited => t!("Bilibili request rate limited. Retry later."),
                 Self::UnsupportedAudio => t!("Bilibili has no supported independent AAC-LC audio."),
+                Self::ResourceExpired => {
+                    t!("A fresh playback address is required. Retry playback.")
+                }
                 Self::LimitExceeded => {
                     t!("Bilibili favorites exceed the loading limit. No partial queue was created.")
                 }
@@ -68,9 +75,17 @@ impl BilibiliError {
             -403 | 62012 => Self::PermissionDenied,
             -404 | 62002 | 62004 => Self::Unavailable,
             -10403 => Self::RegionRestricted,
-            -412 | -509 => Self::RateLimited,
+            -352 | -412 | -509 => Self::RateLimited,
             other => Self::Api(other),
         }
+    }
+}
+
+fn transport_error(error: reqwest::Error) -> BilibiliError {
+    if error.is_timeout() {
+        BilibiliError::Timeout
+    } else {
+        BilibiliError::Network
     }
 }
 
@@ -92,6 +107,7 @@ impl<T> Envelope<T> {
 #[derive(Clone)]
 pub struct BilibiliClient {
     http: Client,
+    audio_clients: crate::source::resource::clients::AsyncClients,
     #[cfg(test)]
     test_origin: Option<String>,
 }
@@ -112,15 +128,21 @@ impl BilibiliClient {
         let address = address.as_deref().unwrap_or(resource.url());
         #[cfg(not(test))]
         let address = resource.url();
-        let mut response = self
-            .http
+        let client_resource = crate::source::HttpResource::new(address)
+            .with_headers(resource.headers().clone())
+            .with_route(resource.route().clone());
+        let client = self
+            .audio_clients
+            .get(&client_resource)
+            .map_err(|_| BilibiliError::Network)?;
+        let mut response = client
             .get(address)
             .headers(resource.headers().clone())
             .header(header::RANGE, "bytes=0-0")
-            .timeout(Duration::from_secs(6))
+            .timeout(crate::source::resource::timing::AUDIO_PROBE_TIMEOUT)
             .send()
             .await
-            .map_err(|_| BilibiliError::Network)?;
+            .map_err(transport_error)?;
         if !response.status().is_success() {
             return Err(if response.status().as_u16() == 429 {
                 BilibiliError::RateLimited
@@ -139,7 +161,7 @@ impl BilibiliClient {
         if response
             .chunk()
             .await
-            .map_err(|_| BilibiliError::Network)?
+            .map_err(transport_error)?
             .is_none_or(|chunk| chunk.is_empty())
         {
             return Err(BilibiliError::InvalidResponse);
@@ -155,7 +177,7 @@ impl BilibiliClient {
             .header(header::REFERER, REFERER)
             .send()
             .await
-            .map_err(|_| BilibiliError::Network)?;
+            .map_err(transport_error)?;
         if !response.status().is_success() {
             return Err(BilibiliError::Http(response.status().as_u16()));
         }
@@ -167,7 +189,7 @@ impl BilibiliClient {
             return Err(BilibiliError::InvalidResponse);
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| BilibiliError::Network)? {
+        while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
             if bytes.len().saturating_add(chunk.len()) > limit {
                 return Err(BilibiliError::InvalidResponse);
             }
@@ -175,30 +197,17 @@ impl BilibiliClient {
         }
         Ok(bytes)
     }
-    pub fn new(proxy: Option<&str>) -> Result<Self, BilibiliError> {
-        let mut builder = Client::builder()
-            .no_proxy()
+    pub fn new(route: &NetworkRoute) -> Result<Self, BilibiliError> {
+        let builder = Client::builder()
             .referer(false)
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(20));
-        if let Some(proxy) = proxy.filter(|proxy| !proxy.is_empty()) {
-            let parsed = url::Url::parse(proxy).map_err(|_| BilibiliError::InvalidProxy)?;
-            if !matches!(parsed.scheme(), "http" | "https")
-                || parsed.host_str().is_none()
-                || !parsed.username().is_empty()
-                || parsed.password().is_some()
-                || parsed.path() != "/"
-                || parsed.query().is_some()
-                || parsed.fragment().is_some()
-            {
-                return Err(BilibiliError::InvalidProxy);
-            }
-            builder =
-                builder.proxy(reqwest::Proxy::all(proxy).map_err(|_| BilibiliError::InvalidProxy)?);
-        }
+        let builder = crate::source::resource::clients::route_async(builder, route)
+            .map_err(|_| BilibiliError::InvalidProxy)?;
         Ok(Self {
             http: builder.build().map_err(|_| BilibiliError::Network)?,
+            audio_clients: Default::default(),
             #[cfg(test)]
             test_origin: None,
         })
@@ -227,7 +236,7 @@ impl BilibiliClient {
         if let Some(session) = session {
             request = request.header(header::COOKIE, session.cookie_header()?);
         }
-        let response = request.send().await.map_err(|_| BilibiliError::Network)?;
+        let response = request.send().await.map_err(transport_error)?;
         if !response.status().is_success() {
             return Err(if response.status().as_u16() == 429 {
                 BilibiliError::RateLimited
@@ -248,7 +257,7 @@ impl BilibiliClient {
             return Err(BilibiliError::InvalidResponse);
         }
         let mut bytes = zeroize::Zeroizing::new(Vec::new());
-        while let Some(chunk) = response.chunk().await.map_err(|_| BilibiliError::Network)? {
+        while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
             if bytes.len().saturating_add(chunk.len()) > RESPONSE_LIMIT {
                 return Err(BilibiliError::InvalidResponse);
             }
@@ -259,7 +268,7 @@ impl BilibiliClient {
 
     #[cfg(test)]
     pub(super) fn local(origin: String) -> Self {
-        let mut client = Self::new(None).unwrap();
+        let mut client = Self::new(&NetworkRoute::Direct).unwrap();
         client.test_origin = Some(origin);
         client
     }

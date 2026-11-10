@@ -1,12 +1,16 @@
 //! QR task ownership is part of the settings overlay's lifetime.
 
+use crate::models::{
+    network::{NetworkError, SourceConnection},
+    Config,
+};
 use crate::secrets::source_credentials::{CredentialError, StagedCredential};
 use crate::source::{
     bilibili::{
         auth::{Account, AuthSession},
         client::BilibiliError,
     },
-    SourceId,
+    SourceId, SourceProfile,
 };
 use gpui_kit::Image;
 use std::{fmt, sync::Arc};
@@ -69,7 +73,47 @@ pub(in crate::app) struct LoginTarget {
     /// Reauthentication must verify the same account. A different account
     /// requires a new source, preserving cached identities for both accounts.
     pub account_id: Option<u64>,
-    pub proxy: Option<String>,
+    pub connection: SourceConnection,
+    /// A newly added row may resolve to an already saved account during login.
+    pub provisional_source: Option<SourceId>,
+}
+
+impl LoginTarget {
+    /// Apply the selected connection and merge a duplicate account's new row
+    /// into its saved identity as part of the same configuration transaction.
+    pub(in crate::app) fn apply_source_settings(
+        &self,
+        config: &mut Config,
+    ) -> Result<Option<SourceId>, NetworkError> {
+        config.set_source_connection(&self.source, self.connection.clone())?;
+        let provisional = self
+            .provisional_source
+            .as_ref()
+            .filter(|source| *source != &self.source);
+        if let Some(source) = provisional {
+            // Only an unsigned row created for this login can be replaced.
+            if !config.sources.iter().any(|profile| {
+                profile.id() == *source
+                    && matches!(
+                        profile,
+                        SourceProfile::Bilibili {
+                            account_id: None,
+                            credential_key: None,
+                            ..
+                        }
+                    )
+            }) {
+                return Ok(None);
+            }
+            config.sources.retain(|profile| profile.id() != *source);
+            if config.active_source.as_ref() == Some(source) {
+                config.active_source = Some(self.source.clone());
+            }
+            config.sync_active_profile();
+            return Ok(Some(source.clone()));
+        }
+        Ok(None)
+    }
 }
 
 #[derive(Default)]
@@ -122,10 +166,27 @@ impl Drop for LoginState {
 
 #[derive(Debug)]
 pub(in crate::app) enum AccountStatus {
-    Checking,
+    Checking { request: u128 },
     Ready(AuthSession),
     Failed(LoginError),
     Removing,
+}
+
+impl AccountStatus {
+    pub(in crate::app) fn complete_check(
+        &mut self,
+        request: u128,
+        result: Result<AuthSession, LoginError>,
+    ) -> bool {
+        if !matches!(self, Self::Checking { request: current } if *current == request) {
+            return false;
+        }
+        *self = match result {
+            Ok(session) => Self::Ready(session),
+            Err(error) => Self::Failed(error),
+        };
+        true
+    }
 }
 
 #[cfg(test)]

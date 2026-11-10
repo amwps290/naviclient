@@ -15,8 +15,10 @@ fn start(audio: &AudioHandle) -> bool {
         "fixture-song".into(),
         Some(Duration::from_secs(180)),
         1.0,
-        Duration::from_millis(42_125),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_millis(42_125),
+            ..Default::default()
+        },
     )
 }
 
@@ -24,6 +26,104 @@ fn request(audio: &AudioHandle, request: PlaybackRequest) -> PlaybackAction {
     apply_playback_request(audio, request, true, || {
         assert!(start(audio));
     })
+}
+
+#[test]
+fn pause_and_play_keep_both_kinds_of_recovery_while_waiting_or_resolving() {
+    use crate::app::playback::reconnect::{ReconnectPoll, RetryKind};
+    use crate::models::PlaybackId;
+    use std::time::Instant;
+
+    for intent in [StartIntent::Reconnect, StartIntent::ResourceRefresh] {
+        for resolving in [false, true] {
+            let fixture = Fixture::new(PlaybackState {
+                error: Some("stream failed".into()),
+                ..Default::default()
+            });
+            let mut reconnect = PlaybackReconnect::default();
+            let occurrence = PlaybackId::new();
+            let now = Instant::now();
+            if intent == StartIntent::ResourceRefresh {
+                reconnect.schedule_resource_refresh(occurrence, Duration::from_secs(42), now);
+            } else {
+                reconnect.schedule(
+                    occurrence,
+                    Some(StreamFailure::Connect),
+                    Duration::from_secs(42),
+                    now,
+                );
+            }
+            if resolving {
+                assert!(matches!(
+                    reconnect.poll(
+                        now + Duration::from_secs(2),
+                        Some(occurrence),
+                        true,
+                        &fixture.audio.state(),
+                    ),
+                    ReconnectPoll::Retry(_)
+                ));
+            }
+            for (request, paused) in [
+                (PlaybackRequest::Pause, true),
+                (PlaybackRequest::Toggle, false),
+                (PlaybackRequest::Toggle, true),
+                (PlaybackRequest::Play, false),
+            ] {
+                assert!(apply_recovery_playback_request(
+                    &fixture.audio,
+                    request,
+                    resolving.then_some(intent),
+                    &reconnect,
+                ));
+                assert_eq!(fixture.audio.state().paused, paused);
+                assert!(reconnect.pending());
+            }
+            assert_eq!(fixture.commands(), ["pause", "resume", "pause", "resume"]);
+            if !resolving {
+                let ReconnectPoll::Retry(attempt) = reconnect.poll(
+                    now + Duration::from_secs(2),
+                    Some(occurrence),
+                    true,
+                    &fixture.audio.state(),
+                ) else {
+                    panic!("transport request cancelled a waiting recovery");
+                };
+                assert_eq!(attempt.position, Duration::from_secs(42));
+                assert_eq!(attempt.attempt, 1);
+                assert_eq!(
+                    attempt.kind,
+                    if intent == StartIntent::ResourceRefresh {
+                        RetryKind::ResourceRefresh
+                    } else {
+                        RetryKind::Network
+                    },
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn only_recovery_intents_handle_transport_before_a_reconnect_is_registered() {
+    for (intent, expected) in [
+        (None, false),
+        (Some(StartIntent::User), false),
+        (Some(StartIntent::AutoAdvance), false),
+        (Some(StartIntent::Reconnect), true),
+        (Some(StartIntent::ResourceRefresh), true),
+    ] {
+        let fixture = fixture(false, false);
+        let handled = apply_recovery_playback_request(
+            &fixture.audio,
+            PlaybackRequest::Pause,
+            intent,
+            &PlaybackReconnect::default(),
+        );
+        assert_eq!(handled, expected);
+        assert_eq!(fixture.audio.state().paused, expected);
+        assert_eq!(fixture.commands().len(), usize::from(expected));
+    }
 }
 
 #[test]
@@ -88,8 +188,10 @@ fn play_after_end_or_failure_starts_at_zero_instead_of_the_worker_terminal_posit
                         request.cache_key.clone(),
                         request.duration,
                         request.gain,
-                        request.position,
-                        None,
+                        crate::audio::PlaybackStart {
+                            position: request.position,
+                            ..Default::default()
+                        },
                     )
                 })
                 .unwrap();
@@ -513,8 +615,10 @@ fn rejected_replacement_after_removal_stops_the_old_occurrence_and_keeps_the_sur
                 request.cache_key.clone(),
                 request.duration,
                 request.gain,
-                request.position,
-                None,
+                crate::audio::PlaybackStart {
+                    position: request.position,
+                    ..Default::default()
+                },
             )
         }),
         Err(StartError::OutputUnavailable)

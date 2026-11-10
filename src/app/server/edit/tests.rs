@@ -290,3 +290,47 @@ fn saving_preserves_other_preferences_and_profiles() {
     }
     assert_eq!(serde_json::to_value(&config).unwrap(), before);
 }
+
+#[test]
+fn a_new_server_exists_only_after_saving_and_then_becomes_the_current_source() {
+    let config = configured(vec![profile_with_id("existing", "old")]);
+    let browsing = config.active_source.clone();
+    assert!(ServerForm::new("", USERNAME, "secret", "")
+        .prepare_new(&config)
+        .is_none());
+    assert!(ServerForm::new(URL, " ", "secret", "")
+        .prepare_new(&config)
+        .is_none());
+    let edit = ServerForm::new("https://new.example", USERNAME, "secret", " Home ")
+        .prepare_new(&config)
+        .unwrap();
+    assert!(edit.requires_reconnect());
+    assert_eq!(
+        config.servers.len(),
+        1,
+        "the draft never mutates the original"
+    );
+    assert_eq!(config.active_source, browsing);
+    let saved = edit.finish(PasswordStorage::Plaintext);
+    assert_eq!(saved.servers.len(), 2);
+    let added = saved.active_profile().unwrap();
+    assert_eq!(added.url, "https://new.example");
+    assert_eq!(added.name, "Home");
+    assert_ne!(added.id, "existing");
+    assert!(saved
+        .sources
+        .iter()
+        .any(|profile| profile.id() == saved.active_source.clone().unwrap()));
+}
+
+#[test]
+fn adding_the_same_server_twice_keeps_both_entries_distinct() {
+    let config = configured(vec![ServerProfile::new(URL, USERNAME, "secret")]);
+    let saved = ServerForm::new(URL, USERNAME, "secret", "Copy")
+        .prepare_new(&config)
+        .unwrap()
+        .finish(PasswordStorage::Plaintext);
+    assert_eq!(saved.servers.len(), 2);
+    assert_ne!(saved.servers[0].id, saved.servers[1].id);
+    assert_eq!(saved.active_profile().unwrap().name, "Copy");
+}

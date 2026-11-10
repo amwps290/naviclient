@@ -17,7 +17,7 @@ pub(crate) fn decode(resource: &PlaybackResource) -> Result<DecodeEvidence> {
     let cache = tempfile::tempdir()?;
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(12))
+        .timeout(crate::source::resource::timing::STREAM_TIMEOUT)
         .build()
         .map_err(reqwest::Error::without_url)?;
     let mut evidence = DecodeEvidence {

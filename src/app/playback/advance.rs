@@ -2,24 +2,15 @@
 
 use super::logic::should_scrobble;
 use super::occurrence::Selection;
-use super::start::{select_state, PreparedStart, StartError, StartTarget, UnresolvedStart};
+use super::start::{
+    select_state, PreparedStart, StartError, StartIntent, StartTarget, UnresolvedStart,
+};
 use crate::app::prelude::*;
 use crate::app::queue::logic::ShuffleHistory;
 use crate::app::queue::navigation::QueueStep;
 use rand::thread_rng;
 
 impl NavidromeApp {
-    pub(in crate::app) fn play_queue_index(&mut self, index: usize) -> bool {
-        let Some(target) = StartTarget::existing(&self.state.queue, index) else {
-            return false;
-        };
-        let Some(start) = self.prepare_playback_start(target, Duration::ZERO, Selection::New)
-        else {
-            return false;
-        };
-        self.activate_playback_start(start)
-    }
-
     pub(in crate::app) fn play_queue_index_with_history(
         &mut self,
         index: usize,
@@ -35,14 +26,19 @@ impl NavidromeApp {
         self.activate_playback_start(start.with_history(history))
     }
 
-    pub(in crate::app) fn play_queue_index_at(&mut self, index: usize, position: Duration) -> bool {
+    pub(in crate::app) fn play_queue_index_at(
+        &mut self,
+        index: usize,
+        position: Duration,
+        intent: StartIntent,
+    ) -> bool {
         let Some(target) = StartTarget::existing(&self.state.queue, index) else {
             return false;
         };
         let Some(start) = self.prepare_playback_start(target, position, Selection::Resume) else {
             return false;
         };
-        self.activate_playback_start(start)
+        self.activate_playback_start(start.with_intent(intent))
     }
 
     pub(in crate::app) fn prepare_playback_start(
@@ -56,7 +52,7 @@ impl NavidromeApp {
             .cloned();
         if let Some(api) = source
             .as_ref()
-            .filter(|api| api.id().provider == crate::source::ProviderKind::Bilibili)
+            .filter(|api| api.playback_policy().authorized_session)
         {
             let Some(authorized) = self.available_source(api.id()) else {
                 self.notify_error(t!("Bilibili login expired. Sign in again."));
@@ -81,6 +77,9 @@ impl NavidromeApp {
 
     pub(in crate::app) fn activate_playback_start(&mut self, start: UnresolvedStart) -> bool {
         self.start_resolution.cancel();
+        if !start.intent().reconnecting() {
+            self.reconnect.cancel();
+        }
         match start.try_resolve() {
             Some(result) => match result
                 .map_err(StartError::Request)
@@ -119,15 +118,9 @@ impl NavidromeApp {
         );
         let audio = self.audio.clone();
         let new_occurrence = start.new_occurrence();
+        let keep_paused = start.preserves_pause() && audio.state().paused;
         let effects = match start.commit(&mut self.state, &mut self.session, |request| {
-            audio.play(
-                request.url.clone(),
-                request.cache_key.clone(),
-                request.duration,
-                request.gain,
-                request.position,
-                preload_id,
-            )
+            request.send(&audio, preload_id, keep_paused)
         }) {
             Ok(effects) => effects,
             Err(error) => {
@@ -284,9 +277,6 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn seek_playback(&mut self, position: Duration) {
-        self.start_resolution.cancel();
-        self.reconnect.cancel();
-        self.cancel_next_preload();
         let playback = self.audio.state();
         let Some(timeline) = self
             .session
@@ -295,6 +285,19 @@ impl NavidromeApp {
             return;
         };
         let timeline = timeline.with_position(position);
+        if self
+            .start_resolution
+            .value_mut()
+            .is_some_and(|start| start.seek_during_refresh(timeline.position))
+        {
+            self.reconnect.update_position(timeline.position);
+            self.session.set_position(timeline);
+            self.media_session.restored_position_changed();
+            return;
+        }
+        self.start_resolution.cancel();
+        self.reconnect.cancel();
+        self.cancel_next_preload();
         if playback.active {
             self.audio.seek(timeline.position);
         } else {
@@ -320,7 +323,14 @@ impl NavidromeApp {
         ) else {
             return false;
         };
-        self.apply_queue_step(step)
+        self.apply_queue_step(
+            step,
+            if natural_end {
+                StartIntent::AutoAdvance
+            } else {
+                StartIntent::User
+            },
+        )
     }
 
     pub(in crate::app) fn advance_queue(&mut self, forward: bool) {
@@ -331,17 +341,27 @@ impl NavidromeApp {
             return;
         }
         if let Some(step) = self.state.queue_navigation().previous_playback() {
-            self.apply_queue_step(step);
+            self.apply_queue_step(step, StartIntent::User);
         }
     }
 
-    fn apply_queue_step(&mut self, step: QueueStep) -> bool {
-        match step {
-            QueueStep::KeepHistory(index) => self.play_queue_index(index),
-            QueueStep::WithHistory { index, history } => {
-                self.play_queue_index_with_history(index, history)
-            }
-        }
+    fn apply_queue_step(&mut self, step: QueueStep, intent: StartIntent) -> bool {
+        let (index, history) = match step {
+            QueueStep::KeepHistory(index) => (index, None),
+            QueueStep::WithHistory { index, history } => (index, Some(history)),
+        };
+        let Some(target) = StartTarget::existing(&self.state.queue, index) else {
+            return false;
+        };
+        let Some(start) = self.prepare_playback_start(target, Duration::ZERO, Selection::New)
+        else {
+            return false;
+        };
+        let start = start.with_intent(intent);
+        self.activate_playback_start(match history {
+            Some(history) => start.with_history(history),
+            None => start,
+        })
     }
 
     pub fn skip(&mut self, offset: i32) {

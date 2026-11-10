@@ -2,6 +2,7 @@
 
 use super::bilibili_state::{AccountStatus, LoginError, LoginStage, LoginTarget, LoginUpdate};
 use crate::app::prelude::*;
+use crate::models::network::SourceConnection;
 use crate::secrets::source_credentials::{
     self, CredentialError, CredentialStore, StagedCredential, SystemStore,
 };
@@ -12,15 +13,27 @@ use crate::source::bilibili::{
 use crate::source::{ProviderKind, SourceId, SourceProfile};
 
 impl NavidromeApp {
+    /// Generate a new QR code for the current login target.
+    pub(in crate::app) fn restart_bilibili_login(&mut self) {
+        let Some(target) = self.state.settings.bilibili_login.target.clone() else {
+            return;
+        };
+        let saved = self
+            .config
+            .sources
+            .iter()
+            .any(|profile| profile.id() == target.source);
+        self.start_bilibili_login(saved.then_some(target.source), target.connection);
+    }
+
+    /// Sign in an existing source, or a new one using `connection`. A new
+    /// source is written to the configuration only after login succeeds.
     pub(in crate::app) fn start_bilibili_login(
         &mut self,
         source: Option<SourceId>,
-        cx: &Context<Self>,
+        connection: SourceConnection,
     ) {
-        let selected_proxy = self.bilibili_proxy_input.read(cx).value().to_string();
-        let selected_proxy =
-            (!selected_proxy.trim().is_empty()).then(|| selected_proxy.trim().to_string());
-        let (source, account_id, proxy) = match source {
+        let (source, account_id, connection) = match source {
             Some(source) => {
                 let Some(SourceProfile::Bilibili { account_id, .. }) = self
                     .config
@@ -36,7 +49,8 @@ impl NavidromeApp {
                 ) {
                     return;
                 }
-                (source, *account_id, selected_proxy)
+                let connection = self.config.source_connection(&source);
+                (source, *account_id, connection)
             }
             None => (
                 SourceId::new(
@@ -44,23 +58,32 @@ impl NavidromeApp {
                     format!("{:032x}", rand::random::<u128>()),
                 ),
                 None,
-                selected_proxy,
+                connection,
             ),
         };
-        let client = match BilibiliClient::new(proxy.as_deref()) {
+        let Ok(route) = self.config.resolve_connection(&connection) else {
+            self.notify_error(t!(
+                "The selected proxy is missing. Choose a proxy or direct connection."
+            ));
+            return;
+        };
+        let target = LoginTarget {
+            provisional_source: account_id.is_none().then(|| source.clone()),
+            connection,
+            source,
+            account_id,
+        };
+        let client = match BilibiliClient::new(&route) {
             Ok(client) => client,
             Err(error) => {
-                self.state.settings.bilibili_login.cancel();
+                // Keep the target, so the dialog can offer another connection.
+                self.state.settings.bilibili_login.begin(target);
                 self.state.settings.bilibili_login.stage =
                     LoginStage::Failed(LoginError::Protocol(error));
                 return;
             }
         };
-        let request = self.state.settings.bilibili_login.begin(LoginTarget {
-            source,
-            account_id,
-            proxy,
-        });
+        let request = self.state.settings.bilibili_login.begin(target);
         let tx = self.tx.clone();
         let task = self.runtime.spawn(async move {
             let result = async {
@@ -180,6 +203,7 @@ impl NavidromeApp {
                     if let Some(profile) = self.config.sources.iter().find(|profile| matches!(profile, SourceProfile::Bilibili { account_id: Some(id), .. } if *id == account.id)) {
                         target.source = profile.id();
                         target.account_id = Some(account.id);
+                        target.connection = self.config.source_connection(&target.source);
                     }
                 }
                 if matches!(
@@ -257,13 +281,13 @@ impl NavidromeApp {
         {
             return;
         }
-        let (next, old_key) = match crate::source::bilibili::account::prepare_config(
+        let (mut next, old_key) = match crate::source::bilibili::account::prepare_config(
             &self.config,
             &target.source,
             &account,
             &session,
             credential.key(),
-            target.proxy,
+            None,
         ) {
             Ok(result) => result,
             Err(error) => {
@@ -272,17 +296,39 @@ impl NavidromeApp {
                 return;
             }
         };
+        let provisional = match target.apply_source_settings(&mut next) {
+            Ok(source) => source,
+            Err(error) => {
+                self.state.settings.bilibili_login.stage =
+                    LoginStage::Failed(LoginError::Protocol(BilibiliError::InvalidProxy));
+                self.notify_error(error.message());
+                return;
+            }
+        };
+        // Adding an account means using it: it becomes the browsing source.
+        let adding = target.provisional_source.is_some()
+            && self.config.active_source.as_ref() != Some(&target.source);
+        if adding {
+            next.active_source = Some(target.source.clone());
+        }
         if config::save(&next).is_err() {
             self.state.settings.bilibili_login.stage = LoginStage::Failed(LoginError::Config);
             return;
         }
         credential.commit();
-        self.cancel_bilibili_authorization_work(&target.source);
+        self.cancel_source_playback_work(&target.source);
+        if adding {
+            self.prepare_server_change();
+        }
         self.config = next;
+        if let Some(source) = provisional {
+            self.bilibili_accounts.remove(&source);
+        }
         self.bilibili_accounts
             .insert(target.source.clone(), AccountStatus::Ready(session));
         self.activate_bilibili_account(&target.source);
         self.state.settings.bilibili_login.cancel();
+        self.state.settings.dismiss_dialog();
         self.notify_success(t!("Bilibili account connected"));
         if let Some(old_key) = old_key {
             if source_credentials::validate_reference(&target.source, account.id, &old_key).is_ok()
@@ -297,76 +343,115 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn restore_bilibili_accounts(&mut self) {
-        let profiles = self.config.sources.clone();
-        for profile in profiles {
-            let source = profile.id();
-            let SourceProfile::Bilibili {
-                account_id,
-                credential_key,
-                proxy,
-                ..
-            } = profile
-            else {
-                continue;
-            };
-            self.bilibili_accounts
-                .insert(source.clone(), AccountStatus::Checking);
-            let tx = self.tx.clone();
-            self.spawn_future(async move {
-                let result = async {
-                    let account_id =
-                        account_id.ok_or(LoginError::Credentials(CredentialError::Missing))?;
-                    let key =
-                        credential_key.ok_or(LoginError::Credentials(CredentialError::Missing))?;
-                    source_credentials::validate_reference(&source, account_id, &key)
-                        .map_err(LoginError::Credentials)?;
-                    let secret = SystemStore
-                        .load(&key)
-                        .await
-                        .map_err(LoginError::Credentials)?;
-                    let session = AuthSession::decode_secret(secret, account_id)
-                        .map_err(LoginError::Protocol)?;
-                    let client =
-                        BilibiliClient::new(proxy.as_deref()).map_err(LoginError::Protocol)?;
-                    client
-                        .verify_account(&session)
-                        .await
-                        .map_err(LoginError::Protocol)?;
-                    Ok(session)
-                }
-                .await;
-                let _ = tx.send(Msg::BilibiliAccount { source, result });
-            });
+        let sources: Vec<_> = self
+            .config
+            .sources
+            .iter()
+            .filter(|profile| matches!(profile, SourceProfile::Bilibili { .. }))
+            .map(SourceProfile::id)
+            .collect();
+        for source in sources {
+            self.check_bilibili_account(&source);
         }
+    }
+
+    pub(in crate::app) fn check_bilibili_account(&mut self, source: &SourceId) {
+        if matches!(
+            self.bilibili_accounts.get(source),
+            Some(AccountStatus::Removing)
+        ) {
+            return;
+        }
+        let Some(SourceProfile::Bilibili {
+            account_id,
+            credential_key,
+            ..
+        }) = self
+            .config
+            .sources
+            .iter()
+            .find(|profile| profile.id() == *source)
+            .cloned()
+        else {
+            return;
+        };
+        let route = match self.config.route_for(source) {
+            Ok(route) => route,
+            Err(_) => {
+                self.bilibili_accounts.insert(
+                    source.clone(),
+                    AccountStatus::Failed(LoginError::Protocol(BilibiliError::InvalidProxy)),
+                );
+                self.notify_error(t!(
+                    "The selected proxy is missing. Choose a proxy or direct connection."
+                ));
+                return;
+            }
+        };
+        let source = source.clone();
+        let request = rand::random();
+        self.bilibili_accounts
+            .insert(source.clone(), AccountStatus::Checking { request });
+        let tx = self.tx.clone();
+        self.spawn_future(async move {
+            let result = async {
+                let account_id =
+                    account_id.ok_or(LoginError::Credentials(CredentialError::Missing))?;
+                let key =
+                    credential_key.ok_or(LoginError::Credentials(CredentialError::Missing))?;
+                source_credentials::validate_reference(&source, account_id, &key)
+                    .map_err(LoginError::Credentials)?;
+                let secret = SystemStore
+                    .load(&key)
+                    .await
+                    .map_err(LoginError::Credentials)?;
+                let session =
+                    AuthSession::decode_secret(secret, account_id).map_err(LoginError::Protocol)?;
+                let client = BilibiliClient::new(&route).map_err(LoginError::Protocol)?;
+                client
+                    .verify_account(&session)
+                    .await
+                    .map_err(LoginError::Protocol)?;
+                Ok(session)
+            }
+            .await;
+            let _ = tx.send(Msg::BilibiliAccount {
+                request,
+                source,
+                result,
+            });
+        });
     }
 
     pub(in crate::app) fn finish_bilibili_account(
         &mut self,
+        request: u128,
         source: SourceId,
         result: Result<AuthSession, LoginError>,
     ) {
-        if !matches!(
-            self.bilibili_accounts.get(&source),
-            Some(AccountStatus::Checking)
-        ) {
+        let Some(status) = self.bilibili_accounts.get_mut(&source) else {
+            return;
+        };
+        if !status.complete_check(request, result) {
             return;
         }
-        self.bilibili_accounts.insert(
-            source.clone(),
-            match result {
-                Ok(session) => AccountStatus::Ready(session),
-                Err(error) => AccountStatus::Failed(error),
-            },
-        );
         self.activate_bilibili_account(&source);
     }
 
-    fn activate_bilibili_account(&mut self, source: &SourceId) {
+    pub(in crate::app) fn activate_bilibili_account(&mut self, source: &SourceId) {
         let Some(api) = self.available_source(source) else {
             if self.config.active_source.as_ref() == Some(source) {
-                self.state.status = t!("Bilibili login expired. Sign in again.").to_string();
-                self.state.settings.open = true;
-                self.state.settings.section = SettingsSection::Servers;
+                self.state.status = match self.bilibili_accounts.get(source) {
+                    Some(AccountStatus::Failed(error)) => error.message().to_string(),
+                    Some(AccountStatus::Checking { .. }) => {
+                        t!("Verifying Bilibili account…").to_string()
+                    }
+                    _ => t!("Sign in to Bilibili").to_string(),
+                };
+                if !self.state.settings.open {
+                    self.state.settings.open = true;
+                    self.state.settings.section = SettingsSection::Sources;
+                }
             }
             return;
         };
@@ -385,22 +470,8 @@ impl NavidromeApp {
         }
     }
 
-    /// Retire work carrying old cookies while leaving already playing audio intact.
-    fn cancel_bilibili_authorization_work(&mut self, source: &SourceId) {
-        self.start_resolution.cancel_source(source);
-        self.preload_resolution.cancel_source(source);
-        if self
-            .playback_source
-            .as_ref()
-            .is_some_and(|api| api.id() == source)
-        {
-            self.cancel_next_preload();
-            self.reconnect.cancel();
-        }
-    }
-
     pub(in crate::app) fn expire_bilibili_account(&mut self, source: &SourceId) {
-        self.cancel_bilibili_authorization_work(source);
+        self.cancel_source_playback_work(source);
         self.bilibili_accounts.insert(
             source.clone(),
             AccountStatus::Failed(LoginError::Protocol(BilibiliError::NotAuthenticated)),
@@ -412,7 +483,7 @@ impl NavidromeApp {
         if self.config.active_source.as_ref() == Some(source) {
             self.state.status = t!("Bilibili login expired. Sign in again.").to_string();
             self.state.settings.open = true;
-            self.state.settings.section = SettingsSection::Servers;
+            self.state.settings.section = SettingsSection::Sources;
         }
     }
 
@@ -423,7 +494,7 @@ impl NavidromeApp {
         ) {
             return;
         }
-        let Some(SourceProfile::Bilibili { .. }) = self
+        let Some(SourceProfile::Bilibili { credential_key, .. }) = self
             .config
             .sources
             .iter()
@@ -431,6 +502,7 @@ impl NavidromeApp {
         else {
             return;
         };
+        let has_credentials = credential_key.is_some();
         self.state.settings.bilibili_login.cancel();
         self.retire_playback_source(&source);
         if self.api.as_ref().is_some_and(|api| api.id() == &source) {
@@ -439,6 +511,10 @@ impl NavidromeApp {
         }
         self.bilibili_accounts
             .insert(source.clone(), AccountStatus::Removing);
+        if !has_credentials {
+            self.finish_bilibili_removal(source, Ok(()));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = async {

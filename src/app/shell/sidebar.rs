@@ -35,7 +35,7 @@ impl NavidromeApp {
                 .h_full()
                 .p_3()
                 .gap_2()
-                .child(div().text_sm().child("Bilibili"))
+                .child(div().text_sm().child(self.active_server_label()))
                 .child(self.nav_button(
                     View::Playlists,
                     Some(self.state.playlists.items().len()),
@@ -241,18 +241,18 @@ impl NavidromeApp {
         } else {
             t!("Offline")
         };
-        let server_count = self.config.servers.len();
-        let tooltip = if server_count > 1 {
+        let source_count = self.config.sources.len();
+        let tooltip = if source_count > 1 {
             t!(
-                "%{label} — %{status}\n%{server_count} servers configured · click to switch",
+                "%{label} — %{status}\n%{source_count} music sources configured · click to switch",
                 label = label,
                 status = status,
-                server_count = server_count
+                source_count = source_count
             )
             .to_string()
         } else {
             t!(
-                "%{label} — %{status}\nClick to manage servers",
+                "%{label} — %{status}\nClick to manage music sources",
                 label = label,
                 status = status
             )
@@ -280,7 +280,7 @@ impl NavidromeApp {
                         .h(px(34.0))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.state.settings.open = true;
-                            this.state.settings.section = SettingsSection::Servers;
+                            this.state.settings.section = SettingsSection::Sources;
                             this.refresh_output_devices(cx);
                             cx.notify();
                         })),
@@ -326,7 +326,7 @@ impl NavidromeApp {
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.settings.open = true;
-                        this.state.settings.section = SettingsSection::Servers;
+                        this.state.settings.section = SettingsSection::Sources;
                         this.refresh_output_devices(cx);
                         cx.notify();
                     })),

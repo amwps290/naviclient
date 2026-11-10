@@ -11,7 +11,9 @@ fn seek_keeps_resource_headers_proxy_and_temporary_cache_policy() {
     );
     let mut resource = HttpResource::new("https://cdn.test/audio?signature=secret")
         .with_headers(headers)
-        .with_proxy(Some("http://proxy.test:7890".into()));
+        .with_route(crate::models::network::NetworkRoute::Proxy(
+            "http://proxy.test:7890".into(),
+        ));
     resource = resource.with_cache_policy(CachePolicy::Temporary { max_bytes: 10 });
     resource = resource.with_mime_hint(Some("audio/mp4".into()));
     let mut track = TrackState::default();
@@ -28,7 +30,10 @@ fn seek_keeps_resource_headers_proxy_and_temporary_cache_policy() {
     assert_eq!(position, Duration::from_secs(120));
     assert_eq!(seek.cache_key, "stable-key");
     assert_eq!(seek.url.headers()[REFERER], "https://www.bilibili.com/");
-    assert_eq!(seek.url.proxy(), Some("http://proxy.test:7890"));
+    assert_eq!(
+        seek.url.route(),
+        &crate::models::network::NetworkRoute::Proxy("http://proxy.test:7890".into())
+    );
     assert_eq!(
         seek.url.cache_policy(),
         CachePolicy::Temporary { max_bytes: 10 }

@@ -1,6 +1,171 @@
 use super::*;
 
 #[test]
+fn known_expiry_refreshes_immediately_and_keeps_new_seek_position_for_network_retries() {
+    let mut reconnect = PlaybackReconnect::default();
+    let occurrence = PlaybackId::new();
+    let now = Instant::now();
+    assert_eq!(
+        reconnect.schedule_expired_resource(occurrence, Duration::from_secs(42), now),
+        ReconnectDecision::Retry {
+            attempt: 1,
+            delay: Duration::ZERO
+        }
+    );
+    assert_eq!(
+        reconnect.poll(now, Some(occurrence), true, &PlaybackState::default()),
+        ReconnectPoll::Retry(ReconnectAttempt {
+            attempt: 1,
+            kind: RetryKind::ResourceRefresh,
+            position: Duration::from_secs(42)
+        })
+    );
+    reconnect.update_position(Duration::from_secs(90));
+    assert!(matches!(
+        reconnect.resolution_failed(Some(occurrence), Some(StreamFailure::Timeout), now),
+        ReconnectDecision::Retry { attempt: 1, .. }
+    ));
+    assert_eq!(
+        reconnect.poll(
+            now + Duration::from_secs(2),
+            Some(occurrence),
+            true,
+            &PlaybackState::default()
+        ),
+        ReconnectPoll::Retry(ReconnectAttempt {
+            attempt: 1,
+            kind: RetryKind::Network,
+            position: Duration::from_secs(90)
+        })
+    );
+    assert_eq!(
+        reconnect.schedule_expired_resource(occurrence, Duration::from_secs(90), now),
+        ReconnectDecision::Exhausted
+    );
+}
+
+#[test]
+fn resolution_failure_schedules_the_remaining_attempts_at_the_original_position() {
+    let mut reconnect = PlaybackReconnect::default();
+    let occurrence = PlaybackId::new();
+    let mut now = Instant::now();
+    let position = Duration::from_secs(42);
+    reconnect.schedule(occurrence, Some(StreamFailure::Connect), position, now);
+    for attempt in 1..=PLAYBACK_RECONNECT_ATTEMPTS {
+        now += Duration::from_secs(5);
+        assert_eq!(
+            reconnect.poll(now, Some(occurrence), true, &PlaybackState::default()),
+            ReconnectPoll::Retry(ReconnectAttempt {
+                attempt,
+                position,
+                kind: RetryKind::Network
+            })
+        );
+        let decision =
+            reconnect.resolution_failed(Some(occurrence), Some(StreamFailure::Timeout), now);
+        if attempt == PLAYBACK_RECONNECT_ATTEMPTS {
+            assert_eq!(decision, ReconnectDecision::Exhausted);
+        } else {
+            assert!(
+                matches!(decision, ReconnectDecision::Retry { attempt: next, .. } if next == attempt + 1)
+            );
+        }
+    }
+    assert_eq!(
+        reconnect.poll(
+            now + Duration::from_secs(30),
+            Some(occurrence),
+            true,
+            &PlaybackState::default()
+        ),
+        ReconnectPoll::Idle
+    );
+}
+
+#[test]
+fn network_retries_and_resource_refresh_have_independent_bounded_budgets() {
+    for refresh_first in [false, true] {
+        let mut reconnect = PlaybackReconnect::default();
+        let occurrence = PlaybackId::new();
+        let now = Instant::now();
+        let position = Duration::from_secs(42);
+        if refresh_first {
+            reconnect.schedule_resource_refresh(occurrence, position, now);
+        } else {
+            reconnect.schedule(occurrence, Some(StreamFailure::Timeout), position, now);
+        }
+        reconnect.poll(
+            now + Duration::from_secs(2),
+            Some(occurrence),
+            true,
+            &PlaybackState::default(),
+        );
+        let decision = if refresh_first {
+            reconnect.resolution_failed(Some(occurrence), Some(StreamFailure::Timeout), now)
+        } else {
+            reconnect.schedule_resource_refresh(occurrence, position, now)
+        };
+        assert!(matches!(
+            decision,
+            ReconnectDecision::Retry { attempt: 1, .. }
+        ));
+        assert!(matches!(
+            reconnect.schedule(occurrence, Some(StreamFailure::Timeout), position, now),
+            ReconnectDecision::Retry { attempt: 2, .. }
+        ));
+        assert_eq!(
+            reconnect.schedule_resource_refresh(occurrence, position, now),
+            ReconnectDecision::Exhausted
+        );
+    }
+}
+
+#[test]
+fn terminal_or_stale_resolution_cancels_recovery_and_manual_resolution_cannot_start_it() {
+    let occurrence = PlaybackId::new();
+    let now = Instant::now();
+    for (id, failure) in [
+        (Some(occurrence), None),
+        (Some(PlaybackId::new()), Some(StreamFailure::Timeout)),
+    ] {
+        let mut reconnect = PlaybackReconnect::default();
+        reconnect.schedule(
+            occurrence,
+            Some(StreamFailure::Timeout),
+            Duration::ZERO,
+            now,
+        );
+        reconnect.poll(
+            now + Duration::from_secs(2),
+            Some(occurrence),
+            true,
+            &PlaybackState::default(),
+        );
+        assert_eq!(
+            reconnect.resolution_failed(id, failure, now),
+            ReconnectDecision::DoNotRetry
+        );
+        // Transport controls treat any pending context as recovery; a terminal
+        // resolution (for example an unavailable item) must leave none behind.
+        assert!(!reconnect.pending());
+        assert_eq!(
+            reconnect.poll(
+                now + Duration::from_secs(30),
+                Some(occurrence),
+                true,
+                &PlaybackState::default()
+            ),
+            ReconnectPoll::Idle
+        );
+    }
+    let mut reconnect = PlaybackReconnect::default();
+    assert_eq!(
+        reconnect.resolution_failed(Some(occurrence), Some(StreamFailure::Timeout), now),
+        ReconnectDecision::DoNotRetry
+    );
+}
+
+#[test]
 fn signed_audio_refresh_has_one_attempt_and_keeps_the_failure_position() {
     let mut reconnect = PlaybackReconnect::default();
     let occurrence = PlaybackId::new();
@@ -18,6 +183,7 @@ fn signed_audio_refresh_has_one_attempt_and_keeps_the_failure_position() {
             &PlaybackState::default()
         ),
         ReconnectPoll::Retry(ReconnectAttempt {
+            kind: RetryKind::ResourceRefresh,
             attempt: 1,
             position
         })
@@ -120,6 +286,7 @@ fn waiting_retries_once_at_the_deadline_from_the_failed_position() {
             &playback
         ),
         ReconnectPoll::Retry(ReconnectAttempt {
+            kind: RetryKind::Network,
             attempt: 1,
             position: failed_at,
         })
@@ -149,6 +316,7 @@ fn successive_failures_keep_the_budget_until_exhausted() {
         assert_eq!(
             state.poll(now + delay, Some(song), true, &playback),
             ReconnectPoll::Retry(ReconnectAttempt {
+                kind: RetryKind::Network,
                 attempt,
                 position: failed_at,
             })
@@ -247,6 +415,7 @@ fn waiting_is_not_confirmed_as_recovered_by_an_old_audio_snapshot() {
     assert_eq!(
         state.poll(now + Duration::from_secs(2), Some(song), true, &playback),
         ReconnectPoll::Retry(ReconnectAttempt {
+            kind: RetryKind::Network,
             attempt: 1,
             position: failed_at
         })
@@ -394,6 +563,7 @@ fn failure_on_another_song_starts_a_new_budget_and_replaces_the_plan() {
     assert_eq!(
         state.poll(now + Duration::from_secs(2), Some(second), true, &playback),
         ReconnectPoll::Retry(ReconnectAttempt {
+            kind: RetryKind::Network,
             attempt: 1,
             position: second_failed_at
         })

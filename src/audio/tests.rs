@@ -161,11 +161,13 @@ fn restoring_playback_sends_one_command_with_the_saved_position() {
         "song".into(),
         Some(Duration::from_secs(180)),
         1.0,
-        Duration::from_secs(42),
-        None,
+        crate::audio::PlaybackStart {
+            position: Duration::from_secs(42),
+            ..Default::default()
+        },
     );
     assert!(
-        matches!(rx.recv().unwrap().command, Command::Play { start_position, .. } if start_position == Duration::from_secs(42))
+        matches!(rx.recv().unwrap().command, Command::Play { start, .. } if start.position == Duration::from_secs(42))
     );
     assert!(rx.try_recv().is_err());
 }
@@ -215,8 +217,7 @@ fn newly_selected_track_supplies_its_own_position_and_duration_before_worker_pol
         "new-song".into(),
         Some(Duration::from_secs(180)),
         1.0,
-        Duration::ZERO,
-        None,
+        Default::default(),
     );
     let song = crate::models::Song {
         duration: Some(180),

@@ -1,10 +1,13 @@
-//! Bilibili account controls in the existing connection settings.
+//! Bilibili login and removal dialogs, and account error messages.
 
-use super::bilibili_state::{AccountStatus, LoginError, LoginStage};
+use super::bilibili_state::{LoginError, LoginStage};
+use super::state::SettingsDialog;
 use crate::app::prelude::*;
+use crate::models::network::SourceConnection;
 use crate::secrets::source_credentials::CredentialError;
 use crate::source::bilibili::client::BilibiliError;
-use crate::source::SourceProfile;
+use crate::source::{SourceId, SourceProfile};
+use gpui_kit::component::dialog::Dialog;
 
 impl LoginError {
     pub(in crate::app) fn message(self) -> SharedString {
@@ -26,12 +29,14 @@ impl LoginError {
                 t!("Scan with the same Bilibili account, or add a new account.")
             }
             Self::Protocol(BilibiliError::InvalidProxy) => {
-                t!("Enter a valid HTTP proxy address, or leave it empty.")
+                t!("Enter a valid proxy address.")
             }
             Self::Protocol(BilibiliError::NotAuthenticated | BilibiliError::Api(-101)) => {
                 t!("Bilibili login expired. Sign in again.")
             }
-            Self::Protocol(BilibiliError::Network | BilibiliError::Http(_)) => {
+            Self::Protocol(
+                BilibiliError::Network | BilibiliError::Timeout | BilibiliError::Http(_),
+            ) => {
                 t!("Cannot reach Bilibili. Check the connection or proxy and retry.")
             }
             Self::Protocol(_) => t!("Bilibili returned an unexpected response. Retry signing in."),
@@ -41,202 +46,235 @@ impl LoginError {
 }
 
 impl NavidromeApp {
-    pub(in crate::app) fn render_bilibili_settings(
+    /// Sign in a saved Bilibili source again, or add a new account when
+    /// `source` is `None`. A new account is saved only after login succeeds.
+    pub(in crate::app) fn open_bilibili_login(
+        &mut self,
+        source: Option<SourceId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_bilibili_login(source, SourceConnection::System);
+        if self.state.settings.bilibili_login.stage == LoginStage::Idle {
+            return;
+        }
+        self.state
+            .settings
+            .open_dialog(SettingsDialog::BilibiliLogin);
+        self.show_settings_dialog(window, cx);
+    }
+
+    pub(in crate::app) fn confirm_remove_bilibili(
+        &mut self,
+        source: SourceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state
+            .settings
+            .open_dialog(SettingsDialog::RemoveBilibili(source));
+        self.show_settings_dialog(window, cx);
+    }
+
+    pub(in crate::app) fn render_bilibili_login_dialog(
         &self,
+        dialog: Dialog,
         cx: &Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    ) -> Dialog {
         let login = &self.state.settings.bilibili_login;
-        let mut card = v_flex().w_full().gap_3()
-            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(t!("Bilibili accounts")))
-            .child(div().text_xs().text_color(palette(cx).text_secondary)
-                .child(t!("Sign in with the Bilibili App. Credentials are kept in the system credential store.")));
-        if login.stage == LoginStage::Idle {
-            card = card.child(
+        let Some(target) = login.target.as_ref() else {
+            // The login could not start, for example with an invalid proxy.
+            let message = match login.stage {
+                LoginStage::Failed(error) => error.message(),
+                _ => t!("Sign in to Bilibili").into(),
+            };
+            return dialog
+                .title(t!("Sign in to Bilibili"))
+                .w(px(400.0))
+                .child(div().text_sm().text_color(cx.theme().danger).child(message))
+                .footer(
+                    h_flex().justify_end().child(
+                        Button::new("bilibili-close-login")
+                            .label(t!("Cancel"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.cancel_settings_dialog(window, cx);
+                            })),
+                    ),
+                );
+        };
+        let saved = self
+            .config
+            .sources
+            .iter()
+            .any(|profile| profile.id() == target.source);
+        let status: SharedString = match login.stage {
+            LoginStage::Generating => t!("Preparing Bilibili QR login…").into(),
+            LoginStage::WaitingScan => t!("Scan with the Bilibili App to sign in.").into(),
+            LoginStage::WaitingConfirmation => {
+                t!("Scanned. Confirm login in the Bilibili App.").into()
+            }
+            LoginStage::Verifying => t!("Verifying Bilibili account…").into(),
+            LoginStage::Saving => t!("Saving Bilibili credentials…").into(),
+            LoginStage::Expired => t!("QR code expired. Generate a new one.").into(),
+            LoginStage::Failed(error) => error.message(),
+            LoginStage::Idle => "".into(),
+        };
+        let failed = matches!(login.stage, LoginStage::Failed(_) | LoginStage::Expired);
+        let working = matches!(
+            login.stage,
+            LoginStage::Generating | LoginStage::Verifying | LoginStage::Saving
+        );
+        let placeholder = if failed {
+            KitIcon::TriangleAlert
+        } else {
+            KitIcon::LoaderCircle
+        };
+        let qr = div()
+            .size(px(220.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(tokens::radius::COVER))
+            .map(|frame| match login.image.clone() {
+                // QR codes need a white quiet zone in dark mode as well.
+                Some(image) => frame
+                    .bg(gpui_kit::white())
+                    .child(img(image).size(px(196.0)).object_fit(ObjectFit::Contain)),
+                None => frame.bg(palette(cx).sunken).child(
+                    Icon::new(placeholder)
+                        .with_size(px(28.0))
+                        .text_color(palette(cx).text_secondary),
+                ),
+            });
+        let body = v_flex()
+            .w_full()
+            .gap_4()
+            .items_center()
+            .child(qr)
+            .child(
+                div()
+                    .text_sm()
+                    .text_center()
+                    .when(failed, |text| text.text_color(cx.theme().danger))
+                    .child(status),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_center()
+                    .text_color(palette(cx).text_secondary)
+                    .child(t!("Credentials are kept in the system credential store.")),
+            )
+            // A new account chooses its connection here; changing it starts
+            // a new QR code through that connection.
+            .when(!saved, |body| {
+                body.child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(palette(cx).text_secondary)
+                                .child(t!("Connection")),
+                        )
+                        .child(self.connection_picker(
+                            "bilibili-login-connection",
+                            &target.connection,
+                            working,
+                            |this, choice, _| this.start_bilibili_login(None, choice),
+                            cx,
+                        )),
+                )
+            });
+        let footer = h_flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("bilibili-cancel-login")
+                    .label(t!("Cancel"))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.cancel_settings_dialog(window, cx);
+                    })),
+            )
+            .when(!working, |footer| {
+                footer.child(
+                    Button::new("bilibili-refresh-qr")
+                        .label(t!("New QR code"))
+                        .outline()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.restart_bilibili_login();
+                            cx.notify();
+                        })),
+                )
+            });
+        dialog
+            .title(if saved {
+                t!("Sign in to Bilibili again")
+            } else {
+                t!("Add Bilibili account")
+            })
+            .w(px(400.0))
+            .child(body)
+            .footer(footer)
+    }
+
+    pub(in crate::app) fn render_remove_bilibili_dialog(
+        &self,
+        dialog: Dialog,
+        source: &SourceId,
+        cx: &Context<Self>,
+    ) -> Dialog {
+        let label = self
+            .config
+            .sources
+            .iter()
+            .find(|profile| profile.id() == *source)
+            .and_then(|profile| match profile {
+                SourceProfile::Bilibili { name, .. } if !name.trim().is_empty() => {
+                    Some(name.trim().to_string())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "Bilibili".into());
+        let remove = source.clone();
+        let footer = h_flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("cancel-remove-bilibili")
+                    .label(t!("Cancel"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.cancel_settings_dialog(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("confirm-remove-bilibili")
+                    .label(t!("Remove"))
+                    .danger()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.remove_bilibili_account(remove.clone());
+                        this.cancel_settings_dialog(window, cx);
+                    })),
+            );
+        dialog
+            .title(t!("Remove Bilibili account?"))
+            .w(px(440.0))
+            .child(
                 v_flex()
                     .gap_2()
+                    .child(div().text_sm().child(t!(
+                        "Remove “%{label}” from this app?",
+                        label = label
+                    )))
                     .child(
                         div()
                             .text_xs()
                             .text_color(palette(cx).text_secondary)
-                            .child(t!("Bilibili proxy (optional)")),
-                    )
-                    .child(Input::new(&self.bilibili_proxy_input).w_full()),
-            );
-        }
-        for profile in &self.config.sources {
-            let SourceProfile::Bilibili {
-                name, account_id, ..
-            } = profile
-            else {
-                continue;
-            };
-            let source = profile.id();
-            let status = match self.bilibili_accounts.get(&source) {
-                Some(AccountStatus::Ready(session))
-                    if Some(session.account_id()) == *account_id =>
-                {
-                    t!("Signed in").into()
-                }
-                Some(AccountStatus::Checking) => t!("Verifying Bilibili account…").into(),
-                Some(AccountStatus::Removing) => t!("Removing Bilibili account…").into(),
-                Some(AccountStatus::Failed(error)) => error.message(),
-                _ => t!("Sign in to Bilibili").into(),
-            };
-            let removing = matches!(
-                self.bilibili_accounts.get(&source),
-                Some(AccountStatus::Removing)
-            );
-            let reauth = source.clone();
-            let remove = source.clone();
-            let browse = source.clone();
-            let ready = matches!(
-                self.bilibili_accounts.get(&source),
-                Some(AccountStatus::Ready(_))
-            );
-            card = card.child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_sm().truncate().child(if name.is_empty() {
-                                "Bilibili".to_string()
-                            } else {
-                                name.clone()
-                            }))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(palette(cx).text_secondary)
-                                    .child(status),
-                            ),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!(
-                            "bilibili-browse-{}",
-                            source.cache_namespace()
-                        )))
-                        .label(t!("Browse favorites"))
-                        .outline()
-                        .small()
-                        .disabled(!ready || removing)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.switch_bilibili_source(&browse);
-                            cx.notify();
-                        })),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!(
-                            "bilibili-reauth-{}",
-                            source.cache_namespace()
-                        )))
-                        .label(t!("Sign in again"))
-                        .ghost()
-                        .small()
-                        .disabled(removing)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_bilibili_login(Some(reauth.clone()), cx);
-                            cx.notify();
-                        })),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!(
-                            "bilibili-remove-{}",
-                            source.cache_namespace()
-                        )))
-                        .label(t!("Remove account"))
-                        .ghost()
-                        .small()
-                        .disabled(removing)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.remove_bilibili_account(remove.clone());
-                            cx.notify();
-                        })),
+                            .child(t!("Its saved login and local caches are deleted. Adding it again requires scanning a new QR code.")),
                     ),
-            );
-        }
-        if login.stage == LoginStage::Idle {
-            card = card.child(
-                v_flex().gap_2().child(
-                    Button::new("bilibili-add-account")
-                        .label(t!("Add Bilibili account"))
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.start_bilibili_login(None, cx);
-                            cx.notify();
-                        })),
-                ),
-            );
-        } else {
-            let status: SharedString = match login.stage {
-                LoginStage::Generating => t!("Preparing Bilibili QR login…").into(),
-                LoginStage::WaitingScan => t!("Scan with the Bilibili App to sign in.").into(),
-                LoginStage::WaitingConfirmation => {
-                    t!("Scanned. Confirm login in the Bilibili App.").into()
-                }
-                LoginStage::Verifying => t!("Verifying Bilibili account…").into(),
-                LoginStage::Saving => t!("Saving Bilibili credentials…").into(),
-                LoginStage::Expired => t!("QR code expired. Generate a new one.").into(),
-                LoginStage::Failed(error) => error.message(),
-                LoginStage::Idle => unreachable!(),
-            };
-            card = card.child(
-                v_flex()
-                    .gap_3()
-                    .items_start()
-                    .when_some(login.image.clone(), |this, image| {
-                        this.child(img(image).size(px(220.0)).object_fit(ObjectFit::Contain))
-                    })
-                    .child(div().text_sm().child(status))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .when(
-                                !matches!(
-                                    login.stage,
-                                    LoginStage::Generating
-                                        | LoginStage::Verifying
-                                        | LoginStage::Saving
-                                ),
-                                |this| {
-                                    this.child(
-                                        Button::new("bilibili-refresh-qr")
-                                            .label(t!("New QR code"))
-                                            .ghost()
-                                            .small()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                let source = this
-                                                    .state
-                                                    .settings
-                                                    .bilibili_login
-                                                    .target
-                                                    .as_ref()
-                                                    .filter(|target| target.account_id.is_some())
-                                                    .map(|target| target.source.clone());
-                                                this.start_bilibili_login(source, cx);
-                                                cx.notify();
-                                            })),
-                                    )
-                                },
-                            )
-                            .child(
-                                Button::new("bilibili-cancel-login")
-                                    .label(t!("Cancel"))
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.state.settings.bilibili_login.cancel();
-                                        cx.notify();
-                                    })),
-                            ),
-                    ),
-            );
-        }
-        card.into_any_element()
+            )
+            .footer(footer)
     }
 }

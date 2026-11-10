@@ -97,6 +97,9 @@ fn normalize_server_url(url: &str) -> String {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    /// Shared proxies and transport choices, independent of provider credentials.
+    #[serde(default = "super::network::NetworkSettings::legacy")]
+    pub network: super::network::NetworkSettings,
     /// 当前激活服务器的地址/账号镜像，保留用于旧配置兼容。
     #[serde(default)]
     pub server_url: String,
@@ -158,6 +161,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            network: Default::default(),
             server_url: "http://127.0.0.1:4533".to_string(),
             username: String::new(),
             password: String::new(),
@@ -208,6 +212,7 @@ impl Config {
             self.active_server = self.servers.first().map(|profile| profile.id.clone());
         }
         self.sync_sources();
+        self.sync_network();
         if self
             .active_source
             .as_ref()
@@ -323,6 +328,7 @@ impl Config {
         true
     }
 
+    #[cfg(test)]
     pub fn add_server(&mut self) -> String {
         let base = ServerProfile::id_for(&self.server_url, &self.username);
         let mut candidate = base.clone();

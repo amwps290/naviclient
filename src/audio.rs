@@ -89,6 +89,14 @@ pub struct AudioHandle {
     transport: Arc<Mutex<Transport>>,
 }
 
+/// Initial transport intent travels with the selected resource in one command.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PlaybackStart {
+    pub position: Duration,
+    pub paused: bool,
+    pub preload_id: Option<u64>,
+}
+
 impl AudioHandle {
     pub fn start(cache_dir: PathBuf, output_device: Option<String>) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
@@ -114,8 +122,7 @@ impl AudioHandle {
         cache_key: String,
         duration_hint: Option<Duration>,
         gain: f32,
-        start_position: Duration,
-        preload_id: Option<u64>,
+        start: PlaybackStart,
     ) -> bool {
         self.cancel_transition();
         self.transition.lock().unwrap().take();
@@ -124,9 +131,8 @@ impl AudioHandle {
                 url,
                 cache_key,
                 duration_hint,
-                start_position,
+                start,
                 gain,
-                preload_id,
             })
             .is_err()
         {

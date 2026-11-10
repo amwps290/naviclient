@@ -1,5 +1,7 @@
 //! Shared player transport actions and manual stream retry.
 
+use super::reconnect::PlaybackReconnect;
+use super::start::StartIntent;
 use crate::app::desktop::media_command_state::{playback_action, PlaybackAction, PlaybackRequest};
 use crate::app::prelude::*;
 
@@ -17,6 +19,24 @@ pub(in crate::app) fn apply_playback_request(
         PlaybackAction::Unchanged => {}
     }
     action
+}
+
+fn apply_recovery_playback_request(
+    audio: &AudioHandle,
+    request: PlaybackRequest,
+    intent: Option<StartIntent>,
+    reconnect: &PlaybackReconnect,
+) -> bool {
+    if !intent.is_some_and(StartIntent::reconnecting) && !reconnect.pending() {
+        return false;
+    }
+    match request {
+        PlaybackRequest::Pause => audio.pause(),
+        PlaybackRequest::Play => audio.resume(),
+        PlaybackRequest::Toggle if audio.state().paused => audio.resume(),
+        PlaybackRequest::Toggle => audio.pause(),
+    }
+    true
 }
 
 pub(in crate::app) fn stop_playback_state(
@@ -51,7 +71,7 @@ impl NavidromeApp {
             position.as_millis()
         );
         self.reconnect.cancel();
-        self.play_queue_index_at(index, position);
+        self.play_queue_index_at(index, position, StartIntent::User);
     }
 
     pub fn toggle_playback(&mut self) {
@@ -59,7 +79,15 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn request_playback(&mut self, request: PlaybackRequest, can_play: bool) {
+        let intent = self
+            .start_resolution
+            .value_mut()
+            .map(|start| start.intent());
+        if apply_recovery_playback_request(&self.audio, request, intent, &self.reconnect) {
+            return;
+        }
         self.start_resolution.cancel();
+        self.state.occurrence.cancel_advance();
         self.state.cancel_deferred_playback();
         self.reconnect.cancel();
         self.sync_gapless_transition();
@@ -67,7 +95,7 @@ impl NavidromeApp {
         apply_playback_request(&audio, request, can_play, || {
             if let Some(index) = self.state.queue_index {
                 let position = self.session.start_position(self.state.now_playing.as_ref());
-                self.play_queue_index_at(index, position);
+                self.play_queue_index_at(index, position, StartIntent::User);
             }
         });
     }

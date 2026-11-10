@@ -7,10 +7,8 @@ impl NavidromeApp {
         let section = self.state.settings.section;
         let presentation = section.presentation();
         let content = match section {
-            SettingsSection::Servers => vec![
-                self.render_server_settings(cx),
-                self.render_bilibili_settings(cx),
-            ],
+            SettingsSection::Sources => vec![self.render_source_settings(cx)],
+            SettingsSection::Proxies => vec![self.render_proxy_settings(cx)],
             SettingsSection::Playback => self.render_playback_settings(cx),
             SettingsSection::Desktop => vec![self.render_desktop_settings(cx)],
             SettingsSection::Appearance => self.render_appearance_settings(cx),

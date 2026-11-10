@@ -134,14 +134,15 @@ fn project(current: &PlaybackState, command: &Command) -> Option<PlaybackState> 
     let mut playback = current.clone();
     match command {
         Command::Play {
-            start_position,
+            start,
             duration_hint,
             ..
         } => {
             reset_track(&mut playback);
             playback.active = true;
+            playback.paused = start.paused;
             playback.position =
-                duration_hint.map_or(*start_position, |limit| (*start_position).min(limit));
+                duration_hint.map_or(start.position, |limit| start.position.min(limit));
             playback.duration = *duration_hint;
         }
         Command::Seek(position) => {

@@ -51,12 +51,19 @@ impl NavidromeApp {
                 Msg::BilibiliLogin { request, update } => {
                     self.finish_bilibili_login(request, update)
                 }
-                Msg::BilibiliAccount { source, result } => {
-                    self.finish_bilibili_account(source, result)
-                }
+                Msg::BilibiliAccount {
+                    request,
+                    source,
+                    result,
+                } => self.finish_bilibili_account(request, source, result),
                 Msg::BilibiliRemoved { source, result } => {
                     self.finish_bilibili_removal(source, result)
                 }
+                Msg::ProxyProbed {
+                    proxy,
+                    request,
+                    result,
+                } => self.finish_proxy_probe(proxy, request, result),
                 Msg::PlaybackResolved { request, result } => {
                     self.finish_playback_resolution(request, result)
                 }
@@ -131,6 +138,8 @@ impl NavidromeApp {
                 }
             }
         }
+        // A finished login or a closed settings overlay ends its dialog.
+        self.sync_settings_dialog(window, cx);
         changed
     }
 }

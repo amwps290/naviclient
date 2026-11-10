@@ -44,6 +44,10 @@ impl<T> ResolutionState<T> {
         self.pending.is_some()
     }
 
+    pub(in crate::app) fn value_mut(&mut self) -> Option<&mut T> {
+        self.pending.as_mut().map(|pending| &mut pending.value)
+    }
+
     pub(in crate::app) fn attempted(
         &self,
         media: &MediaKey,

@@ -25,50 +25,37 @@ fn server_config(active_configured: bool) -> Config {
     }
 }
 
-#[test]
-fn configured_active_server_has_no_implicit_form_target() {
-    assert!(SettingsUi::default()
-        .server_form_target(&server_config(true))
-        .is_none());
+fn server_dialog(target: Option<&str>) -> SettingsDialog {
+    SettingsDialog::Server(ServerDialog {
+        target: target.map(str::to_owned),
+        connection: Default::default(),
+    })
 }
 
 #[test]
-fn unconfigured_active_server_is_the_implicit_form_target() {
-    let config = server_config(false);
-    assert_eq!(
-        SettingsUi::default().server_form_target(&config),
-        config.active_profile()
-    );
-}
-
-#[test]
-fn explicit_edit_target_takes_priority_without_switching_servers() {
-    let mut settings = SettingsUi {
-        editing_server: Some("other".into()),
-        ..Default::default()
-    };
+fn only_an_open_server_dialog_has_a_form_target() {
     for active_configured in [true, false] {
         let config = server_config(active_configured);
+        assert!(SettingsUi::default().server_form_target(&config).is_none());
+        let mut settings = SettingsUi::default();
+        settings.open_dialog(server_dialog(Some("other")));
         assert_eq!(
             settings.server_form_target(&config),
             Some(&config.servers[1])
         );
         assert_eq!(config.active_server.as_deref(), Some("active"));
+        // Adding a server has no saved profile yet.
+        settings.open_dialog(server_dialog(None));
+        assert!(settings.server_form_target(&config).is_none());
+        settings.open_dialog(SettingsDialog::BilibiliLogin);
+        assert!(settings.server_form_target(&config).is_none());
     }
-    settings.editing_server = Some("active".into());
-    let config = server_config(true);
-    assert_eq!(
-        settings.server_form_target(&config),
-        config.active_profile()
-    );
 }
 
 #[test]
 fn missing_edit_target_never_falls_back_to_the_active_server() {
-    let settings = SettingsUi {
-        editing_server: Some("removed".into()),
-        ..Default::default()
-    };
+    let mut settings = SettingsUi::default();
+    settings.open_dialog(server_dialog(Some("removed")));
     for active_configured in [true, false] {
         assert!(settings
             .server_form_target(&server_config(active_configured))
@@ -77,24 +64,43 @@ fn missing_edit_target_never_falls_back_to_the_active_server() {
 }
 
 #[test]
-fn missing_active_server_has_no_implicit_form_target() {
-    let mut config = server_config(false);
-    config.active_server = Some("removed".into());
-    assert!(SettingsUi::default().server_form_target(&config).is_none());
-    config.active_server = None;
-    assert!(SettingsUi::default().server_form_target(&config).is_none());
-    assert!(SettingsUi::default()
-        .server_form_target(&Config::default())
-        .is_none());
+fn the_app_closes_its_dialog_once_and_a_user_close_needs_no_request() {
+    let mut settings = SettingsUi::default();
+    settings.open_dialog(server_dialog(None));
+    assert!(settings.dialog.is_some());
+    settings.dismiss_dialog();
+    assert!(settings.dialog.is_none());
+    assert!(settings.take_close_request());
+    assert!(!settings.take_close_request());
+    settings.open_dialog(server_dialog(None));
+    settings.dialog_closed();
+    assert!(settings.dialog.is_none());
+    assert!(!settings.take_close_request());
+    // Dismissing nothing must not close an unrelated window dialog.
+    settings.dismiss_dialog();
+    assert!(!settings.take_close_request());
+}
+
+#[test]
+fn closing_settings_dismisses_its_dialog_and_login() {
+    let mut settings = SettingsUi {
+        open: true,
+        ..Default::default()
+    };
+    settings.open_dialog(SettingsDialog::BilibiliLogin);
+    settings.close();
+    assert!(!settings.open);
+    assert!(settings.dialog.is_none());
+    assert!(settings.take_close_request());
 }
 
 #[test]
 fn defaults_match_a_closed_server_settings_overlay() {
     let settings = SettingsUi::default();
     assert!(!settings.open);
-    assert_eq!(settings.section, SettingsSection::Servers);
+    assert_eq!(settings.section, SettingsSection::Sources);
     assert_eq!(settings.recording(), None);
-    assert!(settings.editing_server.is_none());
+    assert!(settings.dialog.is_none());
     assert!(settings.global_shortcut_failures.is_empty());
 }
 
@@ -103,7 +109,6 @@ fn changing_recording_target_clears_transient_errors_and_preserves_other_setting
     let mut settings = SettingsUi {
         open: true,
         section: SettingsSection::Shortcuts,
-        editing_server: Some("another-server".into()),
         global_shortcut_failures: HashSet::from([ShortcutAction::Previous]),
         ..Default::default()
     };
@@ -122,7 +127,6 @@ fn changing_recording_target_clears_transient_errors_and_preserves_other_setting
     assert!(settings.shortcut_conflict.is_none());
     assert!(settings.global_shortcut_conflict.is_none());
     assert!(settings.global_shortcut_validation.is_none());
-    assert_eq!(settings.editing_server.as_deref(), Some("another-server"));
     assert!(settings.open);
     assert_eq!(settings.section, SettingsSection::Shortcuts);
     assert!(settings

@@ -39,7 +39,8 @@ pub(crate) use style::theme::apply_app_theme;
 
 pub struct NavidromeApp {
     bilibili_accounts: HashMap<crate::source::SourceId, settings::bilibili_state::AccountStatus>,
-    bilibili_proxy_input: Entity<InputState>,
+    proxy_url_input: Entity<InputState>,
+    proxy_name_input: Entity<InputState>,
     runtime: Runtime,
     api: Option<MusicSource>,
     /// Browsing requests use `api`; transport and reporting retain this handle.

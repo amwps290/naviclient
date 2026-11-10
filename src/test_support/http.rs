@@ -65,7 +65,14 @@ impl Server {
             assert!(header_bytes <= MAX_REQUEST_HEADER_BYTES);
             let mut parts = first_line.split_whitespace();
             let method = parts.next().unwrap().to_string();
-            let url = Url::parse(&format!("http://fixture{}", parts.next().unwrap())).unwrap();
+            let target = parts.next().unwrap();
+            let url = if target.starts_with('/') {
+                Url::parse(&format!("http://fixture{target}"))
+            } else {
+                // HTTP proxies receive an absolute URI instead of an origin path.
+                Url::parse(target)
+            }
+            .unwrap();
             let mut headers = BTreeMap::new();
             loop {
                 let mut line = String::new();

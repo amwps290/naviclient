@@ -19,6 +19,7 @@ pub(crate) struct PlaybackResolveError {
     pub(crate) message: String,
     pub(crate) unavailable: bool,
     pub(crate) login_expired: bool,
+    pub(crate) retry_failure: Option<crate::audio::StreamFailure>,
 }
 
 /// 后台线程解码完成的封面结果，UI 线程只负责插入缓存。
@@ -35,6 +36,7 @@ pub enum Msg {
         update: crate::app::settings::bilibili_state::LoginUpdate,
     },
     BilibiliAccount {
+        request: u128,
         source: crate::source::SourceId,
         result: Result<
             crate::source::bilibili::auth::AuthSession,
@@ -44,6 +46,11 @@ pub enum Msg {
     BilibiliRemoved {
         source: crate::source::SourceId,
         result: Result<(), crate::secrets::source_credentials::CredentialError>,
+    },
+    ProxyProbed {
+        proxy: String,
+        request: u64,
+        result: Result<std::time::Duration, crate::source::route_probe::RouteProbeError>,
     },
     PlaybackResolved {
         request: PlaybackResolveRequest,

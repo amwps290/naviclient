@@ -144,21 +144,12 @@ impl NavidromeApp {
             })
             .collect();
 
-        let initial_bilibili_proxy = config
-            .sources
-            .iter()
-            .find_map(|profile| match profile {
-                crate::source::SourceProfile::Bilibili { proxy, .. } => proxy.clone(),
-                _ => None,
-            })
-            .unwrap_or_default();
         let mut app = Self {
             bilibili_accounts: HashMap::new(),
-            bilibili_proxy_input: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder("http://172.16.15.251:7890")
-                    .default_value(initial_bilibili_proxy)
-            }),
+            proxy_url_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("http://127.0.0.1:7890")),
+            proxy_name_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Proxy name (optional)"))),
             runtime,
             playback_source,
             playback_server: None,

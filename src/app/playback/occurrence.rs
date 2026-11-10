@@ -23,6 +23,7 @@ struct Occurrence {
     phase: Phase,
     reported: bool,
     scrobbled: bool,
+    advance_pending: bool,
 }
 
 #[derive(Default)]
@@ -55,6 +56,7 @@ impl PlaybackOccurrence {
             phase: Phase::Active,
             reported: false,
             scrobbled: false,
+            advance_pending: false,
         });
         true
     }
@@ -87,7 +89,27 @@ impl PlaybackOccurrence {
             return false;
         };
         current.phase = if ended { Phase::Ended } else { Phase::Failed };
+        current.advance_pending = ended;
         true
+    }
+
+    /// Natural-end accounting may finish while another track is resolving.
+    /// The resolution owner decides whether to retain or cancel advancement.
+    /// A successful selection replaces the occurrence altogether.
+    pub(in crate::app) fn claim_advance(&mut self, resolving: bool) -> bool {
+        let Some(current) = self.current.as_mut().filter(|current| {
+            !resolving && current.phase == Phase::Ended && current.advance_pending
+        }) else {
+            return false;
+        };
+        current.advance_pending = false;
+        true
+    }
+
+    pub(in crate::app) fn cancel_advance(&mut self) {
+        if let Some(current) = &mut self.current {
+            current.advance_pending = false;
+        }
     }
 
     pub(in crate::app) fn claim_report(&mut self, song_id: &str) -> bool {

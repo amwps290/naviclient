@@ -22,7 +22,7 @@ use super::transport::{self, WorkerCommand};
 use super::{set_state, PlaybackState};
 use crate::models::EqSettings;
 
-const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(12);
+use crate::source::resource::timing::{CONNECT_TIMEOUT, STREAM_TIMEOUT};
 
 pub(super) mod commands;
 pub(super) mod playback;
@@ -33,10 +33,9 @@ pub(super) enum Command {
         url: crate::source::HttpResource,
         cache_key: String,
         duration_hint: Option<Duration>,
-        start_position: Duration,
+        start: super::PlaybackStart,
         /// 该曲目的响度补偿增益系数（1.0 = 不变），与用户音量相乘。
         gain: f32,
-        preload_id: Option<u64>,
     },
     Preload {
         id: u64,
@@ -97,9 +96,11 @@ pub(super) fn run_worker(
     );
     report_output_device(&state, &output_name, &device_sink);
 
+    // Public streams on the system route reuse this client; any other route
+    // or header-bearing resource gets a pooled client of its own.
     let client = match Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(HTTP_IO_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(STREAM_TIMEOUT)
         .build()
     {
         Ok(client) => client,

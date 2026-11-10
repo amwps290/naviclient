@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use super::occurrence::Selection;
+use super::occurrence::{PlaybackOccurrence, Selection};
 use super::session_state::SessionState;
 use crate::app::queue::logic::ShuffleHistory;
 use crate::app::shell::state::AppState;
@@ -20,6 +20,21 @@ enum QueueChange {
         before: Vec<QueueEntryId>,
         owners: HashSet<SourceId>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) enum StartIntent {
+    #[default]
+    User,
+    AutoAdvance,
+    Reconnect,
+    ResourceRefresh,
+}
+
+impl StartIntent {
+    pub(in crate::app) fn reconnecting(self) -> bool {
+        matches!(self, Self::Reconnect | Self::ResourceRefresh)
+    }
 }
 
 pub(in crate::app) struct StartTarget {
@@ -126,6 +141,25 @@ pub(in crate::app) struct PlaybackRequest {
 }
 
 impl PlaybackRequest {
+    pub(in crate::app) fn send(
+        &self,
+        audio: &crate::audio::AudioHandle,
+        preload_id: Option<u64>,
+        paused: bool,
+    ) -> bool {
+        audio.play(
+            self.url.clone(),
+            self.cache_key.clone(),
+            self.duration,
+            self.gain,
+            crate::audio::PlaybackStart {
+                position: self.position,
+                paused,
+                preload_id,
+            },
+        )
+    }
+
     pub(in crate::app) fn from_resource(
         resource: PlaybackResource,
         song: &Song,
@@ -134,21 +168,20 @@ impl PlaybackRequest {
         if song.media_key().as_ref() != Some(&resource.media) {
             anyhow::bail!("resolved audio belongs to another media item");
         }
+        let transcoding = resource.media.source.provider.capabilities().transcoding;
         Ok(Self {
             cache_key: resource.cache_key(),
             duration: resource.duration,
             url: resource.http.with_backups(resource.backups),
-            audio_quality: (resource.media.source.provider
-                == crate::source::ProviderKind::Bilibili)
-                .then_some(resource.quality),
-            quality: if resource.media.source.provider == crate::source::ProviderKind::Bilibili {
-                TranscodingQuality::Original
-            } else {
+            audio_quality: (!transcoding).then_some(resource.quality),
+            quality: if transcoding {
                 TranscodingQuality::effective_for(
                     configured,
                     song.suffix.as_deref(),
                     song.content_type.as_deref(),
                 )
+            } else {
+                TranscodingQuality::Original
             },
             position: Duration::ZERO,
             gain: 1.0,
@@ -180,6 +213,7 @@ pub(in crate::app) struct PreparedStart {
     target: StartTarget,
     pub(in crate::app) request: PlaybackRequest,
     selection: Selection,
+    intent: StartIntent,
     history: Option<ShuffleHistory>,
     source: MusicSource,
 }
@@ -198,6 +232,7 @@ pub(in crate::app) struct UnresolvedStart {
     selection: Selection,
     history: Option<ShuffleHistory>,
     remaining_skips: u8,
+    intent: StartIntent,
 }
 
 impl UnresolvedStart {
@@ -222,6 +257,7 @@ impl UnresolvedStart {
             selection,
             history: None,
             remaining_skips: 20,
+            intent: StartIntent::User,
         })
     }
 
@@ -243,11 +279,36 @@ impl UnresolvedStart {
         self.configured
     }
 
+    pub(in crate::app) fn with_intent(mut self, intent: StartIntent) -> Self {
+        self.intent = intent;
+        self
+    }
+
+    pub(in crate::app) fn intent(&self) -> StartIntent {
+        self.intent
+    }
+
+    /// A user-selected target owns the outcome, even if its old track ended
+    /// meanwhile. Failed selection must not restart an unrelated old queue.
+    pub(in crate::app) fn settle_intent(&self, occurrence: &mut PlaybackOccurrence) {
+        if self.intent == StartIntent::User {
+            occurrence.cancel_advance();
+        }
+    }
+
+    pub(in crate::app) fn seek_during_refresh(&mut self, position: Duration) -> bool {
+        if self.intent != StartIntent::ResourceRefresh {
+            return false;
+        }
+        self.position = position;
+        true
+    }
+
     /// Skip only authoritative per-item failures during new playback. Session
     /// renewal retains its selected item, and the old source is never committed
     /// merely because one item in a replacement queue was unavailable.
     pub(in crate::app) fn skip_unavailable(mut self, current: &PlaybackQueue) -> Option<Self> {
-        if self.source.id().provider != crate::source::ProviderKind::Bilibili
+        if !self.source.playback_policy().skip_unavailable
             || self.selection != Selection::New
             || self.remaining_skips == 0
             || !self.target.matches(current)
@@ -296,6 +357,7 @@ impl UnresolvedStart {
             target: self.target,
             request,
             selection: self.selection,
+            intent: self.intent,
             history: self.history,
             source: self.source,
         })
@@ -344,6 +406,7 @@ impl PreparedStart {
             target,
             request,
             selection,
+            intent: StartIntent::User,
             history: None,
             source: api.clone(),
         })
@@ -363,6 +426,10 @@ impl PreparedStart {
 
     pub(in crate::app) fn new_occurrence(&self) -> bool {
         self.selection == Selection::New
+    }
+
+    pub(in crate::app) fn preserves_pause(&self) -> bool {
+        self.intent.reconnecting()
     }
 
     #[cfg(test)]

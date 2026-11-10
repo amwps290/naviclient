@@ -2,16 +2,19 @@
 
 pub mod bilibili;
 mod opensubsonic;
+pub(crate) mod playback;
 mod queries;
 pub mod resource;
+pub(crate) mod route_probe;
 
 pub use crate::models::source::{
-    MediaKey, ProviderKind, SourceCapabilities, SourceId, SourceProfile,
+    MediaKey, PlaybackPolicy, ProviderKind, SourceCapabilities, SourceId, SourceProfile,
 };
 
 pub use opensubsonic::OpenSubsonicAdapter;
 pub use resource::{AudioQuality, CachePolicy, HttpResource, PlaybackResource};
 
+use crate::models::network::NetworkRoute;
 use crate::models::{Song, TranscodingQuality};
 use anyhow::Result;
 
@@ -40,8 +43,24 @@ impl MusicSource {
         }
     }
 
+    pub fn opensubsonic_with_route(
+        profile_id: &str,
+        server_url: &str,
+        username: &str,
+        password: &str,
+        route: NetworkRoute,
+    ) -> Result<Self> {
+        Ok(Self::OpenSubsonic(OpenSubsonicAdapter::with_route(
+            profile_id, server_url, username, password, route,
+        )?))
+    }
+
     pub fn capabilities(&self) -> SourceCapabilities {
         self.id().provider.capabilities()
+    }
+
+    pub fn playback_policy(&self) -> PlaybackPolicy {
+        self.id().provider.playback_policy()
     }
 
     /// Transitional address for legacy server/session APIs. Media identity
@@ -92,5 +111,7 @@ impl MusicSource {
     }
 }
 
+#[cfg(test)]
+mod network_tests;
 #[cfg(test)]
 mod tests;

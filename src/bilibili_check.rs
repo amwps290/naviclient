@@ -79,13 +79,12 @@ async fn run(options: Options) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("账号序号从 1 开始"))?,
         )
         .ok_or_else(|| anyhow::anyhow!("账号序号不存在"))?;
-    let session = restore_session(profile).await?;
+    let route = config
+        .route_for(&profile.id())
+        .map_err(|_| anyhow::anyhow!("所选代理已不存在，请在设置中重新选择"))?;
+    let session = restore_session(profile, &route).await?;
     println!("登录恢复：成功（系统凭据库回读及账号验证通过）");
-    let proxy = match profile {
-        SourceProfile::Bilibili { proxy, .. } => proxy.clone(),
-        _ => None,
-    };
-    let provider = BilibiliProvider::new(profile.id(), session, proxy)?;
+    let provider = BilibiliProvider::new(profile.id(), session, route)?;
     let folders = provider.favorite_folders().await?;
     println!("自己的收藏夹：{} 个", folders.len());
     for (index, folder) in folders.iter().enumerate() {
@@ -170,8 +169,7 @@ async fn output_probe(
         resource.cache_key(),
         resource.duration,
         1.0,
-        Duration::ZERO,
-        None,
+        Default::default(),
     ) {
         bail!("音频输出工作线程未接受播放请求");
     }

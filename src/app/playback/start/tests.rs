@@ -3,6 +3,189 @@ use crate::audio::PlaybackState;
 use crate::models::QueueOrigin;
 use std::time::Instant;
 
+#[test]
+fn failed_user_selection_does_not_advance_the_old_queue_and_settles_its_end_once() {
+    use crate::app::library::requests::LibraryRequests;
+    use crate::app::playback::resolution_state::ResolutionState;
+    for replacement in [false, true] {
+        for ended in [false, true] {
+            for succeeds in [false, true] {
+                let mut state = state();
+                let target = if replacement {
+                    StartTarget::replacement(
+                        PlaybackQueue::from_songs(vec![song("chosen")], QueueOrigin::Manual),
+                        0,
+                    )
+                    .unwrap()
+                } else {
+                    StartTarget::existing(&state.queue, 1).unwrap()
+                };
+                let start = UnresolvedStart::new(
+                    target,
+                    Some(&api()),
+                    TranscodingQuality::Original,
+                    Duration::ZERO,
+                    Selection::New,
+                )
+                .unwrap();
+                let media = start.song().media_key().unwrap();
+                let old_occurrence = state.occurrence.id();
+                let mut resolution = ResolutionState::default();
+                let ticket = resolution.begin(
+                    media,
+                    old_occurrence,
+                    start,
+                    &mut LibraryRequests::default(),
+                );
+                if ended {
+                    assert!(state.occurrence.claim_terminal(old_occurrence, true));
+                    assert!(state.listening.finish(true));
+                    assert!(!state.occurrence.claim_terminal(old_occurrence, true));
+                    assert!(!state.occurrence.claim_advance(resolution.pending()));
+                }
+                let before = snapshot(&state);
+                let start = resolution.complete(&ticket, state.occurrence.id()).unwrap();
+                start.settle_intent(&mut state.occurrence);
+                if succeeds {
+                    let resource = start.try_resolve().unwrap().unwrap();
+                    start
+                        .finish(resource)
+                        .unwrap()
+                        .commit(&mut state, &mut session(), |_| true)
+                        .unwrap();
+                    assert_eq!(
+                        state.now_playing.as_ref().unwrap().id,
+                        if replacement { "chosen" } else { "other" }
+                    );
+                    assert!(state.occurrence.active());
+                } else {
+                    assert_eq!(snapshot(&state), before);
+                    assert_eq!(state.occurrence.active(), !ended);
+                    assert_eq!(state.occurrence.id(), old_occurrence);
+                }
+                assert!(!state.occurrence.claim_advance(false));
+                if ended {
+                    assert_eq!(state.listening.history().events.len(), 1);
+                    assert!(state.listening.history().events[0].completed);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn automatic_resolution_keeps_natural_end_advance_pending() {
+    let mut state = state();
+    let start = UnresolvedStart::new(
+        StartTarget::existing(&state.queue, 1).unwrap(),
+        Some(&api()),
+        TranscodingQuality::Original,
+        Duration::ZERO,
+        Selection::New,
+    )
+    .unwrap()
+    .with_intent(StartIntent::AutoAdvance);
+    assert!(state.occurrence.claim_terminal(state.occurrence.id(), true));
+    start.settle_intent(&mut state.occurrence);
+    assert!(!state.occurrence.claim_advance(true));
+    assert!(state.occurrence.claim_advance(false));
+    assert!(!state.occurrence.claim_advance(false));
+}
+
+#[test]
+fn repeated_seek_during_refresh_keeps_the_ticket_and_uses_the_latest_position() {
+    use crate::app::library::requests::LibraryRequests;
+    use crate::app::playback::resolution_state::ResolutionState;
+    let mut state = state();
+    let start = UnresolvedStart::new(
+        StartTarget::existing(&state.queue, 0).unwrap(),
+        Some(&api()),
+        TranscodingQuality::Original,
+        Duration::from_secs(42),
+        Selection::Resume,
+    )
+    .unwrap()
+    .with_intent(StartIntent::ResourceRefresh);
+    let mut resolution = ResolutionState::default();
+    let ticket = resolution.begin(
+        start.song().media_key().unwrap(),
+        state.occurrence.id(),
+        start,
+        &mut LibraryRequests::default(),
+    );
+    for seconds in [70, 90] {
+        assert!(resolution
+            .value_mut()
+            .unwrap()
+            .seek_during_refresh(Duration::from_secs(seconds)));
+    }
+    let start = resolution.complete(&ticket, state.occurrence.id()).unwrap();
+    let resource = start.try_resolve().unwrap().unwrap();
+    let request = start.finish(resource).unwrap();
+    assert_eq!(request.request.position, Duration::from_secs(90));
+    let old_occurrence = state.occurrence.id();
+    request
+        .commit(&mut state, &mut session(), |_| true)
+        .unwrap();
+    assert_eq!(state.occurrence.id(), old_occurrence);
+}
+
+#[test]
+fn resume_intent_is_manual_unless_dispatched_by_reconnect() {
+    let state = state();
+    let start = UnresolvedStart::new(
+        StartTarget::existing(&state.queue, 0).unwrap(),
+        Some(&api()),
+        TranscodingQuality::Original,
+        Duration::from_secs(42),
+        Selection::Resume,
+    )
+    .unwrap();
+    assert!(!start.intent().reconnecting());
+    assert!(start
+        .with_intent(StartIntent::Reconnect)
+        .intent()
+        .reconnecting());
+}
+
+#[test]
+fn refreshed_stream_preserves_pause_but_user_resume_starts_playing() {
+    use crate::audio::test_transport::Fixture;
+    for intent in [
+        StartIntent::User,
+        StartIntent::Reconnect,
+        StartIntent::ResourceRefresh,
+    ] {
+        for paused in [false, true] {
+            let mut state = state();
+            let start = UnresolvedStart::new(
+                StartTarget::existing(&state.queue, 0).unwrap(),
+                Some(&api()),
+                TranscodingQuality::Original,
+                Duration::from_secs(42),
+                Selection::Resume,
+            )
+            .unwrap()
+            .with_intent(intent);
+            let resource = start.try_resolve().unwrap().unwrap();
+            let start = start.finish(resource).unwrap();
+            let fixture = Fixture::new(PlaybackState {
+                paused,
+                ..Default::default()
+            });
+            let paused = start.preserves_pause() && fixture.audio.state().paused;
+            start
+                .commit(&mut state, &mut session(), |request| {
+                    request.send(&fixture.audio, None, paused)
+                })
+                .unwrap();
+            assert_eq!(fixture.audio.state().paused, paused);
+            assert_eq!(fixture.audio.state().position, Duration::from_secs(42));
+            assert_eq!(fixture.commands(), ["play"]);
+        }
+    }
+}
+
 fn song(id: &str) -> Song {
     Song {
         id: id.into(),
@@ -333,8 +516,10 @@ fn restored_overlong_position_matches_display_save_and_the_accepted_play_command
                 request.cache_key.clone(),
                 request.duration,
                 request.gain,
-                request.position,
-                None,
+                crate::audio::PlaybackStart {
+                    position: request.position,
+                    ..Default::default()
+                },
             )
         })
         .unwrap();
@@ -660,7 +845,7 @@ fn bilibili_api() -> MusicSource {
                 123,
             )
             .unwrap(),
-            None,
+            crate::models::network::NetworkRoute::Direct,
         )
         .unwrap(),
     )
@@ -697,7 +882,6 @@ fn unavailable_replacement_preserves_old_playback_and_never_enters_shuffle_histo
         backups: vec![],
         quality: Default::default(),
         duration: Some(Duration::from_secs(180)),
-        expires_at: None,
     };
     let prepared = next.finish(resource).unwrap();
     prepared

@@ -259,18 +259,37 @@ For a release build:
 cargo build --release --locked
 ```
 
-The first launch opens Server Settings automatically. Enter the Navidrome
-server URL, username, and password, then click **Save and Connect**. The
-settings window also provides Paste buttons beside each field if the system
-clipboard shortcut is unavailable.
+The first launch opens Music Sources settings automatically. Choose **Set up**
+on the server row, enter the Navidrome server URL, username, and password, then
+click **Save and connect**.
 
-For Bilibili, open Server Settings, choose **Add Bilibili account**, scan with
-the Bilibili App and confirm, then choose **Browse favorites** beside the
-signed-in account. Open a folder and use **Play all**, double-click a part,
-or use the row menu to play all parts of that video. A Navidrome server is
-optional for this flow. Bilibili sessions use Linux Secret Service with DH
-encryption or Windows Credential Manager, with no plaintext fallback. A
-locked or unavailable credential store must be made available before signing in.
+All providers share **Settings → Music sources**. Choose **Add music source**
+and select **Navidrome / OpenSubsonic** or **Bilibili favorites**. Adding a
+source opens a dialog; nothing is saved until the server is saved or the
+Bilibili sign-in succeeds, and the new source then becomes the current one.
+Each row shows a status dot and one action (**Use**, **Set up**, **Sign in** or
+**Retry**); its **⋯** menu edits the connection details, signs in again,
+chooses the network connection, or removes the source after confirmation.
+For Bilibili, scan the QR code with the Bilibili App and confirm; a new account
+can choose its network connection in the same dialog. Open a favorites folder
+and use **Play all**, double-click a part, or use the row menu to play all
+parts of that video. A Navidrome server is optional. Bilibili sessions use
+Linux Secret Service with DH encryption or Windows Credential Manager, with no
+plaintext fallback. A locked or unavailable credential store must be made
+available before signing in.
+
+Each source uses one of three connections, chosen in its **⋯ → Connection**
+menu: **System proxy** (the platform/environment proxy such as `HTTPS_PROXY`,
+the default for new sources), **Direct connection**, or a proxy saved in
+**Settings → Proxies**. Proxies may be HTTP, HTTPS or SOCKS5 (`socks5://`, or
+`socks5h://` to resolve host names through the proxy); a bare
+`127.0.0.1:7890` means HTTP. Proxies that need a username and password are not
+supported. **Test** checks that a proxy relays a request and shows its latency.
+The choice applies to API requests, covers, and audio. Editing a shared proxy
+updates all sources that use it, and a proxy can be removed once no source uses
+it. Upgrading keeps every source on its previous route: Navidrome servers use
+the system proxy, Bilibili accounts stay direct or keep their proxy, identical
+legacy addresses share one proxy and distinct addresses remain separate.
 
 For remote sign-in, close the player and run:
 
@@ -280,8 +299,8 @@ cargo run --locked -- --bilibili-login-web --port 8765
 
 This mode binds to `0.0.0.0` and prints a temporary browser path. Replace
 `服务器IP` in the printed URL with the remote host address, then scan with
-the Bilibili App and confirm. Add `--proxy http://HOST:PORT` when required;
-the proxy applies only to this Bilibili account. The server expires after
+the Bilibili App and confirm. Add `--proxy http://HOST:PORT` (or a SOCKS5
+address) when required; the proxy applies only to this Bilibili account. The server expires after
 15 minutes. Restart the player after successful sign-in.
 
 To check a saved account from SSH without opening a window:
@@ -318,8 +337,23 @@ same directory (`covers/`), capped at 256 MiB with oldest-first pruning, so
 restarts render grids instantly without re-downloading every cover.
 Bilibili uses a private temporary audio cache capped at 32 MiB per reader;
 larger audio continues through HTTP Range requests, and the temporary file
-is released with its reader. Signed playback addresses are resolved again
+is released with its reader, so replaying a track downloads its audio again.
+Signed playback addresses are resolved again
 after restart and are never stored in the saved queue.
+Address lifetimes are calibrated to the playurl response's server date and
+tracked with a monotonic clock; missing dates leave validation to the CDN.
+Expired addresses are checked before a new HTTP range request; cached or
+already-decoded audio remains usable. Known expiry triggers an immediate,
+quiet refresh that preserves pause intent and the latest seek position.
+Network reconnects and signed-URL refresh
+have separate retry budgets, including API resolution failures during recovery.
+CDN probes and streaming follow only same-origin redirects and reuse bounded
+connection pools without storing account Cookies in those clients. Resolution
+has a 25-second request budget and up to nine audio probes; rate limiting stops
+further requests. Loaded favorite parts reuse their validated identity and take
+duration from playurl, avoiding an extra video-info request. If a user-selected
+track fails to resolve, the previous track keeps playing if it has not ended;
+an already-ended track stays stopped instead of advancing its old queue.
 
 Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
@@ -421,7 +455,8 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/global_shortcuts.rs` and `src/global_shortcuts/` - shared binding validation and parsed registration keys, owned registration replacement and cleanup, and a separate Windows API/message-loop adapter
 - `src/app/shortcuts/repeat.rs` - matched-key repeat suppression with a shared 250ms clock, preserving selection-movement exemptions across library resets
 - `src/app/shortcuts/settings_view.rs` and `src/app/shortcuts/row_view.rs` - shortcut section composition and shared app/global binding rows, preserving platform restrictions and feedback
-- `src/app/server/settings_view.rs`, `src/app/server/list_view.rs` and `src/app/server/form_view.rs` - connection status, server rows and edit form
+- `src/app/settings/sources_view.rs`, `src/app/settings/source_row.rs`, `src/app/settings/proxy.rs`, `src/app/settings/dialogs.rs` and `src/app/server/form_view.rs` - music source list and row states, shared proxies and their tests, settings dialogs, and the server dialog
+- `src/models/network.rs` and `src/source/route_probe.rs` - per-source routes (system, direct, proxy), proxy normalization and migration, and the proxy reachability test
 - `src/app/server/profiles.rs`, `src/app/server/lifecycle.rs` and `src/app/server/cache.rs` - profile changes, outgoing-server persistence, reconnect resets and restoration of server-scoped caches
 - `src/app/server/profile_edit.rs`, `src/app/server/remove_dialog.rs` and `src/app/server/removal_state.rs` - server form workflows, removal dialog rendering and events, and single-use removal targets independent of reconnecting library state
 - `src/app/queue/edits.rs` - owned queue additions, selected-index corrections, shuffle-history remapping and removal outcomes
