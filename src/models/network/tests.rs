@@ -250,3 +250,26 @@ fn released_files_without_network_settings_migrate_on_load() {
         Ok(NetworkRoute::System)
     );
 }
+
+#[test]
+fn lyrics_routes_are_independent_and_prevent_removing_their_saved_proxy() {
+    let mut config = legacy();
+    config.sync_network();
+    let source = subsonic(&config);
+    let proxy = config
+        .store_proxy(None, "Lyrics", "http://127.0.0.1:7900")
+        .unwrap();
+    config.lyrics.connection = SourceConnection::Proxy(proxy.clone());
+    assert_eq!(config.route_for(&source), Ok(NetworkRoute::System));
+    assert_eq!(
+        config.resolve_connection(&config.lyrics.connection),
+        Ok(NetworkRoute::Proxy("http://127.0.0.1:7900".into()))
+    );
+    assert_eq!(config.proxy_users(&proxy), 1);
+    assert_eq!(config.remove_proxy(&proxy), Err(NetworkError::ProxyInUse));
+    let restored: Config = serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+    assert_eq!(restored.lyrics.connection, config.lyrics.connection);
+    config.lyrics.connection = SourceConnection::Direct;
+    config.remove_proxy(&proxy).unwrap();
+    assert_eq!(config.route_for(&source), Ok(NetworkRoute::System));
+}

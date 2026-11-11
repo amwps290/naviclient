@@ -7,6 +7,7 @@ mod paths;
 mod preferences;
 mod server_cache;
 mod server_writer;
+pub(crate) use json::write_json_atomic;
 
 pub(crate) use server_cache::CacheSnapshot;
 pub(crate) use server_writer::ServerCacheWriter;

@@ -12,7 +12,6 @@ impl NavidromeApp {
             self.render_streaming_settings(cx),
             self.render_output_settings(cx),
             self.render_normalization_settings(cx),
-            self.render_lyrics_settings(cx),
         ]
     }
 
@@ -260,47 +259,6 @@ impl NavidromeApp {
                                 .expect("app owns volume normalization menu")
                             })
                     }),
-            )
-            .into_any_element()
-    }
-
-    fn render_lyrics_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        v_flex()
-            .gap_3()
-            .child(section_title(t!("Lyrics"), cx))
-            .child(
-                h_flex()
-                    .justify_between()
-                    .items_center()
-                    .gap_4()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .child(t!("Show translation")),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(
-                                        t!("Show translated lyrics under the original line when the server provides another language variant."
-                                        ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        Switch::new("lyrics-translation-switch")
-                            .checked(self.config.show_lyrics_translation)
-                            .accessibility_label(t!("Show translation"))
-                            .on_change(cx.listener(|this, checked, _, cx| {
-                                this.set_show_lyrics_translation(*checked, cx);
-                            })),
-                    ),
             )
             .into_any_element()
     }

@@ -97,12 +97,16 @@ impl NavidromeApp {
         show: bool,
         cx: &mut Context<Self>,
     ) {
-        self.config.show_lyrics_translation = show;
-        if let Err(error) = config::save(&self.config) {
+        let mut next = self.config.clone();
+        next.show_lyrics_translation = show;
+        if let Err(error) = config::save(&next) {
             self.notify_error(t!(
                 "Lyrics translation save failed: %{error}",
                 error = format!("{error:#}")
             ));
+        } else {
+            self.config = next;
+            self.notify_success(t!("Lyrics settings saved."));
         }
         cx.notify();
     }

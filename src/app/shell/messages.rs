@@ -45,6 +45,10 @@ impl NavidromeApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let mut changed = false;
+        if let Some(error) = self.lyrics_cache.take_error() {
+            self.notify_error(t!("Could not save lyrics: %{error}", error = error));
+            changed = true;
+        }
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
             match message {
@@ -122,7 +126,13 @@ impl NavidromeApp {
                 }
                 Msg::Radio { request, result } => self.finish_radio(request, result),
                 Msg::Lyrics { request, result } => {
-                    self.state.lyrics.complete(request, result);
+                    self.state.lyrics.finish(request, result);
+                }
+                Msg::LyricsProgress { request, status } => {
+                    self.state.lyrics.progress(request, status);
+                }
+                Msg::LyricsSearch { request, result } => {
+                    self.finish_lyrics_search(request, result);
                 }
                 Msg::Cover { request, result } => {
                     self.finish_cover(request, result);
@@ -140,6 +150,7 @@ impl NavidromeApp {
         }
         // A finished login or a closed settings overlay ends its dialog.
         self.sync_settings_dialog(window, cx);
+        self.sync_lyrics_dialog(window, cx);
         changed
     }
 }

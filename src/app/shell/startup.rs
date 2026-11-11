@@ -145,6 +145,10 @@ impl NavidromeApp {
             .collect();
 
         let mut app = Self {
+            lyrics_cache: Default::default(),
+            lyrics_gate: Default::default(),
+            lyrics_client: None,
+            lyrics_ui: crate::app::player::lyrics_search::LyricsUi::new(window, cx),
             bilibili_accounts: HashMap::new(),
             proxy_url_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder("http://127.0.0.1:7890")),
@@ -203,6 +207,7 @@ impl NavidromeApp {
             server_removal: ServerRemovalState::default(),
         };
         app.state.playback_modes = app.config.playback_modes;
+        app.subscribe_lyrics_inputs(cx);
         // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
         {
             let prune_config = app.config.clone();

@@ -49,14 +49,14 @@ impl NavidromeApp {
             .lyrics()
             .and_then(|lyrics| lyrics.active_line_index(playback.position));
         let lyrics = self.state.lyrics.lyrics();
-        let lyrics_body = if self.state.lyrics.loading() {
+        let lyrics_body = if self.state.lyrics.loading() && lyrics.is_none() {
             div()
                 .flex_1()
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_color(p.text_secondary)
-                .child(t!("Loading lyrics..."))
+                .child(self.state.lyrics.status.message())
                 .into_any_element()
         } else if let Some(error) = self.state.lyrics.error() {
             v_flex()
@@ -65,7 +65,7 @@ impl NavidromeApp {
                 .justify_center()
                 .gap_2()
                 .text_color(p.text_secondary)
-                .child(t!("Lyrics are unavailable for this track."))
+                .child(self.state.lyrics.status.message())
                 .child(div().text_xs().child(error.to_string()))
                 .into_any_element()
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
@@ -162,7 +162,20 @@ impl NavidromeApp {
                 .items_center()
                 .justify_center()
                 .text_color(p.text_secondary)
-                .child(t!("No lyrics are available for this track."))
+                .child(self.state.lyrics.status.message())
+                .child(
+                    Button::new("empty-lyrics-search")
+                        .label(t!("Search lyrics"))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_lyrics_dialog(
+                                super::lyrics_search::LyricsDialog::Search,
+                                window,
+                                cx,
+                            )
+                        })),
+                )
                 .into_any_element()
         };
 
@@ -257,23 +270,7 @@ impl NavidromeApp {
                     .min_w_0()
                     .h_full()
                     .pl_6()
-                    .child(
-                        v_flex()
-                            .items_center()
-                            .gap_1()
-                            .pb_1()
-                            .child(
-                                div()
-                                    .text_base()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(t!("Lyrics")),
-                            )
-                            .child(div().text_xs().text_color(p.text_secondary).child(t!(
-                                "%{title} - %{artist}",
-                                title = song.title,
-                                artist = song.artist
-                            ))),
-                    )
+                    .child(self.render_lyrics_header(cx))
                     .child(lyrics_body),
             )
             .into_any_element()

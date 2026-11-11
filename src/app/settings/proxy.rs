@@ -17,7 +17,7 @@ impl NetworkError {
             Self::InvalidProxy => t!("Enter a valid proxy address."),
             Self::MissingProxy => t!("The selected proxy is missing. Choose a proxy or direct connection."),
             Self::MissingSource => t!("This music source no longer exists."),
-            Self::ProxyInUse => t!("This proxy is in use. Change its music sources to another connection before removing it."),
+            Self::ProxyInUse => t!("This proxy is in use. Change its music sources and lyrics service to another connection before removing it."),
         }.into()
     }
 }
@@ -60,9 +60,18 @@ impl NavidromeApp {
             .map(|profile| profile.id())
             .filter(|source| self.config.route_for(source) != next.route_for(source))
             .collect();
+        let lyrics_changed = self
+            .config
+            .resolve_connection(&self.config.lyrics.connection)
+            != next.resolve_connection(&next.lyrics.connection);
         self.config = next;
         for source in changed {
             self.apply_source_route(&source);
+        }
+        if lyrics_changed {
+            self.lyrics_client = None;
+            self.lyrics_ui.cancel();
+            self.refresh_lyrics();
         }
         Ok(())
     }
@@ -281,7 +290,7 @@ impl NavidromeApp {
         let usage = if users == 0 {
             t!("Not used").to_string()
         } else {
-            t!("Used by %{count} music sources", count = users).to_string()
+            t!("Used by %{count} connections", count = users).to_string()
         };
         let test = proxy.id.clone();
         let menu_id = proxy.id.clone();
@@ -363,7 +372,7 @@ impl NavidromeApp {
                             .separator()
                             .item(
                                 PopupMenuItem::new(if used {
-                                    t!("In use — change its music sources first")
+                                    t!("In use — change its music sources and lyrics connection first")
                                 } else {
                                     t!("Remove proxy")
                                 })

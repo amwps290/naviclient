@@ -13,16 +13,18 @@ pub(in crate::app) enum SettingsSection {
     Sources,
     Proxies,
     Playback,
+    Lyrics,
     Desktop,
     Appearance,
     Shortcuts,
 }
 
 impl SettingsSection {
-    pub(in crate::app) const ALL: [Self; 6] = [
+    pub(in crate::app) const ALL: [Self; 7] = [
         Self::Sources,
         Self::Proxies,
         Self::Playback,
+        Self::Lyrics,
         Self::Desktop,
         Self::Appearance,
         Self::Shortcuts,

@@ -34,6 +34,25 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.lyrics_ui.dialog == Some(crate::app::player::lyrics_search::LyricsDialog::Search)
+            && !window.has_focused_input(cx)
+        {
+            match keystroke.key.as_str() {
+                "up" | "down" if !self.lyrics_ui.records.is_empty() => {
+                    let count = self.lyrics_ui.records.len();
+                    let index = match (self.lyrics_ui.selected, keystroke.key.as_str()) {
+                        (Some(index), "up") => index.saturating_sub(1),
+                        (Some(index), _) => (index + 1).min(count - 1),
+                        _ => 0,
+                    };
+                    self.lyrics_ui.selected = Some(index);
+                    self.lyrics_ui.candidates_scroll.scroll_to_item(index);
+                    cx.notify();
+                    return;
+                }
+                _ => {}
+            }
+        }
         let can_record_shortcut =
             self.state.settings.open && self.state.settings.section == SettingsSection::Shortcuts;
         if !can_record_shortcut {

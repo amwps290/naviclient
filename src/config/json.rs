@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 /// Serialize first, then atomically replace the destination from a temporary
 /// file in the same directory. A crash can therefore leave either the old or
 /// the new complete JSON document, but never a truncated destination file.
-pub(super) fn write_json_atomic<T>(path: &Path, value: &T, label: &str) -> Result<()>
+pub(crate) fn write_json_atomic<T>(path: &Path, value: &T, label: &str) -> Result<()>
 where
     T: serde::Serialize + ?Sized,
 {

@@ -36,6 +36,12 @@ impl SettingsSection {
                 "settings-nav-desktop",
                 AppIcon::MiniPlayer,
             ),
+            Self::Lyrics => (
+                t!("Lyrics"),
+                t!("Choose lyrics sources, matching and display preferences."),
+                "settings-nav-lyrics",
+                AppIcon::Globe,
+            ),
             Self::Appearance => (
                 t!("Appearance"),
                 t!("Choose the theme and interface language."),
@@ -104,7 +110,11 @@ impl NavidromeApp {
             }));
 
         if compact {
-            div().flex_1().min_w_0().child(button).into_any_element()
+            div()
+                .w(px(136.0))
+                .flex_none()
+                .child(button)
+                .into_any_element()
         } else {
             button.into_any_element()
         }
@@ -122,7 +132,9 @@ impl NavidromeApp {
 
         if compact {
             h_flex()
+                .id("settings-nav-scroll")
                 .w_full()
+                .overflow_x_scroll()
                 .flex_none()
                 .gap_1()
                 .p_2()

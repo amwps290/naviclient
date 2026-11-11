@@ -32,6 +32,9 @@ impl NavidromeApp {
         self.finish_listening_event(false);
         self.save_session();
         self.flush_server_cache_writes();
+        if let Err(error) = self.lyrics_cache.flush() {
+            log::warn!("pending lyrics cache save failed: {error:#}");
+        }
     }
 
     pub(in crate::app) fn maybe_save_session(&mut self) {
@@ -50,6 +53,7 @@ impl NavidromeApp {
         self.config.playback_modes = self.state.playback_modes;
         if let Some(song) = self.state.now_playing.clone() {
             self.ensure_song_cover(&song, true);
+            self.load_lyrics(&song);
         }
         log::info!(
             "restored playback session; server={:?} queue={} index={:?} position={:.1}s",

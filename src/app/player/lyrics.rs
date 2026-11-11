@@ -4,18 +4,65 @@ use crate::app::prelude::*;
 
 impl NavidromeApp {
     pub(in crate::app) fn load_lyrics(&mut self, song: &Song) {
-        let Some(api) = self
-            .source_for_song(song)
-            .cloned()
-            .filter(|api| api.capabilities().lyrics)
-        else {
+        let Some(media) = self.lyrics_media(song) else {
             self.state.lyrics.clear();
             return;
         };
-        let media = crate::source::MediaKey::new(api.id().clone(), &song.id);
+        if self.state.lyrics.media() != Some(&media)
+            || self
+                .lyrics_ui
+                .media
+                .as_ref()
+                .is_some_and(|target| target != &media)
+        {
+            self.lyrics_ui.cancel();
+        }
         let Some(request) = self.state.lyrics.begin(&media, &mut self.library_requests) else {
             return;
         };
+        self.start_lyrics_load(song, media, request, false);
+    }
+
+    pub(in crate::app) fn lyrics_media(&self, song: &Song) -> Option<crate::source::MediaKey> {
+        song.media_key().or_else(|| {
+            self.source_for_song(song)
+                .map(|api| crate::source::MediaKey::new(api.id().clone(), &song.id))
+        })
+    }
+
+    pub(in crate::app) fn refresh_lyrics(&mut self) {
+        if self
+            .state
+            .lyrics
+            .document
+            .as_ref()
+            .is_some_and(|d| d.manual)
+        {
+            self.state.lyrics.cancel_task();
+            return;
+        }
+        let Some(song) = self.state.now_playing.clone() else {
+            return;
+        };
+        let Some(media) = self.lyrics_media(&song) else {
+            return;
+        };
+        let request = self
+            .state
+            .lyrics
+            .refresh(&media, &mut self.library_requests);
+        self.start_lyrics_load(&song, media, request, true);
+    }
+
+    fn start_lyrics_load(
+        &mut self,
+        song: &Song,
+        media: crate::source::MediaKey,
+        request: LibraryRequest,
+        refresh: bool,
+    ) {
+        let api = self.source_for_song(song).cloned();
+        let service = self.lyrics_service();
         let structured_lyrics = self
             .playback_server
             .as_ref()
@@ -23,13 +70,21 @@ impl NavidromeApp {
             .unwrap_or_default();
         let song = song.clone();
         let tx = self.tx.clone();
-        self.spawn_future(async move {
-            let result = api
-                .lyrics(&song, structured_lyrics)
-                .await
-                .map_err(error_message);
+        self.state.lyrics.task = Some(self.runtime.spawn(async move {
+            let result = service
+                .load(
+                    &song,
+                    &media,
+                    api.as_ref(),
+                    structured_lyrics,
+                    refresh,
+                    |status, _| {
+                        let _ = tx.send(Msg::LyricsProgress { request, status });
+                    },
+                )
+                .await;
             let _ = tx.send(Msg::Lyrics { request, result });
-        });
+        }));
     }
 
     pub(in crate::app) fn update_active_lyric(&mut self) {

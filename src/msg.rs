@@ -8,9 +8,7 @@ use crate::app::{
 };
 use crate::audio::OutputDevice;
 use crate::import::{ImportedPlaylist, MatchedSongs};
-use crate::models::{
-    Album, Artist, Favorites, Genre, Lyrics, Playlist, SearchResults, ServerInfo, Song,
-};
+use crate::models::{Album, Artist, Favorites, Genre, Playlist, SearchResults, ServerInfo, Song};
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
 use crate::recommendation::{DailyMixSnapshot, RecommendedTrack};
 
@@ -147,7 +145,16 @@ pub enum Msg {
     },
     Lyrics {
         request: LibraryRequest,
-        result: Result<Lyrics, String>,
+        result: crate::lyrics::service::LoadOutcome,
+    },
+    LyricsProgress {
+        request: LibraryRequest,
+        status: crate::lyrics::service::LyricsStatus,
+    },
+    LyricsSearch {
+        request: LibraryRequest,
+        result:
+            Result<Vec<crate::lyrics::provider::Record>, crate::lyrics::provider::ProviderError>,
     },
     Cover {
         request: CoverRequest,

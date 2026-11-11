@@ -63,7 +63,8 @@ impl ProxyProfile {
 }
 
 /// The connection a user chose for one source. Missing entries mean `System`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceConnection {
     #[default]
     System,
@@ -204,7 +205,7 @@ impl Config {
 
     /// How many sources currently route through this proxy.
     pub fn proxy_users(&self, id: &str) -> usize {
-        self.network
+        usize::from(self.lyrics.connection == SourceConnection::Proxy(id.to_string())) + self.network
             .source_proxies
             .iter()
             .filter(

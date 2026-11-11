@@ -15,6 +15,7 @@ mod global_shortcuts;
 #[cfg(test)]
 mod i18n_tests;
 mod import;
+mod lyrics;
 mod media_session;
 mod models;
 mod msg;

@@ -10,6 +10,7 @@ impl NavidromeApp {
             SettingsSection::Sources => vec![self.render_source_settings(cx)],
             SettingsSection::Proxies => vec![self.render_proxy_settings(cx)],
             SettingsSection::Playback => self.render_playback_settings(cx),
+            SettingsSection::Lyrics => vec![self.render_lyrics_settings(cx)],
             SettingsSection::Desktop => vec![self.render_desktop_settings(cx)],
             SettingsSection::Appearance => self.render_appearance_settings(cx),
             SettingsSection::Shortcuts => vec![self.render_shortcut_settings(cx)],

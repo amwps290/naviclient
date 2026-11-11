@@ -97,6 +97,8 @@ fn normalize_server_url(url: &str) -> String {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub lyrics: crate::lyrics::LyricsSettings,
     /// Shared proxies and transport choices, independent of provider credentials.
     #[serde(default = "super::network::NetworkSettings::legacy")]
     pub network: super::network::NetworkSettings,
@@ -161,6 +163,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            lyrics: Default::default(),
             network: Default::default(),
             server_url: "http://127.0.0.1:4533".to_string(),
             username: String::new(),

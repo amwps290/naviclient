@@ -6,6 +6,7 @@ pub(crate) mod bilibili_state;
 pub(in crate::app) mod bilibili_view;
 pub(in crate::app) mod desktop_view;
 pub(in crate::app) mod dialogs;
+pub(in crate::app) mod lyrics_view;
 pub(in crate::app) mod navigation_view;
 pub(in crate::app) mod overlay;
 pub(in crate::app) mod playback_view;

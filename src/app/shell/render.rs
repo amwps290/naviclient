@@ -5,6 +5,7 @@ use crate::app::style::cover_tint::{cover_tint, tint_background, TintSurface};
 
 impl Render for NavidromeApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_lyrics_dialog(window, cx);
         let playback = self.playback_for_display();
         let cover = self
             .state

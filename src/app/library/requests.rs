@@ -38,6 +38,9 @@ pub(in crate::app) struct LibraryLoad {
 }
 
 impl LibraryLoad {
+    pub(in crate::app) fn pending(&self, request: LibraryRequest) -> bool {
+        matches!(self.phase, LoadPhase::Loading(current) if current == request)
+    }
     pub(in crate::app) fn loading(&self) -> bool {
         matches!(self.phase, LoadPhase::Loading(_))
     }

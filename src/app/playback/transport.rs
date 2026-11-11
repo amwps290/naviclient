@@ -102,6 +102,7 @@ impl NavidromeApp {
 
     pub fn stop_playback(&mut self) {
         self.start_resolution.cancel();
+        self.lyrics_ui.cancel();
         self.reconnect.cancel();
         self.cancel_next_preload();
         self.audio.stop();

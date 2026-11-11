@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NaviClient · 在线歌词交互原型</title>
+  <style>
+    :root { color-scheme: light; --bg:#F7F3EE; --surface:#fff; --ink:#312b2c; --muted:#81777a; --brand:#B53660; --soft:#F2E4E3; --line:#eae3df; --shadow:0 16px 60px #49332912; --warning:#8e6124; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.6 system-ui,-apple-system,"Segoe UI","Noto Sans SC",sans-serif; }
+    body.dark { color-scheme:dark; --bg:#1d1b1c; --surface:#282426; --ink:#f1e9e5; --muted:#b4a7ac; --brand:#ec83a5; --soft:#452d36; --line:#40383b; --warning:#e9bc7f; }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { cursor:default; opacity:.45; }
+    button,input,select,a { -webkit-tap-highlight-color:transparent; }
+    :focus-visible { outline:3px solid var(--brand); outline-offset:3px; }
+    [hidden] { display:none !important; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:25px; font-weight:650; letter-spacing:-.6px; }
+    h2 { font-size:19px; font-weight:650; }
+    h3 { font-size:15px; }
+    small,.muted { color:var(--muted); }
+    .muted { font-size:13px; }
+    .eyebrow { color:var(--brand); font-size:11px; font-weight:700; letter-spacing:1.8px; }
+    .btn { border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); padding:8px 14px; }
+    .btn:hover:not(:disabled) { background:var(--soft); }
+    .btn.primary { background:var(--brand); border-color:var(--brand); color:white; }
+    body.dark .btn.primary { color:#261a20; }
+    .btn.quiet { background:transparent; border-color:transparent; }
+    .icon-btn { width:36px; height:36px; padding:0; font-size:18px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    .spread { justify-content:space-between; }
+    .badge { display:inline-flex; align-items:center; padding:3px 9px; border-radius:7px; font-size:11px; color:var(--brand); background:var(--soft); }
+    .topbar { max-width:1440px; margin:auto; padding:24px 34px 20px; }
+    .prototype-note { font-size:12px; color:var(--muted); margin-top:3px; }
+    .shell { display:grid; grid-template-columns:190px minmax(0,1fr); max-width:1440px; margin:auto; padding:0 24px 30px; gap:20px; }
+    aside { padding:28px 10px; }
+    .logo { padding:0 13px 26px; font-size:18px; font-weight:650; }
+    .logo-mark { display:inline-grid; place-items:center; width:30px; height:30px; border-radius:10px; background:var(--brand); color:white; margin-right:8px; font-size:17px; }
+    .nav-button { display:block; width:100%; text-align:left; border:0; color:var(--muted); background:transparent; border-radius:12px; padding:12px 14px; margin:4px 0; }
+    .nav-button.active { background:var(--soft); color:var(--brand); font-weight:650; }
+    .side-note { margin:32px 14px; font-size:12px; color:var(--muted); }
+    .side-note a { color:var(--brand); }
+    main { min-width:0; }
+    .demo-bar { display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between; margin-bottom:14px; padding:12px 18px; border:1px dashed var(--line); border-radius:14px; }
+    .demo-bar select { padding:5px 8px; max-width:210px; }
+    select,input[type=text],input[type=number] { border:1px solid var(--line); border-radius:9px; color:var(--ink); background:var(--surface); padding:9px 12px; min-width:0; }
+    .song-tabs { display:flex; gap:3px; padding:3px; border-radius:10px; background:var(--surface); }
+    .song-tab { padding:5px 10px; border:0; background:transparent; border-radius:7px; color:var(--muted); }
+    .song-tab.active { background:var(--soft); color:var(--brand); }
+    .player { overflow:hidden; min-height:580px; display:grid; grid-template-columns:minmax(260px,.95fr) minmax(340px,1.25fr); background:var(--surface); border:1px solid var(--line); border-radius:22px; box-shadow:var(--shadow); }
+    .record-column { display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:40px 30px; border-right:1px solid var(--line); }
+    .vinyl { width:clamp(195px,23vw,280px); aspect-ratio:1; display:grid; place-items:center; border-radius:50%; background:repeating-radial-gradient(circle,#202022 0,#202022 3px,#343033 4px,#171719 6px); box-shadow:0 22px 35px #23161c28; margin-bottom:34px; }
+    .vinyl-label { width:38%; aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:50%; color:#fff3ee; background:linear-gradient(140deg,#cf6c87,#8f3154); font-size:10px; letter-spacing:1px; }
+    .vinyl-label b { font-size:20px; font-weight:450; letter-spacing:3px; }
+    .vinyl-hole { width:11px; height:11px; border-radius:50%; background:#211d20; margin-top:9px; }
+    .track-title { font-size:27px; line-height:1.3; margin-bottom:8px; overflow-wrap:anywhere; }
+    .track-tags { margin-top:15px; }
+    .lyrics-column { padding:28px 30px; display:flex; flex-direction:column; min-width:0; position:relative; }
+    .lyrics-toolbar { align-items:flex-start; gap:8px; }
+    .source-label { margin-top:6px; font-size:12px; line-height:1.7; color:var(--muted); }
+    .inline-status { padding-top:10px; font-size:12px; color:var(--warning); }
+    .lyrics-body { min-height:365px; flex:1; display:flex; flex-direction:column; justify-content:center; gap:11px; padding:22px 0; }
+    .lyric-line { width:100%; text-align:left; border:0; background:transparent; color:var(--muted); border-radius:9px; padding:8px 12px; font-size:17px; line-height:1.6; }
+    .lyric-line.active { color:var(--brand); background:var(--soft); font-size:20px; font-weight:650; }
+    .lyric-line small { display:block; font-weight:400; font-size:11px; margin-top:3px; }
+    .lyric-line:hover:not(:disabled) { background:var(--bg); }
+    .lyrics-footnote { font-size:11px; color:var(--muted); }
+    .empty-state { text-align:center; padding:45px 16px; display:grid; justify-items:center; gap:10px; }
+    .empty-symbol { color:var(--brand); font-size:36px; margin-bottom:5px; }
+    .empty-state p { font-size:13px; color:var(--muted); max-width:300px; }
+    .transport { background:var(--surface); border:1px solid var(--line); border-radius:16px; margin-top:14px; padding:13px 20px; gap:18px; }
+    .play-button { display:grid; place-items:center; flex-shrink:0; width:38px; height:38px; border-radius:50%; border:0; color:white; background:var(--brand); }
+    .seek { flex:1; accent-color:var(--brand); min-width:60px; }
+    .time { font-variant-numeric:tabular-nums; font-size:12px; }
+    .menu { position:absolute; right:30px; top:72px; z-index:3; min-width:205px; padding:6px; background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow); border-radius:12px; }
+    .menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--ink); border:0; border-radius:7px; padding:9px 11px; }
+    .menu button:hover:not(:disabled) { background:var(--soft); }
+    .settings-panel { max-width:860px; padding:30px; background:var(--surface); border:1px solid var(--line); border-radius:22px; box-shadow:var(--shadow); }
+    .settings-intro { margin:8px 0 26px; }
+    .setting-row { padding:20px 0; border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:24px; }
+    .setting-row p { font-size:12px; color:var(--muted); max-width:430px; margin-top:4px; }
+    .setting-row select { width:240px; }
+    .toggle { position:relative; display:inline-block; flex-shrink:0; width:42px; height:24px; }
+    .toggle input { position:absolute; opacity:0; width:100%; height:100%; margin:0; z-index:2; cursor:pointer; }
+    .toggle span { position:absolute; inset:0; border-radius:20px; background:var(--line); }
+    .toggle span::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:white; box-shadow:0 1px 4px #0002; transition:transform .15s; }
+    .toggle input:checked + span { background:var(--brand); }
+    .toggle input:checked + span::after { transform:translateX(18px); }
+    .toggle input:focus-visible + span { outline:3px solid var(--brand); outline-offset:3px; }
+    .settings-callout { margin-top:22px; padding:15px 18px; border-radius:12px; background:var(--bg); color:var(--muted); font-size:12px; }
+    dialog { color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:0 30px 100px #18101440; padding:0; max-height:90vh; }
+    dialog::backdrop { background:#24192266; backdrop-filter:blur(4px); }
+    .search-dialog { width:min(1080px,calc(100vw - 32px)); }
+    .dialog-head { padding:22px 26px 16px; border-bottom:1px solid var(--line); }
+    .dialog-head p { margin-top:4px; font-size:12px; color:var(--muted); }
+    .search-content { padding:20px 26px; }
+    .form-grid { display:grid; grid-template-columns:1.2fr 1fr 1fr auto; gap:12px; align-items:end; }
+    .field { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
+    .field input { width:100%; }
+    .search-hint { margin:10px 0 16px; font-size:12px; color:var(--muted); }
+    .results-grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+    .column-heading { font-size:12px; color:var(--muted); margin-bottom:9px; }
+    .candidates { display:grid; gap:8px; align-content:start; }
+    .candidate { padding:14px; width:100%; text-align:left; color:var(--ink); border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+    .candidate.selected { border-color:var(--brand); background:var(--soft); }
+    .candidate-top { display:flex; justify-content:space-between; align-items:flex-start; gap:7px; }
+    .candidate-title { font-size:14px; font-weight:650; overflow-wrap:anywhere; }
+    .candidate-meta { font-size:12px; color:var(--muted); margin-top:4px; }
+    .candidate-reason { font-size:11px; color:var(--brand); margin-top:7px; }
+    .preview { min-height:240px; max-height:340px; overflow:auto; padding:18px 20px; background:var(--bg); border-radius:12px; }
+    .preview-line { padding:7px 0; font-size:14px; }
+    .preview-line time { font-size:11px; color:var(--muted); margin-right:8px; }
+    .preview-warning { font-size:12px; color:var(--warning); margin-top:12px; }
+    .dialog-footer { border-top:1px solid var(--line); padding:16px 26px; display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap; }
+    .check-label { display:flex; align-items:center; gap:7px; font-size:12px; }
+    input[type=checkbox] { accent-color:var(--brand); }
+    .preview-options { margin-top:12px; display:grid; gap:8px; }
+    .small-dialog { width:min(430px,calc(100vw - 32px)); }
+    .small-dialog .content { padding:22px 26px; }
+    .offset-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:20px 0; }
+    .offset-display { text-align:center; color:var(--brand); font-size:16px; font-variant-numeric:tabular-nums; }
+    .offset-field { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; }
+    .offset-field input { width:110px; }
+    .small-dialog p { font-size:12px; color:var(--muted); margin-top:16px; }
+    .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); max-width:calc(100vw - 32px); color:var(--ink); background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow); padding:11px 19px; border-radius:12px; z-index:10; font-size:13px; }
+    @media (max-width:1050px) { .shell { grid-template-columns:145px minmax(0,1fr); gap:10px; } .record-column { padding:30px 18px; } .lyrics-column { padding:24px 20px; } .player { grid-template-columns:minmax(230px,.85fr) minmax(280px,1fr); } .demo-bar { padding:12px; } .form-grid { grid-template-columns:1fr 1fr; } }
+    @media (max-width:780px) { .topbar { padding:18px 18px 12px; } .topbar h1 { font-size:20px; } .shell { display:block; padding:0 14px 20px; } aside { display:flex; align-items:center; padding:4px 0 12px; gap:4px; } .logo { padding:0 8px 0 0; font-size:15px; } .nav-button { width:auto; white-space:nowrap; margin:0; padding:10px; } .side-note { display:none; } .lyrics-column { padding:24px; } .player { grid-template-columns:minmax(200px,.8fr) minmax(280px,1fr); } .settings-panel { padding:24px; } .settings-panel select { width:200px; } }
+    @media (max-width:580px) { .prototype-note { max-width:270px; } .logo { display:none; } .demo-bar { gap:10px; } .demo-bar .row { gap:8px; } .demo-bar select { max-width:180px; } .player { display:block; min-height:0; } .record-column { padding:25px 20px; border-right:0; border-bottom:1px solid var(--line); } .vinyl { width:155px; margin-bottom:18px; } .track-title { font-size:23px; } .track-tags { margin-top:10px; } .lyrics-body { min-height:300px; } .setting-row { flex-wrap:wrap; gap:12px; } .setting-row select { width:100%; } .results-grid { grid-template-columns:1fr; } .search-content,.dialog-head,.dialog-footer { padding-left:18px; padding-right:18px; } .preview { min-height:180px; max-height:230px; } .form-grid { grid-template-columns:1fr 1fr; } .transport { gap:10px; padding:12px; } .transport-note { display:none; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } }
+  </style>
+</head>
+<body>
+  <header class="topbar row spread">
+    <div><div class="eyebrow">NAVICLIENT / DESIGN STUDY</div><h1>在线歌词 · 交互原型</h1><p class="prototype-note">占位歌词与候选数据，仅演示交互；无 API 请求、无音频。</p></div>
+    <button id="theme" class="btn quiet" aria-label="切换深色模式">◐ 外观</button>
+  </header>
+  <div class="shell">
+    <aside aria-label="原型导航">
+      <div class="logo"><span class="logo-mark" aria-hidden="true">N</span>NaviClient</div>
+      <button id="nav-player" class="nav-button active" aria-current="page">♫ 正在播放</button>
+      <button id="nav-settings" class="nav-button">⚙ 歌词设置</button>
+      <div class="side-note">推荐体验顺序<br>启用在线歌词 → 无歌词场景 → 更换歌词 → 时间调整。<br><br><a href="../plans/2026-11-09-online-lyrics.md">阅读完整方案 ↗</a></div>
+    </aside>
+    <main>
+      <div class="demo-bar">
+        <div class="row"><span class="muted">演示曲目</span><div class="song-tabs" role="group" aria-label="选择演示曲目"><button class="song-tab active" data-song="zh" aria-pressed="true">中文</button><button class="song-tab" data-song="en" aria-pressed="false">English</button><button class="song-tab" data-song="ja" aria-pressed="false">日本語</button></div></div>
+        <label class="row muted">场景 <select id="scenario"><option value="source">原音乐源歌词正常</option><option value="missing">原音乐源没有歌词</option><option value="metadata">Bilibili · 标签不完整</option><option value="network">歌词服务连接失败</option><option value="instrumental">纯音乐结果</option></select></label>
+      </div>
+      <section id="player-view" aria-label="正在播放">
+        <div class="player">
+          <div class="record-column">
+            <div class="vinyl" aria-hidden="true"><div class="vinyl-label"><b id="record-name">稻香</b><span>LYRICS EDITION</span><i class="vinyl-hole"></i></div></div>
+            <h2 id="track-title" class="track-title">稻香</h2>
+            <p id="track-artist" class="muted">周杰伦 · 魔杰座</p>
+            <div class="track-tags row"><span id="music-source" class="badge">Navidrome</span><small id="track-duration">3:43</small></div>
+          </div>
+          <div class="lyrics-column">
+            <div class="lyrics-toolbar row spread"><div><h2>歌词</h2><p id="provenance" class="source-label"></p></div><div class="row"><button id="replace" class="btn quiet">更换</button><button id="more" class="btn quiet icon-btn" aria-label="歌词操作" aria-expanded="false" aria-controls="lyrics-menu">⋯</button></div></div>
+            <div id="lyrics-menu" class="menu" hidden><button id="menu-search">搜索 / 更换歌词</button><button id="menu-timing">歌词时间调整</button><button id="menu-plain">按纯文本显示</button><button id="menu-restore">恢复自动选择</button></div>
+            <p id="inline-status" class="inline-status" role="status" hidden></p>
+            <div id="lyrics-body" class="lyrics-body"></div>
+            <p id="lyrics-note" class="lyrics-footnote"></p>
+          </div>
+        </div>
+        <div class="transport row"><button id="play" class="play-button" aria-label="模拟播放">▶</button><span id="position" class="time">0:18</span><input id="seek" class="seek" type="range" min="0" max="223" value="18" step="0.1" aria-label="模拟播放位置"><span id="duration" class="time">3:43</span><small class="transport-note">模拟播放 · 无音频</small></div>
+      </section>
+      <section id="settings-view" hidden aria-label="歌词设置">
+        <div class="settings-panel">
+          <h2>歌词</h2><p class="muted settings-intro">歌词服务适用于所有音乐源，独立于音频和账号设置。</p>
+          <div class="setting-row"><div><h3 id="online-label">在线歌词</h3><p>启用后，向歌词服务发送当前歌曲的歌名、歌手、专辑和时长。</p></div><label class="toggle"><input id="online-enabled" type="checkbox" aria-labelledby="online-label"><span></span></label></div>
+          <div class="setting-row"><div><h3>服务</h3><p>公开同步歌词和纯文本歌词，无需账号。</p></div><span class="badge">LRCLIB</span></div>
+          <div class="setting-row"><div><h3>获取策略</h3><p id="strategy-description">保留原歌词；没有原歌词时才在线查找。</p></div><select id="strategy" aria-label="歌词获取策略"><option value="source">原音乐源优先（推荐）</option><option value="online">在线歌词优先</option><option value="manual">仅手动搜索</option></select></div>
+          <div class="setting-row"><div><h3>连接方式</h3><p>只影响歌词服务，不改变任何音乐源的连接方式。</p></div><select id="route" aria-label="歌词服务连接方式"><option value="system">使用系统代理</option><option value="direct">直连</option><option value="proxy">已保存代理 · 127.0.0.1:7890</option></select></div>
+          <div class="setting-row"><div><h3 id="translation-label">显示翻译</h3><p>仅显示歌词源提供的翻译，在线歌词不保证有翻译。</p></div><label class="toggle"><input id="translation" type="checkbox" checked aria-labelledby="translation-label"><span></span></label></div>
+          <div class="setting-row"><div><h3>在线缓存</h3><p id="cache-stats">自动缓存 128 首 / 2.4 MB（示意）；单曲选择另行保留。</p></div><button id="clear-cache" class="btn">清理在线缓存</button></div>
+          <p class="settings-callout">设置自动保存。关闭在线服务会停止新查询，已经记住的本地歌词仍然可用。清理自动缓存保留单曲选择和时间调整。原型仅在此浏览器保存演示设置，不修改 NaviClient 配置。</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="search-dialog" class="search-dialog" aria-labelledby="search-heading">
+    <div class="dialog-head"><div class="row spread"><h2 id="search-heading">更换歌词</h2><button id="close-search" class="btn quiet icon-btn" aria-label="关闭搜索">×</button></div><p>先预览，再应用。搜索词不会修改歌曲标签；所有候选均为原型示例。</p></div>
+    <div class="search-content">
+      <form id="search-form" class="form-grid"><label class="field">歌名<input id="search-title" type="text" required maxlength="200" autocomplete="off"></label><label class="field">歌手（可选）<input id="search-artist" type="text" maxlength="200" autocomplete="off"></label><label class="field">专辑（可选）<input id="search-album" type="text" maxlength="200" autocomplete="off"></label><button id="search-submit" class="btn primary" type="submit">搜索</button></form>
+      <p id="search-hint" class="search-hint" role="status"></p>
+      <div id="results-grid" class="results-grid"><div><h3 class="column-heading">候选版本</h3><div id="candidates" class="candidates"></div></div><div><h3 class="column-heading">预览 · 不改变当前歌词</h3><div id="preview" class="preview"><p class="muted">搜索后选择一份歌词预览。</p></div><p id="preview-warning" class="preview-warning" hidden></p><div class="preview-options"><label class="check-label"><input id="apply-plain" type="checkbox">按纯文本显示</label></div></div></div>
+    </div>
+    <div class="dialog-footer"><label class="check-label"><input id="remember" type="checkbox" checked>记住这首歌的选择</label><div class="row"><button id="cancel-search" class="btn">取消</button><button id="apply" class="btn primary" disabled>使用这份歌词</button></div></div>
+  </dialog>
+
+  <dialog id="enable-dialog" class="small-dialog" aria-labelledby="enable-heading">
+    <div class="dialog-head"><h2 id="enable-heading">开启在线歌词</h2></div><div class="content"><p style="margin-top:0">在线歌词尚未启用。开启后可搜索并预览 LRCLIB 的歌词，只发送歌曲元数据。</p><p>这是流程演示，本原型不会发出网络请求。</p></div><div class="dialog-footer"><button id="enable-cancel" class="btn">取消</button><button id="enable-confirm" class="btn primary">开启并搜索</button></div>
+  </dialog>
+
+  <dialog id="timing-dialog" class="small-dialog" aria-labelledby="timing-heading">
+    <div class="dialog-head row spread"><h2 id="timing-heading">歌词时间调整</h2><button id="timing-close" class="btn quiet icon-btn" aria-label="关闭时间调整">×</button></div>
+    <div class="content"><div class="offset-controls"><button id="advance" class="btn">提前 0.5 秒</button><output id="offset-display" class="offset-display">无偏移</output><button id="delay" class="btn">延后 0.5 秒</button></div><label class="offset-field">精确调整（毫秒）<input id="offset-value" type="number" value="0" step="100" min="-60000" max="60000"></label><p>正数让歌词更晚出现，负数让歌词提前。高亮和点击跳转同步调整，只影响这首歌。</p><p>调整立即生效。固定偏移无法修复翻唱变速或不同编排。</p></div><div class="dialog-footer"><button id="offset-reset" class="btn">重置</button><button id="timing-done" class="btn primary">完成</button></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script>
+    'use strict';
+    // Standalone interaction study: all lyric text and candidates are fixtures.
+    // No fetch, XHR, external assets, audio, or application configuration writes.
+    const $ = id => document.getElementById(id);
+    const storageKey = 'naviclient-online-lyrics-prototype-v1';
+    const defaults = { enabled:false, strategy:'source', route:'system', translation:true, choices:{}, offsets:{} };
+    let settings = structuredClone(defaults);
+    try { const saved = JSON.parse(localStorage.getItem(storageKey)); if (saved) settings = {...defaults,...saved,choices:saved.choices || {},offsets:saved.offsets || {}}; } catch (_) { /* Demonstration remains usable in memory. */ }
+    const songs = {
+      zh:{title:'稻香',artist:'周杰伦',album:'魔杰座',duration:223,label:'稻香',lines:['这里是第一句歌词的示意','文字与时间轴独立于音乐源','当前这一行随播放位置高亮','可以搜索另一份歌词并预览','选中后确认，才会更换歌词','这里是最后一句歌词的示意']},
+      en:{title:'Hello',artist:'Adele',album:'25',duration:296,label:'HELLO',lines:['This is a placeholder lyric line','A second line for the UI preview','The current line follows playback','Choose a version and preview it','Apply only after your confirmation','This is the final placeholder line']},
+      ja:{title:'Lemon',artist:'米津玄師',album:'Lemon',duration:256,label:'LEMON',lines:['これは歌詞の表示例です','音楽ソースとは別に検索します','再生位置に合わせて強調します','別の候補をプレビューします','選択を確定してから変更します','これは最後の表示例です']}
+    };
+    const timestamps = [0,12000,18000,25000,34000,45000];
+    let songKey = 'zh', scenario = 'source', position = 18000, playing = false, selected = null, results = [], sessionChoice = null, plainSource = false, queryEpoch = 0, toastTimer;
+    const time = ms => { const seconds = Math.max(0,Math.floor(ms / 1000)); return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`; };
+    const mediaKey = () => `${scenario === 'metadata' ? 'bilibili' : 'navidrome'}:${songKey}`;
+    const offset = () => sessionChoice?.key === mediaKey() ? Number(sessionChoice.offset || 0) : Number(settings.offsets[mediaKey()] || 0);
+    function notify(message) { clearTimeout(toastTimer); $('toast').textContent = message; $('toast').hidden = false; toastTimer = setTimeout(() => {$('toast').hidden = true;},3200); }
+    function persist(next) {
+      try { localStorage.setItem(storageKey,JSON.stringify(next)); settings = next; return true; }
+      catch (_) { notify('浏览器未允许保存，演示设置保持原值。'); return false; }
+    }
+    function changeSettings(patch,message) {
+      const ok = persist({...settings,...patch}); syncSettings(); render();
+      if (ok) notify(message || '设置已保存到此浏览器（原型）');
+      return ok;
+    }
+    function syncSettings() {
+      $('online-enabled').checked = settings.enabled; $('strategy').value = settings.strategy; $('route').value = settings.route; $('translation').checked = settings.translation;
+      $('strategy-description').textContent = {source:'保留原歌词；没有原歌词时才在线查找。',online:'优先使用在线高可信匹配，失败时回退到原歌词。',manual:'自动读取原歌词，在线查询只在手动搜索时进行。'}[settings.strategy];
+    }
+    function currentLyrics() {
+      const chosen = sessionChoice?.key === mediaKey() ? sessionChoice.value : settings.choices[mediaKey()];
+      if (chosen) return {...chosen,manual:true};
+      const native = {source:'原音乐源',synced:!plainSource,originalSynced:true,lines:songs[songKey].lines};
+      const online = {source:'LRCLIB',synced:!plainSource,originalSynced:true,lines:songs[songKey].lines};
+      if (scenario === 'source') return settings.enabled && settings.strategy === 'online' ? online : native;
+      if (scenario === 'network') return {...native,warning:settings.enabled && settings.strategy !== 'manual' ? '在线查询暂时不可用，继续显示原音乐源歌词。' : ''};
+      if (!settings.enabled || settings.strategy === 'manual' || scenario === 'metadata') return null;
+      if (scenario === 'instrumental') return {source:'LRCLIB',instrumental:true};
+      return online;
+    }
+    function showView(view) {
+      $('player-view').hidden = view !== 'player'; $('settings-view').hidden = view !== 'settings';
+      for (const name of ['player','settings']) { const node = $(`nav-${name}`); node.classList.toggle('active',name === view); if (name === view) node.setAttribute('aria-current','page'); else node.removeAttribute('aria-current'); }
+      closeMenu();
+    }
+    function emptyState(title,description,actionLabel,action) {
+      const wrap = document.createElement('div'); wrap.className = 'empty-state';
+      const symbol = document.createElement('div'); symbol.className = 'empty-symbol'; symbol.textContent = '♫'; symbol.setAttribute('aria-hidden','true');
+      const heading = document.createElement('h3'); heading.textContent = title;
+      const desc = document.createElement('p'); desc.textContent = description;
+      wrap.append(symbol,heading,desc);
+      if (actionLabel) { const button = document.createElement('button'); button.className = 'btn'; button.textContent = actionLabel; button.addEventListener('click',action); wrap.append(button); }
+      $('lyrics-body').append(wrap);
+    }
+    function render() {
+      const song = songs[songKey], data = currentLyrics();
+      $('record-name').textContent = song.label; $('track-title').textContent = scenario === 'metadata' ? `【音乐分享】${song.title} · 合集 P1` : song.title;
+      $('track-artist').textContent = scenario === 'metadata' ? 'UP 主：音乐分享者（不作为歌手）' : `${song.artist} · ${song.album}`;
+      $('music-source').textContent = scenario === 'metadata' ? 'Bilibili' : 'Navidrome'; $('track-duration').textContent = time(song.duration * 1000);
+      $('position').textContent = time(position); $('duration').textContent = time(song.duration * 1000); $('seek').max = song.duration; $('seek').value = position / 1000;
+      $('provenance').textContent = data ? `来源：${data.source} · ${data.instrumental ? '纯音乐' : data.synced ? '同步歌词' : '纯文本'}${data.manual ? ' · 已手动选择' : ''}${data.manual && data.remembered ? ' · 本地已保存' : ''}` : '来源：等待选择';
+      $('inline-status').hidden = !data?.warning; $('inline-status').textContent = data?.warning || '';
+      $('menu-timing').disabled = !data?.synced || data?.instrumental;
+      $('menu-plain').disabled = !data || data.instrumental || (!data.synced && !data.originalSynced);
+      $('menu-plain').textContent = data?.originalSynced && !data.synced || (!data?.manual && plainSource) ? '恢复同步显示' : '按纯文本显示';
+      $('menu-restore').hidden = !data?.manual;
+      $('lyrics-body').replaceChildren();
+      if (!data) {
+        if (scenario === 'metadata') emptyState('补充歌名和歌手','视频标题和 UP 主不足以确定演唱版本。可以修改搜索词后预览候选。','搜索歌词',openSearch);
+        else if (!settings.enabled) emptyState('这首歌没有原音乐源歌词','开启在线服务后，可自动补缺，也可以手动搜索更合适的歌词。','设置在线歌词',() => showView('settings'));
+        else if (settings.strategy === 'manual') emptyState('这首歌没有原音乐源歌词','当前设置为仅手动搜索，在线服务不会自动查询。','搜索歌词',openSearch);
+        else emptyState('没有找到匹配的歌词','可以补充或修改歌名、歌手，手动选择合适的版本。','搜索歌词',openSearch);
+      } else if (data.instrumental) emptyState('纯音乐，无歌词','匹配结果标注为纯音乐。判断不正确时，仍可搜索并更换。','更换歌词',openSearch);
+      else {
+        let active = -1; timestamps.forEach((stamp,index) => { if (position >= Math.max(0,stamp + offset())) active = index; });
+        data.lines.forEach((text,index) => {
+          const line = document.createElement(data.synced ? 'button' : 'div'); line.className = `lyric-line${data.synced && index === active ? ' active' : ''}`; line.textContent = text;
+          if (data.synced) { line.setAttribute('aria-label',`${text}，跳到 ${time(timestamps[index]+offset())}`); line.addEventListener('click',() => { position = Math.max(0,Math.min(song.duration*1000,timestamps[index]+offset())); render(); }); }
+          if (settings.translation && data.source === '原音乐源') { const translated = document.createElement('small'); translated.textContent = '翻译行示意 · 仅显示来源提供的翻译'; line.append(translated); }
+          $('lyrics-body').append(line);
+        });
+      }
+      $('lyrics-note').textContent = data?.synced ? `点击歌词可模拟跳转${offset() ? ` · 当前${offset()>0 ? '延后' : '提前'} ${Math.abs(offset()/1000).toFixed(1)} 秒` : ''} · 所有正文为占位文本` : '纯文本没有时间轴；不会影响音频播放。';
+    }
+    function closeMenu() { $('lyrics-menu').hidden = true; $('more').setAttribute('aria-expanded','false'); }
+    function closeSearch() { ++queryEpoch; $('search-dialog').close(); }
+    function openSearch() {
+      closeMenu();
+      if (!settings.enabled) { $('enable-dialog').showModal(); return; }
+      const song = songs[songKey]; selected = null; results = []; ++queryEpoch;
+      $('search-heading').textContent = `为“${song.title}”更换歌词`; $('search-title').value = song.title; $('search-title').setCustomValidity(''); $('search-artist').value = scenario === 'metadata' ? '' : song.artist; $('search-album').value = scenario === 'metadata' ? '' : song.album;
+      $('search-hint').textContent = `当前音频 ${time(song.duration*1000)}。${scenario === 'metadata' ? '歌手尚未确定；请填写演唱者，不要使用 UP 主。' : '点击搜索查看示例候选。'}`;
+      $('candidates').replaceChildren(); $('preview').textContent = '搜索后选择一份歌词预览。'; $('preview-warning').hidden = true; $('apply').disabled = true; $('apply-plain').checked = false; $('apply-plain').disabled = false; $('remember').checked = true; $('search-submit').disabled = false;
+      $('search-dialog').showModal();
+    }
+    function makeResults() {
+      const song = songs[songKey]; const title = $('search-title').value.trim(), artist = $('search-artist').value.trim() || '歌手待核对', album = $('search-album').value.trim() || '专辑未知';
+      const common = {source:'LRCLIB',title,artist,lines:song.lines};
+      return [
+        {...common,id:`${songKey}-studio`,album,duration:song.duration,synced:true,reason:artist === '歌手待核对' ? '歌手未确定，需要手动确认' : '歌名 / 歌手一致 · 时长相差 0 秒'},
+        {...common,id:`${songKey}-live`,title:`${title} (Live)`,album:'现场版本（示意）',duration:song.duration+27,synced:true,reason:'现场版本 · 比当前音频长 27 秒'},
+        {...common,id:`${songKey}-plain`,album:'纯文本版本（示意）',duration:null,synced:false,reason:'没有同步时间轴 · 时长未知'}
+      ];
+    }
+    function selectCandidate(index) {
+      selected = results[index]; $('apply').disabled = false; $('apply-plain').checked = !selected.synced; $('apply-plain').disabled = !selected.synced;
+      $('preview').replaceChildren();
+      selected.lines.forEach((text,lineIndex) => { const row = document.createElement('div'); row.className = 'preview-line'; if (selected.synced) { const stamp = document.createElement('time'); stamp.textContent = `[${time(timestamps[lineIndex])}]`; row.append(stamp); } row.append(document.createTextNode(text)); $('preview').append(row); });
+      const mismatch = selected.duration && selected.duration !== songs[songKey].duration;
+      $('preview-warning').hidden = !mismatch; $('preview-warning').textContent = '此版本的时长和编排可能不同，同步不一定准确。可以按纯文本显示。';
+      [...$('candidates').children].forEach((node,i) => { node.classList.toggle('selected',i === index); node.setAttribute('aria-pressed',String(i === index)); });
+    }
+    function renderCandidates() {
+      $('candidates').replaceChildren();
+      results.forEach((item,index) => {
+        const button = document.createElement('button'); button.className = 'candidate'; button.setAttribute('aria-pressed','false');
+        const top = document.createElement('div'); top.className = 'candidate-top'; const title = document.createElement('span'); title.className = 'candidate-title'; title.textContent = `${item.title} · ${item.artist}`; const type = document.createElement('span'); type.className = 'badge'; type.textContent = item.synced ? '同步' : '纯文本'; top.append(title,type);
+        const meta = document.createElement('div'); meta.className = 'candidate-meta'; meta.textContent = `${item.album} · ${item.duration ? time(item.duration*1000) : '时长未知'}`;
+        const reason = document.createElement('div'); reason.className = 'candidate-reason'; reason.textContent = item.reason;
+        button.append(top,meta,reason); button.addEventListener('click',() => selectCandidate(index)); $('candidates').append(button);
+      });
+    }
+    function search(event) {
+      event.preventDefault(); if (!$('search-title').value.trim()) { $('search-title').setCustomValidity('请填写歌名'); $('search-title').reportValidity(); return; }
+      const epoch = ++queryEpoch; $('search-submit').disabled = true; $('apply').disabled = true; selected = null; $('candidates').replaceChildren(); $('preview').textContent = '搜索后选择一份歌词预览。'; $('preview-warning').hidden = true; $('search-hint').textContent = '正在搜索示例候选…当前播放和已显示的歌词保持不变。';
+      setTimeout(() => { if (epoch !== queryEpoch || !$('search-dialog').open) return; results = makeResults(); renderCandidates(); $('search-submit').disabled = false; $('search-hint').textContent = `找到 ${results.length} 个示例版本。选择候选只预览；确认后才应用。`; },450);
+    }
+    function applyCandidate() {
+      if (!selected) return;
+      const remembered = $('remember').checked; const choice = {...selected,originalSynced:selected.synced,synced:selected.synced && !$('apply-plain').checked,remembered}; const key = mediaKey();
+      if (remembered) {
+        const next = {...settings,choices:{...settings.choices,[key]:choice},offsets:{...settings.offsets,[key]:0}};
+        if (!persist(next)) return;
+      }
+      sessionChoice = remembered ? null : {key,value:choice,offset:0}; plainSource = false; closeSearch(); render(); notify(remembered ? '已更换并记住这首歌的歌词（原型）' : '已更换，仅用于当前播放会话；保留此前记住的选择');
+    }
+    function restore() {
+      const key = mediaKey(), choices = {...settings.choices}, offsets = {...settings.offsets}; delete choices[key]; delete offsets[key];
+      if (!persist({...settings,choices,offsets})) return;
+      sessionChoice = null; plainSource = false; closeMenu(); render(); notify('已恢复自动选择并重置单曲偏移');
+    }
+    function togglePlain() {
+      const data = currentLyrics(); if (!data || data.instrumental) return;
+      if (data.manual) {
+        const choice = {...data,synced:!data.synced};
+        if (data.remembered) { if (!persist({...settings,choices:{...settings.choices,[mediaKey()]:choice}})) return; }
+        else sessionChoice = {...sessionChoice,key:mediaKey(),value:choice};
+      } else { plainSource = !plainSource; }
+      closeMenu(); render();
+    }
+    function syncOffset() {
+      $('offset-value').value = offset(); $('offset-display').textContent = offset() ? `${offset()>0 ? '延后' : '提前'} ${Math.abs(offset()/1000).toFixed(1)} 秒` : '无偏移';
+    }
+    function setOffset(value) {
+      if (!Number.isFinite(value)) return;
+      const bounded = Math.max(-60000,Math.min(60000,Math.round(value)));
+      if (sessionChoice?.key === mediaKey()) sessionChoice = {...sessionChoice,offset:bounded};
+      else persist({...settings,offsets:{...settings.offsets,[mediaKey()]:bounded}});
+      syncOffset(); render();
+    }
+    function switchTrack(key,newScenario) {
+      closeSearch(); $('enable-dialog').close(); $('timing-dialog').close(); closeMenu(); songKey = key; scenario = newScenario; position = 18000; sessionChoice = null; plainSource = false;
+      document.querySelectorAll('[data-song]').forEach(node => { const active = node.dataset.song === key; node.classList.toggle('active',active); node.setAttribute('aria-pressed',String(active)); });
+      render();
+    }
+    $('nav-player').addEventListener('click',() => showView('player')); $('nav-settings').addEventListener('click',() => showView('settings'));
+    document.querySelectorAll('[data-song]').forEach(button => button.addEventListener('click',() => switchTrack(button.dataset.song,scenario)));
+    $('scenario').addEventListener('change',event => switchTrack(songKey,event.target.value));
+    $('theme').addEventListener('click',() => { document.body.classList.toggle('dark'); $('theme').setAttribute('aria-label',document.body.classList.contains('dark') ? '切换浅色模式' : '切换深色模式'); });
+    $('online-enabled').addEventListener('change',event => changeSettings({enabled:event.target.checked}));
+    $('strategy').addEventListener('change',event => changeSettings({strategy:event.target.value}));
+    $('route').addEventListener('change',event => changeSettings({route:event.target.value},'歌词连接方式已保存；音乐源的连接方式不变'));
+    $('translation').addEventListener('change',event => changeSettings({translation:event.target.checked}));
+    $('clear-cache').addEventListener('click',() => { $('cache-stats').textContent = '自动缓存 0 首 / 0 MB（示意）；单曲选择与时间调整已保留。'; notify('自动缓存已清理，个人选择和偏移已保留（原型）'); });
+    $('replace').addEventListener('click',openSearch); $('menu-search').addEventListener('click',openSearch);
+    $('more').addEventListener('click',() => { const opening = $('lyrics-menu').hidden; $('lyrics-menu').hidden = !opening; $('more').setAttribute('aria-expanded',String(opening)); if (opening) $('menu-search').focus(); });
+    document.addEventListener('click',event => { if (!$('lyrics-menu').contains(event.target) && !$('more').contains(event.target)) closeMenu(); });
+    document.addEventListener('keydown',event => { if (event.key === 'Escape' && !$('lyrics-menu').hidden) { closeMenu(); $('more').focus(); } });
+    $('menu-timing').addEventListener('click',() => { closeMenu(); syncOffset(); $('timing-dialog').showModal(); }); $('menu-plain').addEventListener('click',togglePlain); $('menu-restore').addEventListener('click',restore);
+    $('close-search').addEventListener('click',closeSearch); $('cancel-search').addEventListener('click',closeSearch); $('search-dialog').addEventListener('cancel',() => { ++queryEpoch; });
+    $('search-form').addEventListener('submit',search); $('search-title').addEventListener('input',() => $('search-title').setCustomValidity('')); $('apply').addEventListener('click',applyCandidate);
+    $('enable-cancel').addEventListener('click',() => $('enable-dialog').close()); $('enable-confirm').addEventListener('click',() => { if (changeSettings({enabled:true},'在线歌词已开启（原型）')) { $('enable-dialog').close(); openSearch(); } });
+    $('advance').addEventListener('click',() => setOffset(offset()-500)); $('delay').addEventListener('click',() => setOffset(offset()+500)); $('offset-value').addEventListener('change',event => setOffset(Number(event.target.value))); $('offset-reset').addEventListener('click',() => setOffset(0)); $('timing-close').addEventListener('click',() => $('timing-dialog').close()); $('timing-done').addEventListener('click',() => { $('timing-dialog').close(); notify('单曲时间调整已生效'); });
+    $('seek').addEventListener('input',event => { position = Number(event.target.value)*1000; render(); });
+    $('play').addEventListener('click',() => { playing = !playing; $('play').textContent = playing ? 'Ⅱ' : '▶'; $('play').setAttribute('aria-label',playing ? '暂停模拟播放' : '模拟播放'); });
+    setInterval(() => { if (!playing || document.hidden) return; position = Math.min(position+500,songs[songKey].duration*1000); if (position === songs[songKey].duration*1000) { playing = false; $('play').textContent = '▶'; $('play').setAttribute('aria-label','模拟播放'); } render(); },500);
+    syncSettings(); render();
+  </script>
+</body>
+</html>
