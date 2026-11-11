@@ -60,13 +60,22 @@ impl NavidromeApp {
         if let Some(song) = &self.state.now_playing {
             // 悬停提示显示完整标题/艺人（长标题被截断时也能看全文），
             // 并说明点击可打开正在播放页。
-            let tooltip_text = if song.artist.trim().is_empty() {
-                t!("%{title}\nOpen now playing", title = song.title).to_string()
+            let tooltip_title = song
+                .bilibili_subtitle()
+                .map(|subtitle| format!("{}\n{subtitle}", song.title))
+                .unwrap_or_else(|| song.title.clone());
+            let tooltip_artist = song
+                .bilibili_part
+                .as_ref()
+                .map(|part| t!("Uploader: %{name}", name = part.uploader).to_string())
+                .unwrap_or_else(|| song.artist.clone());
+            let tooltip_text = if tooltip_artist.trim().is_empty() {
+                t!("%{title}\nOpen now playing", title = tooltip_title).to_string()
             } else {
                 t!(
                     "%{title} — %{artist}\nOpen now playing",
-                    title = song.title,
-                    artist = song.artist
+                    title = tooltip_title,
+                    artist = tooltip_artist
                 )
                 .to_string()
             };
@@ -107,11 +116,19 @@ impl NavidromeApp {
                                 .min_w_0()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(self.song_artist_link(
-                                    SharedString::from(format!("player-bar-artist-{}", song.id)),
-                                    song,
-                                    cx,
-                                )),
+                                .child(match song.bilibili_subtitle() {
+                                    Some(subtitle) => {
+                                        div().truncate().child(subtitle).into_any_element()
+                                    }
+                                    None => self.song_artist_link(
+                                        SharedString::from(format!(
+                                            "player-bar-artist-{}",
+                                            song.id
+                                        )),
+                                        song,
+                                        cx,
+                                    ),
+                                }),
                         ),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {

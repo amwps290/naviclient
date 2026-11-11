@@ -113,9 +113,10 @@ impl NavidromeApp {
             .source
             .as_ref()
             .is_some_and(|source| source.provider == crate::source::ProviderKind::Bilibili);
-        if let (Some(part), SongMenuSource::Library { songs, .. }) =
-            (&song.bilibili_part, &context.source)
-        {
+        if let (Some(part), SongMenuSource::Library { songs, .. }) = (
+            song.bilibili_part.as_ref().filter(|part| part.count > 1),
+            &context.source,
+        ) {
             let parts = songs
                 .iter()
                 .filter(|candidate| {

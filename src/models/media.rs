@@ -77,7 +77,7 @@ pub struct Song {
     pub source: Option<SourceId>,
     pub id: String,
     pub title: String,
-    /// Bilibili part metadata is auxiliary; `title` remains the video title.
+    /// Bilibili video/collection context; multi-part tracks use the part title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bilibili_part: Option<BilibiliPart>,
     #[serde(default)]
@@ -139,9 +139,49 @@ pub struct BilibiliPart {
     pub count: u32,
     pub title: String,
     pub uploader: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub video_title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub collection_title: String,
 }
 
 impl Song {
+    /// Also upgrades saved tracks whose primary title was the video title.
+    pub(crate) fn normalize_bilibili_title(&mut self) {
+        let Some(part) = &mut self.bilibili_part else {
+            return;
+        };
+        if part.video_title.is_empty() {
+            part.video_title.clone_from(&self.title);
+        }
+        if part.count > 1 && !part.title.trim().is_empty() {
+            self.title.clone_from(&part.title);
+        }
+    }
+
+    /// Video or collection context, with numbering only within a multi-part BV.
+    pub(crate) fn bilibili_subtitle(&self) -> Option<String> {
+        let part = self.bilibili_part.as_ref()?;
+        let context = if part.count > 1
+            && !part.video_title.trim().is_empty()
+            && part.video_title != self.title
+        {
+            Some(part.video_title.as_str())
+        } else {
+            Some(part.collection_title.as_str())
+                .filter(|title| !title.trim().is_empty() && *title != self.title)
+        };
+        if part.count > 1 {
+            let position = format!("P{}/{}", part.index, part.count);
+            Some(match context {
+                Some(title) => format!("{title} · {position}"),
+                None => position,
+            })
+        } else {
+            context.map(str::to_string)
+        }
+    }
+
     pub fn media_key(&self) -> Option<MediaKey> {
         self.source
             .clone()
@@ -152,6 +192,9 @@ impl Song {
         self.source.as_ref().is_none_or(|owner| owner == source)
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// 容错解析可选的 f32 字段：接受数字或字符串，其他情况返回 None。
 fn deserialize_optional_f32<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>

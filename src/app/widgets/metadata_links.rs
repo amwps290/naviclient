@@ -59,11 +59,11 @@ impl NavidromeApp {
         song: &Song,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        if let Some(part) = &song.bilibili_part {
+        if song.bilibili_part.is_some() {
             return div()
                 .min_w_0()
                 .truncate()
-                .child(format!("P{}/{} · {}", part.index, part.count, part.title))
+                .child(song.bilibili_subtitle().unwrap_or_default())
                 .into_any_element();
         }
         match album_for_song(song).filter(|_| self.browsing_owns_song(song)) {

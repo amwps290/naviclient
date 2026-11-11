@@ -62,6 +62,82 @@ fn source_adapter_preserves_exact_legacy_open_subsonic_cache_paths() {
     assert_eq!(restored.position_secs, 45.0);
 }
 
+fn legacy_bilibili_song(source: &SourceId) -> Song {
+    serde_json::from_value(serde_json::json!({
+        "source": source,
+        "id": "BV1aJ411s7Nv:158355877",
+        "title": "Video collection",
+        "bilibiliPart": {
+            "bvid": "BV1aJ411s7Nv",
+            "cid": 158355877,
+            "index": 1,
+            "count": 162,
+            "title": "001. Boy「男孩」",
+            "uploader": "Uploader"
+        }
+    }))
+    .unwrap()
+}
+
+#[test]
+fn saved_bilibili_queue_titles_upgrade_without_changing_resume_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = SourceId::new(ProviderKind::Bilibili, "test");
+    let cache = ServerCache::for_source(dir.path().into(), &source);
+    let mut saved = session(42.5);
+    saved.source = Some(source.clone());
+    saved.server_url.clear();
+    saved.queue = vec![legacy_bilibili_song(&source)];
+    cache.save(CacheKind::Session, &saved).unwrap();
+
+    let restored = source_session(&cache, &source, None).unwrap();
+    assert_eq!(restored.queue[0].title, "001. Boy「男孩」");
+    assert_eq!(restored.queue[0].media_key(), saved.queue[0].media_key());
+    assert_eq!(
+        restored.queue[0].bilibili_subtitle().as_deref(),
+        Some("Video collection · P1/162")
+    );
+    assert_eq!(restored.position_secs, saved.position_secs);
+    assert_eq!(restored.queue_index, saved.queue_index);
+    assert_eq!(restored.playback_modes, saved.playback_modes);
+    cache.save(CacheKind::Session, &restored).unwrap();
+    let reloaded = source_session(&cache, &source, None).unwrap();
+    assert_eq!(reloaded.queue[0].title, restored.queue[0].title);
+    assert_eq!(
+        reloaded.queue[0].bilibili_subtitle(),
+        restored.queue[0].bilibili_subtitle()
+    );
+}
+
+#[test]
+fn saved_bilibili_history_titles_upgrade_and_keep_source_isolation() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = SourceId::new(ProviderKind::Bilibili, "test");
+    let cache = ServerCache::for_source(dir.path().into(), &source);
+    let mut history = ListeningHistory::default();
+    history.record_started(legacy_bilibili_song(&source), 123);
+    history.record_started(
+        legacy_bilibili_song(&SourceId::new(ProviderKind::Bilibili, "other")),
+        124,
+    );
+    history.events[0].listened_seconds = 61;
+    history.events[0].completed = true;
+    cache.save(CacheKind::ListeningHistory, &history).unwrap();
+
+    let restored = source_history(&cache, &source);
+    assert_eq!(restored.events.len(), 1);
+    let event = &restored.events[0];
+    assert_eq!(event.song.title, "001. Boy「男孩」");
+    assert_eq!(event.song.source.as_ref(), Some(&source));
+    assert_eq!(event.started_at, 123);
+    assert_eq!(event.listened_seconds, 61);
+    assert!(event.completed);
+    assert_eq!(
+        event.song.bilibili_subtitle().as_deref(),
+        Some("Video collection · P1/162")
+    );
+}
+
 use crate::models::{PlayModes, RepeatMode, Song};
 
 const SERVER_URL: &str = "https://music.example";

@@ -158,6 +158,8 @@ fn loaded_song(provider: &BilibiliProvider) -> Song {
             count: 1,
             title: "Part".into(),
             uploader: "Uploader".into(),
+            video_title: "Video title".into(),
+            collection_title: String::new(),
         }),
         ..fixture_song(provider)
     }

@@ -486,6 +486,8 @@
 "My Bilibili favorites": "我的 Bilibili 收藏夾"
 "No Bilibili favorites yet": "暫無 Bilibili 收藏夾"
 "Part": "分 P"
+"Video title": "影片標題"
+"Collection": "合集"
 "Play all parts of this video": "播放此影片全部分 P"
 "Save videos to your favorites in Bilibili, then refresh here.": "在 Bilibili 中收藏影片，然後在此重新整理。"
 "Skipped %{count} unavailable favorites": "已略過 %{count} 個無法使用的收藏項目"

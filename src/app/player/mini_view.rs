@@ -47,10 +47,13 @@ impl NavidromeApp {
         let artist = song
             .as_ref()
             .map(|song| {
-                song.bilibili_part
-                    .as_ref()
-                    .map(|part| format!("P{}/{} · {}", part.index, part.count, part.title))
-                    .unwrap_or_else(|| song.artist.clone())
+                if let Some(part) = &song.bilibili_part {
+                    song.bilibili_subtitle().unwrap_or_else(|| {
+                        t!("Uploader: %{name}", name = part.uploader).to_string()
+                    })
+                } else {
+                    song.artist.clone()
+                }
             })
             .unwrap_or_else(|| t!("Choose a song").to_string());
 

@@ -60,11 +60,15 @@ impl NavidromeApp {
         info = info_row(info, &t!("Title"), song.title.clone());
         if let Some(part) = &song.bilibili_part {
             info = info_row(info, &t!("Uploader"), part.uploader.clone());
-            info = info_row(
-                info,
-                &t!("Part"),
-                format!("P{}/{} · {}", part.index, part.count, part.title),
-            );
+            if !part.video_title.trim().is_empty() && part.video_title != song.title {
+                info = info_row(info, &t!("Video title"), part.video_title.clone());
+            }
+            if !part.collection_title.trim().is_empty() && part.collection_title != song.title {
+                info = info_row(info, &t!("Collection"), part.collection_title.clone());
+            }
+            if part.count > 1 {
+                info = info_row(info, &t!("Part"), format!("P{}/{}", part.index, part.count));
+            }
         }
         if !song.artist.trim().is_empty() {
             info = info_row(info, &t!("Artist"), song.artist.clone());

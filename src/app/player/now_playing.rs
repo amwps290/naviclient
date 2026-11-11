@@ -224,7 +224,7 @@ impl NavidromeApp {
                                     )),
                             )
                             .when(
-                                !song.album.is_empty() || song.bilibili_part.is_some(),
+                                !song.album.is_empty() || song.bilibili_subtitle().is_some(),
                                 |this| {
                                     this.child(
                                         div()

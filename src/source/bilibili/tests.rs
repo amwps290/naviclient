@@ -160,15 +160,75 @@ async fn all_pages_and_parts_keep_order_and_skip_deleted_videos() {
             .collect::<Vec<_>>(),
         ["BV1GJ411x7h7:10", "BV1GJ411x7h7:11", "BV1GJ411x7h8:20"]
     );
-    assert!(tracks.songs.iter().all(|song| song.title == "Video title"
-        && song.artist.is_empty()
-        && song.album.is_empty()));
+    assert_eq!(
+        tracks
+            .songs
+            .iter()
+            .map(|song| song.title.as_str())
+            .collect::<Vec<_>>(),
+        ["part 1", "part 2", "Video title"]
+    );
+    assert!(tracks.songs.iter().all(|song| song.artist.is_empty()
+        && song.album.is_empty()
+        && song.bilibili_part.as_ref().unwrap().video_title == "Video title"));
+    assert_eq!(
+        tracks.songs[1].bilibili_subtitle().as_deref(),
+        Some("Video title · P2/2")
+    );
+    assert!(tracks.songs[2].bilibili_subtitle().is_none());
     assert_eq!(tracks.songs[1].duration, Some(101));
     assert_eq!(tracks.songs[1].bilibili_part.as_ref().unwrap().index, 2);
     assert_eq!(
         tracks.songs[0].cover_art.as_deref(),
         Some("https://i0.hdslb.com/bfs/archive/a.jpg")
     );
+}
+
+#[tokio::test]
+async fn collection_episode_titles_match_the_current_bv_across_sections() {
+    let fixture = Fixture::new(|path| {
+        if path.contains("list-all") {
+            folders()
+        } else if path.contains("resource/list") {
+            page(
+                123,
+                false,
+                json!([{"type":2,"bvid":"BV1GJ411x7h7"},{"type":2,"bvid":"BV1GJ411x7h8"}]),
+            )
+        } else {
+            let bvid = if path.contains("BV1GJ411x7h7") {
+                "BV1GJ411x7h7"
+            } else {
+                "BV1GJ411x7h8"
+            };
+            let mut response = video(bvid, &[10]);
+            response["data"]["pages"][0]["part"] = json!("upload.mp4");
+            response["data"]["ugc_season"] = json!({
+                "title": "Music collection",
+                "sections": [
+                    {"episodes": [{"bvid":"BV1GJ411x7h9","title":"Unrelated song"}]},
+                    {"episodes": [
+                        {"bvid":"BV1GJ411x7h8","title":" \t "},
+                        {"bvid":"BV1GJ411x7h7","title":"Song A"}
+                    ]}
+                ]
+            });
+            response
+        }
+    });
+    let tracks = fixture.provider().favorite_tracks(5).await.unwrap();
+    assert_eq!(tracks.songs[0].id, "BV1GJ411x7h7:10");
+    assert_eq!(tracks.songs[0].title, "Song A");
+    assert_eq!(tracks.songs[1].id, "BV1GJ411x7h8:10");
+    assert_eq!(tracks.songs[1].title, "Video title");
+    for song in &tracks.songs {
+        assert_eq!(
+            song.bilibili_subtitle().as_deref(),
+            Some("Music collection")
+        );
+        assert_eq!(song.bilibili_part.as_ref().unwrap().count, 1);
+        assert!(song.artist.is_empty() && song.album.is_empty());
+    }
 }
 
 #[tokio::test]

@@ -72,6 +72,30 @@ pub(super) struct Video {
     pic: String,
     owner: Owner,
     pub pages: Vec<Part>,
+    #[serde(default)]
+    ugc_season: Option<Collection>,
+}
+
+#[derive(Deserialize)]
+struct Collection {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    sections: Vec<CollectionSection>,
+}
+
+#[derive(Deserialize)]
+struct CollectionSection {
+    #[serde(default)]
+    episodes: Vec<CollectionEpisode>,
+}
+
+#[derive(Deserialize)]
+struct CollectionEpisode {
+    #[serde(default)]
+    bvid: String,
+    #[serde(default)]
+    title: String,
 }
 #[derive(Deserialize)]
 pub(super) struct Part {
@@ -289,23 +313,47 @@ impl BilibiliProvider {
 impl Video {
     fn into_songs(self, provider: &BilibiliProvider) -> Vec<Song> {
         let count = self.pages.len() as u32;
+        let collection_title = self
+            .ugc_season
+            .as_ref()
+            .map(|collection| collection.title.clone())
+            .unwrap_or_default();
+        let title = self
+            .ugc_season
+            .as_ref()
+            .filter(|_| count == 1)
+            .and_then(|collection| {
+                collection
+                    .sections
+                    .iter()
+                    .flat_map(|section| &section.episodes)
+                    .find(|episode| episode.bvid == self.bvid && !episode.title.trim().is_empty())
+            })
+            .map(|episode| episode.title.clone())
+            .unwrap_or_else(|| self.title.clone());
         self.pages
             .into_iter()
-            .map(|part| Song {
-                source: Some(provider.id.clone()),
-                id: format!("{}:{}", self.bvid, part.cid),
-                title: self.title.clone(),
-                duration: Some(part.duration as i32),
-                bilibili_part: Some(BilibiliPart {
-                    bvid: self.bvid.clone(),
-                    cid: part.cid,
-                    index: part.page,
-                    count,
-                    title: part.part,
-                    uploader: self.owner.name.clone(),
-                }),
-                cover_art: safe_artwork(&self.pic).map(|url| url.to_string()),
-                ..Default::default()
+            .map(|part| {
+                let mut song = Song {
+                    source: Some(provider.id.clone()),
+                    id: format!("{}:{}", self.bvid, part.cid),
+                    title: title.clone(),
+                    duration: Some(part.duration as i32),
+                    bilibili_part: Some(BilibiliPart {
+                        bvid: self.bvid.clone(),
+                        cid: part.cid,
+                        index: part.page,
+                        count,
+                        title: part.part,
+                        uploader: self.owner.name.clone(),
+                        video_title: self.title.clone(),
+                        collection_title: collection_title.clone(),
+                    }),
+                    cover_art: safe_artwork(&self.pic).map(|url| url.to_string()),
+                    ..Default::default()
+                };
+                song.normalize_bilibili_title();
+                song
             })
             .collect()
     }

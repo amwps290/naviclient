@@ -38,8 +38,9 @@ JavaScript runtime.
   expands videos in video/part order; play a selected part, all parts of a
   video, or the whole folder, and append tracks to the source's queue.
   Independent AAC-LC audio is selected by accessible declared bandwidth,
-  with backup addresses and bounded playback URL refresh. Video titles stay
-  primary; uploader and part information are shown separately. Credentials,
+  with backup addresses and bounded playback URL refresh. Multi-part tracks
+  show their part names, with video/collection context shown separately;
+  single-page videos hide redundant part numbering. Credentials,
   queues, history and artwork are isolated by source, and Bilibili audio uses
   bounded temporary caches. HE-AAC, FLAC and Dolby playback, video output,
   Bilibili search and favorite editing are not supported in this version.

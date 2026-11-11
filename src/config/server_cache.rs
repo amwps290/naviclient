@@ -245,14 +245,20 @@ fn source_session(
     source: &SourceId,
     server_url: Option<&str>,
 ) -> Option<PlaybackSession> {
-    let session = if source.provider == ProviderKind::OpenSubsonic {
+    let mut session = if source.provider == ProviderKind::OpenSubsonic {
         cache.session(server_url?)
     } else {
         cache.load(CacheKind::Session)
     }?;
-    session
-        .matches_source(source, server_url)
-        .then_some(session)
+    if !session.matches_source(source, server_url) {
+        return None;
+    }
+    if source.provider == ProviderKind::Bilibili {
+        for song in &mut session.queue {
+            song.normalize_bilibili_title();
+        }
+    }
+    Some(session)
 }
 
 pub fn load_source_session(source: &SourceId, server_url: Option<&str>) -> Option<PlaybackSession> {
@@ -264,12 +270,17 @@ pub fn load_source_session(source: &SourceId, server_url: Option<&str>) -> Optio
 }
 
 pub fn load_source_history(source: &SourceId) -> ListeningHistory {
-    let mut history: ListeningHistory = ServerCache::for_source(config_dir(), source)
-        .load(CacheKind::ListeningHistory)
-        .unwrap_or_default();
+    source_history(&ServerCache::for_source(config_dir(), source), source)
+}
+
+fn source_history(cache: &ServerCache, source: &SourceId) -> ListeningHistory {
+    let mut history: ListeningHistory = cache.load(CacheKind::ListeningHistory).unwrap_or_default();
     history.events.retain(|event| event.song.belongs_to(source));
     for event in &mut history.events {
         event.song.source = Some(source.clone());
+        if source.provider == ProviderKind::Bilibili {
+            event.song.normalize_bilibili_title();
+        }
     }
     history
 }
