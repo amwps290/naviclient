@@ -42,7 +42,8 @@ fn apply_palette(config: &mut ThemeConfig, p: &PaletteHex) {
     c.input = hex(p.border);
     c.ring = hex(p.brand);
     c.caret = hex(p.brand);
-    c.selection = hex(p.brand_soft);
+    // The kit caps selection opacity at 30%; a soft surface tint disappears.
+    c.selection = hex(p.brand);
     c.list_active = hex(p.brand_soft);
     c.list_active_border = hex(p.brand);
     c.list_hover = hex(p.sunken);
