@@ -2,9 +2,9 @@
 
 use crate::app::prelude::*;
 use crate::lyrics::{
-    lrclib::Lrclib,
     matching,
-    provider::{LyricsProvider, ProviderError, Query, Record},
+    online::Provider,
+    provider::{ProviderError, ProviderId, Query, Record, SearchOutcome},
     service::{LyricsService, LyricsStatus},
     Document,
 };
@@ -39,6 +39,8 @@ pub(in crate::app) struct LyricsUi {
     pub selected: Option<usize>,
     pub request: Option<LibraryRequest>,
     pub error: Option<LyricsStatus>,
+    pub source: Option<ProviderId>,
+    pub failures: Vec<(ProviderId, LyricsStatus)>,
     pub remember: bool,
     pub plain: bool,
     pub searched: bool,
@@ -62,6 +64,8 @@ impl LyricsUi {
             selected: None,
             request: None,
             error: None,
+            source: None,
+            failures: Vec::new(),
             remember: true,
             plain: false,
             searched: false,
@@ -89,17 +93,29 @@ impl Drop for LyricsUi {
 
 impl NavidromeApp {
     pub(in crate::app) fn lyrics_service(&mut self) -> LyricsService {
+        let sources = self.config.lyrics.enabled_sources();
         let provider = self
             .config
             .resolve_connection(&self.config.lyrics.connection)
             .map_err(|_| ProviderError::Unavailable)
             .and_then(|route| {
                 if let Some((cached_route, client)) = &self.lyrics_client {
-                    if *cached_route == route {
+                    if *cached_route == route
+                        && client.iter().map(Provider::id).eq(sources.iter().copied())
+                    {
                         return Ok(client.clone());
                     }
                 }
-                let client = Lrclib::new(&route, self.lyrics_gate.clone())?;
+                let client: Vec<_> = sources
+                    .iter()
+                    .map(|id| {
+                        Provider::new(
+                            *id,
+                            &route,
+                            self.lyrics_gate.entry(*id).or_default().clone(),
+                        )
+                    })
+                    .collect::<Result<_, _>>()?;
                 self.lyrics_client = Some((route, client.clone()));
                 Ok(client)
             });
@@ -173,6 +189,8 @@ impl NavidromeApp {
         self.lyrics_ui.candidates_scroll = ScrollHandle::new();
         self.lyrics_ui.selected = None;
         self.lyrics_ui.error = None;
+        self.lyrics_ui.source = None;
+        self.lyrics_ui.failures.clear();
         self.lyrics_ui.searched = false;
         self.lyrics_ui.remember = true;
         self.lyrics_ui.plain = false;
@@ -257,6 +275,11 @@ impl NavidromeApp {
         if !self.config.lyrics.enabled || self.lyrics_ui.dialog != Some(LyricsDialog::Search) {
             return;
         }
+        if self.config.lyrics.enabled_sources().is_empty() {
+            self.lyrics_ui.error = Some(LyricsStatus::SourcesNeeded);
+            cx.notify();
+            return;
+        }
         let Some(song) = self.state.now_playing.as_ref() else {
             return;
         };
@@ -282,20 +305,15 @@ impl NavidromeApp {
         self.lyrics_ui.candidates_scroll = ScrollHandle::new();
         self.lyrics_ui.selected = None;
         self.lyrics_ui.error = None;
+        self.lyrics_ui.failures.clear();
         let request = self.library_requests.next();
         self.lyrics_ui.request = Some(request);
         self.lyrics_ui.searched = true;
         let service = self.lyrics_service();
+        let source = self.lyrics_ui.source;
         let tx = self.tx.clone();
         self.lyrics_ui.task = Some(self.runtime.spawn(async move {
-            let result = match service.provider {
-                Ok(provider) => {
-                    tokio::time::timeout(Duration::from_secs(8), provider.search(&query))
-                        .await
-                        .unwrap_or(Err(ProviderError::Unavailable))
-                }
-                Err(error) => Err(error),
-            };
+            let result = service.search(&query, source).await;
             let _ = tx.send(Msg::LyricsSearch { request, result });
         }));
         cx.notify();
@@ -304,7 +322,7 @@ impl NavidromeApp {
     pub(in crate::app) fn finish_lyrics_search(
         &mut self,
         request: LibraryRequest,
-        result: Result<Vec<Record>, ProviderError>,
+        result: Result<SearchOutcome, ProviderError>,
     ) {
         if self.lyrics_ui.request != Some(request)
             || self.lyrics_ui.media.as_ref()
@@ -319,9 +337,14 @@ impl NavidromeApp {
         }
         self.lyrics_ui.request = None;
         match result {
-            Ok(records) => {
-                self.lyrics_ui.records = matching::ranked(&self.lyrics_ui.query, records);
-                if self.lyrics_ui.records.is_empty() {
+            Ok(outcome) => {
+                self.lyrics_ui.records = matching::ranked(&self.lyrics_ui.query, outcome.records);
+                self.lyrics_ui.failures = outcome
+                    .failures
+                    .into_iter()
+                    .map(|(id, error)| (id, error.into()))
+                    .collect();
+                if self.lyrics_ui.records.is_empty() && self.lyrics_ui.failures.is_empty() {
                     self.lyrics_ui.error = Some(LyricsStatus::NoMatch);
                 }
             }

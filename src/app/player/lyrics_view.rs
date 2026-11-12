@@ -2,7 +2,12 @@
 
 use super::lyrics_search::LyricsDialog;
 use crate::app::prelude::*;
-use crate::lyrics::{matching, provider::Record, service::LyricsStatus, LyricsOrigin};
+use crate::lyrics::{
+    matching,
+    provider::{ProviderId, Record},
+    service::LyricsStatus,
+    LyricsOrigin,
+};
 use gpui_kit::component::{dialog::Dialog, menu::PopupMenuItem};
 
 impl LyricsStatus {
@@ -13,6 +18,7 @@ impl LyricsStatus {
             Self::NoMatch => t!("No matching lyrics found."),
             Self::MetadataNeeded => t!("Enter a song title and artist to search online lyrics."),
             Self::TitleNeeded => t!("Enter a song title to search lyrics."),
+            Self::SourcesNeeded => t!("Choose a lyrics source in Settings."),
             Self::Ambiguous => t!("Several versions match. Choose lyrics for this audio."),
             Self::SourceUnavailable => t!("Could not load lyrics from the music source."),
             Self::SourceTimedOut => t!("The music source lyrics request timed out."),
@@ -23,6 +29,17 @@ impl LyricsStatus {
             ),
             Self::Instrumental => t!("Instrumental track, no lyrics."),
             _ => t!("No lyrics are available for this track."),
+        }
+        .into()
+    }
+}
+
+impl ProviderId {
+    pub(in crate::app) fn label(self) -> SharedString {
+        match self {
+            Self::Lrclib => t!("LRCLIB"),
+            Self::Kugou => t!("Kugou"),
+            Self::Netease => t!("NetEase Cloud Music"),
         }
         .into()
     }
@@ -48,6 +65,8 @@ impl NavidromeApp {
             let origin = match d.origin {
                 LyricsOrigin::Native => t!("Music source"),
                 LyricsOrigin::Lrclib => t!("LRCLIB"),
+                LyricsOrigin::Kugou => t!("Kugou"),
+                LyricsOrigin::Netease => t!("NetEase Cloud Music"),
             };
             let format = if d.instrumental {
                 t!("Instrumental")
@@ -196,6 +215,9 @@ impl NavidromeApp {
         let viewport_height = f32::from(window.viewport_size().height);
         let ui = &self.lyrics_ui;
         let enabled = self.config.lyrics.enabled;
+        let app = cx.entity().downgrade();
+        let source = ui.source;
+        let sources = self.config.lyrics.enabled_sources();
         let fields = v_flex()
             .gap_2()
             .child(
@@ -239,6 +261,45 @@ impl NavidromeApp {
                     ),
             )
             .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().text_xs().child(t!("Lyrics source")))
+                    .child(
+                        Button::new("lyrics-search-source")
+                            .label(
+                                source
+                                    .map(ProviderId::label)
+                                    .unwrap_or_else(|| t!("All enabled sources").into()),
+                            )
+                            .outline()
+                            .small()
+                            .dropdown_caret(true)
+                            .disabled(!enabled || sources.is_empty())
+                            .dropdown_menu(move |menu, _, cx| {
+                                app.update(cx, |_, cx| {
+                                    std::iter::once(None)
+                                        .chain(sources.iter().copied().map(Some))
+                                        .fold(menu, |menu, choice| {
+                                            menu.item(
+                                                PopupMenuItem::new(
+                                                    choice.map(ProviderId::label).unwrap_or_else(
+                                                        || t!("All enabled sources").into(),
+                                                    ),
+                                                )
+                                                .checked(choice == source)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.lyrics_ui.source = choice;
+                                                    this.search_lyrics(cx);
+                                                })),
+                                            )
+                                        })
+                                })
+                                .expect("app owns lyrics source picker")
+                            }),
+                    ),
+            )
+            .child(
                 div()
                     .text_xs()
                     .text_color(palette(cx).text_secondary)
@@ -277,7 +338,8 @@ impl NavidromeApp {
                     .children(ui.records.iter().enumerate().map(|(index, record)| {
                         let info = matching::assess(&ui.query, record);
                         Button::new(SharedString::from(format!(
-                            "lyrics-candidate-{}",
+                            "lyrics-candidate-{}-{}",
+                            record.source.key(),
                             record.id
                         )))
                         .w_full()
@@ -301,7 +363,8 @@ impl NavidromeApp {
                                         .text_xs()
                                         .text_color(palette(cx).text_secondary)
                                         .child(format!(
-                                            "{} · {} · {}",
+                                            "{} · {} · {} · {}",
+                                            record.source.label(),
                                             record.album_name,
                                             record_duration(record),
                                             if record.instrumental {
@@ -366,6 +429,12 @@ impl NavidromeApp {
                     .when_some(ui.error, |this, error| {
                         this.child(div().text_sm().child(error.message()))
                     })
+                    .children(ui.failures.iter().map(|(id, status)| {
+                        div()
+                            .text_xs()
+                            .text_color(palette(cx).text_secondary)
+                            .child(format!("{} · {}", id.label(), status.message()))
+                    }))
                     .when(!ui.searched, |this| {
                         this.child(
                             div()
@@ -439,18 +508,16 @@ impl NavidromeApp {
             .gap_3()
             .child(fields)
             .when(!enabled, |this| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .child(t!("Enable online lyrics in Settings to search LRCLIB.")),
-                )
+                this.child(div().text_sm().child(t!(
+                    "Enable online lyrics in Settings to search lyrics services."
+                )))
                 .child(
                     div()
                         .text_xs()
                         .text_color(palette(cx).text_secondary)
                         .child(t!(
-                        "When enabled, song title, artist, album and duration are sent to LRCLIB."
-                    )),
+                            "When enabled, song metadata is sent to the selected lyrics services."
+                        )),
                 )
                 .child(
                     Button::new("enable-online-lyrics")

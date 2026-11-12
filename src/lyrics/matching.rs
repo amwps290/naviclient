@@ -75,6 +75,26 @@ pub(crate) fn assess(query: &Query, record: &Record) -> MatchInfo {
 
 pub(crate) fn ranked(query: &Query, mut records: Vec<Record>) -> Vec<Record> {
     records.retain(Record::usable);
+    rank_metadata(query, &mut records);
+    let mut unique: Vec<Record> = Vec::new();
+    for record in records {
+        if !unique.iter().any(|r| {
+            r.source == record.source
+                && normalize(&r.track_name) == normalize(&record.track_name)
+                && normalize(&r.artist_name) == normalize(&record.artist_name)
+                && versions(&r.album_name) == versions(&record.album_name)
+                && (r.duration - record.duration).abs() <= 2.0
+                && r.instrumental == record.instrumental
+                && r.lyrics().lines == record.lyrics().lines
+        }) {
+            unique.push(record);
+        }
+    }
+    unique.truncate(20);
+    unique
+}
+
+pub(super) fn rank_metadata(query: &Query, records: &mut [Record]) {
     records.sort_by(|a, b| {
         let a = assess(query, a);
         let b = assess(query, b);
@@ -89,21 +109,6 @@ pub(crate) fn ranked(query: &Query, mut records: Vec<Record>) -> Vec<Record> {
                     .total_cmp(&b.duration_delta.unwrap_or(f64::MAX))
             })
     });
-    let mut unique: Vec<Record> = Vec::new();
-    for record in records {
-        if !unique.iter().any(|r| {
-            normalize(&r.track_name) == normalize(&record.track_name)
-                && normalize(&r.artist_name) == normalize(&record.artist_name)
-                && versions(&r.album_name) == versions(&record.album_name)
-                && (r.duration - record.duration).abs() <= 2.0
-                && r.instrumental == record.instrumental
-                && r.lyrics().lines == record.lyrics().lines
-        }) {
-            unique.push(record);
-        }
-    }
-    unique.truncate(20);
-    unique
 }
 
 pub(crate) fn automatic(query: &Query, records: Vec<Record>) -> Result<Option<Record>, ()> {

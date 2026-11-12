@@ -1,6 +1,7 @@
 //! Lyrics preferences are persisted before changing live request behavior.
 
 use crate::app::prelude::*;
+use crate::lyrics::provider::ProviderId;
 use crate::lyrics::{LyricsPolicy, LyricsSettings};
 use gpui_kit::component::menu::PopupMenuItem;
 
@@ -60,10 +61,25 @@ impl NavidromeApp {
         v_flex().gap_5()
             .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
                 .child(div().text_sm().child(t!("Online lyrics")))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("When enabled, song title, artist, album and duration are sent to LRCLIB."))))
+                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("When enabled, song metadata is sent to the selected lyrics services."))))
                 .child(Switch::new("online-lyrics-enabled").checked(self.config.lyrics.enabled).accessibility_label(t!("Online lyrics"))
                     .on_change(cx.listener(|this,checked,_,cx| this.change_lyrics_settings(|s| s.enabled = *checked,cx)))))
-            .child(div().text_sm().child(t!("Service: LRCLIB · No account required")))
+            .child(v_flex().gap_3()
+                .child(div().text_sm().child(t!("Lyrics sources")))
+                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Automatic lookup tries enabled sources from top to bottom. No account is required.")))
+                .children(ProviderId::ALL.into_iter().map(|id| {
+                    h_flex().justify_between().items_center().gap_3()
+                        .child(div().text_sm().child(id.label()))
+                        .child(Switch::new(SharedString::from(format!("lyrics-source-{}", id.key())))
+                            .checked(self.config.lyrics.sources.contains(&id))
+                            .accessibility_label(id.label())
+                            .on_change(cx.listener(move |this, checked, _, cx| {
+                                this.change_lyrics_settings(|settings| {
+                                    settings.sources.retain(|source| *source != id);
+                                    if *checked { settings.sources.push(id); }
+                                }, cx);
+                            })))
+                })))
             .child(h_flex().justify_between().gap_3().child(div().text_sm().child(t!("Loading policy")))
                 .child(Button::new("lyrics-policy").label(policy.label()).dropdown_caret(true).outline().small()
                     .dropdown_menu(move |menu,_,cx| app.update(cx,|_,cx| {

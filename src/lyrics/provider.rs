@@ -4,6 +4,31 @@ use crate::models::{Lyrics, Song};
 use crate::source::ProviderKind;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProviderId {
+    #[default]
+    Lrclib,
+    Kugou,
+    Netease,
+}
+
+impl ProviderId {
+    pub const ALL: [Self; 3] = [Self::Lrclib, Self::Kugou, Self::Netease];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Lrclib => "lrclib",
+            Self::Kugou => "kugou",
+            Self::Netease => "netease",
+        }
+    }
+
+    fn is_lrclib(&self) -> bool {
+        *self == Self::Lrclib
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Query {
     pub title: String,
@@ -51,6 +76,8 @@ impl Query {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Record {
     pub id: u64,
+    #[serde(default, skip_serializing_if = "ProviderId::is_lrclib")]
+    pub source: ProviderId,
     #[serde(default)]
     pub track_name: String,
     #[serde(default)]
@@ -65,7 +92,35 @@ pub(crate) struct Record {
     pub synced_lyrics: Option<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SearchOutcome {
+    pub records: Vec<Record>,
+    pub failures: Vec<(ProviderId, ProviderError)>,
+}
+
 impl Record {
+    pub(super) fn set_text(&mut self, text: &str) {
+        let lyrics = super::lrc::parse(text);
+        self.plain_lyrics = Some(if lyrics.is_synced() {
+            lyrics
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            text.trim_start_matches('\u{feff}')
+                .lines()
+                .take(10_000)
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('['))
+                .map(|line| line.chars().take(4096).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        self.synced_lyrics = lyrics.is_synced().then(|| text.into());
+    }
+
     pub fn lyrics(&self) -> Lyrics {
         if self.instrumental {
             return Lyrics::default();
@@ -105,5 +160,13 @@ pub(crate) trait LyricsProvider {
     fn fetch(
         &self,
         id: u64,
+        query: Option<&Query>,
     ) -> impl std::future::Future<Output = Result<Option<Record>, ProviderError>> + Send;
+}
+
+pub(super) fn numeric_id(value: &serde_json::Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str()?.parse().ok())
+        .filter(|id| *id > 0)
 }

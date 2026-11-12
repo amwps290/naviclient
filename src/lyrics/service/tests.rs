@@ -28,7 +28,9 @@ fn service(
             policy,
             ..Default::default()
         },
-        provider: Ok(Lrclib::test_client(server.url(""))),
+        provider: Ok(vec![Provider::Lrclib(
+            crate::lyrics::lrclib::Lrclib::test_client(server.url("")),
+        )]),
         cache,
     }
 }
@@ -503,4 +505,386 @@ async fn unusable_remembered_body_is_recovered_by_id_with_its_preferences() {
     assert_eq!(document.offset_ms, -500);
     assert_eq!(cache.selected(&media).unwrap().lyrics.lines[0].text, "test");
     assert_eq!(online.requests()[0].url.path(), "/api/get/7");
+}
+
+fn kugou_record() -> serde_json::Value {
+    json!({"id":"7","song":"Test","singer":"Artist","duration":223000,"accesskey":"temporary-key"})
+}
+fn kugou_lyrics() -> serde_json::Value {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    json!({"status":200,"id":"7","content":STANDARD.encode("[00:01]test")})
+}
+fn multi_service(
+    lrclib: &Server,
+    kugou: &Server,
+    netease: &Server,
+    cache: LyricsCache,
+) -> LyricsService {
+    LyricsService {
+        settings: LyricsSettings {
+            enabled: true,
+            sources: ProviderId::ALL.to_vec(),
+            ..Default::default()
+        },
+        provider: Ok(vec![
+            Provider::Lrclib(crate::lyrics::lrclib::Lrclib::test_client(lrclib.url(""))),
+            Provider::Kugou(crate::lyrics::kugou::Kugou::test_client(kugou.url(""))),
+            Provider::Netease(crate::lyrics::netease::Netease::test_client(
+                netease.url(""),
+            )),
+        ]),
+        cache,
+    }
+}
+
+#[tokio::test]
+async fn lrclib_negative_cache_does_not_suppress_kugou_fallback_and_replay() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![]);
+    let kugou = Server::new(vec![
+        success(json!({"status":200,"candidates":[kugou_record()]})),
+        success(kugou_lyrics()),
+    ]);
+    let netease = Server::new(vec![]);
+    let song = song();
+    let cache = cache(&dir);
+    cache.save_automatic(&Query::for_song(&song), None).unwrap();
+    let service = multi_service(&lrclib, &kugou, &netease, cache);
+    for _ in 0..2 {
+        let outcome = service
+            .load(
+                &song,
+                &song.media_key().unwrap(),
+                None,
+                CapabilitySupport::Unsupported,
+                false,
+                |_, _| {},
+            )
+            .await;
+        assert_eq!(
+            outcome.document.unwrap().origin,
+            crate::lyrics::LyricsOrigin::Kugou
+        );
+    }
+    assert!(lrclib.requests().is_empty());
+    assert!(netease.requests().is_empty());
+    assert_eq!(kugou.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn a_rate_limited_source_does_not_block_other_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![(429, "busy".into())]);
+    let kugou = Server::new(vec![
+        success(json!({"status":200,"candidates":[kugou_record()]})),
+        success(kugou_lyrics()),
+    ]);
+    let netease = Server::new(vec![]);
+    let service = multi_service(&lrclib, &kugou, &netease, cache(&dir));
+    let song = song();
+    let outcome = service
+        .load(
+            &song,
+            &song.media_key().unwrap(),
+            None,
+            CapabilitySupport::Unsupported,
+            false,
+            |_, _| {},
+        )
+        .await;
+    assert_eq!(
+        outcome.document.unwrap().origin,
+        crate::lyrics::LyricsOrigin::Kugou
+    );
+    assert!(service.cache.automatic(&Query::for_song(&song)).is_none());
+    assert_eq!(kugou.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn manual_search_keeps_other_sources_results_and_reports_partial_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![(500, "offline".into())]);
+    let kugou = Server::with_handler(|request| {
+        if request.url.path() == "/search" {
+            success(json!({"status":200,"candidates":[kugou_record()]}))
+        } else {
+            success(kugou_lyrics())
+        }
+    });
+    let netease = Server::new(vec![
+        success(
+            json!({"code":200,"result":{"songs":[{"id":7,"name":"Test","artists":[{"name":"Artist"}],"duration":223000}]}}),
+        ),
+        success(json!({"code":200,"lrc":{"lyric":"[00:01]test"}})),
+    ]);
+    let mut service = multi_service(&lrclib, &kugou, &netease, cache(&dir));
+    service.settings.policy = LyricsPolicy::Manual;
+    let query = Query::for_song(&song());
+    let outcome = service.search(&query, None).await.unwrap();
+    assert_eq!(outcome.records.len(), 2);
+    assert_eq!(
+        outcome.failures,
+        [(ProviderId::Lrclib, ProviderError::Unavailable)]
+    );
+    assert_ne!(outcome.records[0].source, outcome.records[1].source);
+    assert_eq!(outcome.records[0].id, outcome.records[1].id);
+    let outcome = service
+        .search(&query, Some(ProviderId::Kugou))
+        .await
+        .unwrap();
+    assert_eq!(outcome.records.len(), 1);
+    assert_eq!(outcome.records[0].source, ProviderId::Kugou);
+    assert!(outcome.failures.is_empty());
+    assert_eq!(lrclib.requests().len(), 1);
+    assert_eq!(netease.requests().len(), 2);
+    service.settings.enabled = false;
+    assert_eq!(
+        service.search(&query, None).await.unwrap_err(),
+        ProviderError::Unavailable
+    );
+    assert_eq!(kugou.requests().len(), 4);
+}
+
+#[tokio::test]
+async fn a_kugou_pin_works_offline_and_recovery_uses_its_source_and_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![]);
+    let kugou = Server::new(vec![
+        success(json!({"status":200,"candidates":[kugou_record()]})),
+        success(kugou_lyrics()),
+    ]);
+    let netease = Server::new(vec![]);
+    let song = song();
+    let cache = cache(&dir);
+    let mut document = Document::online(super::super::provider::Record {
+        source: ProviderId::Kugou,
+        id: 7,
+        ..Default::default()
+    });
+    document.query = Some(Query::for_song(&song));
+    document.offset_ms = 750;
+    document.plain = true;
+    cache
+        .remember(&song.media_key().unwrap(), &document)
+        .unwrap();
+    let mut service = multi_service(&lrclib, &kugou, &netease, cache);
+    let outcome = service
+        .load(
+            &song,
+            &song.media_key().unwrap(),
+            None,
+            CapabilitySupport::Unsupported,
+            false,
+            |_, _| {},
+        )
+        .await;
+    let document = outcome.document.unwrap();
+    assert_eq!(document.origin, crate::lyrics::LyricsOrigin::Kugou);
+    assert!(document.manual);
+    assert_eq!(document.offset_ms, 750);
+    service.settings.enabled = false;
+    service.settings.sources.clear();
+    let document = service
+        .load(
+            &song,
+            &song.media_key().unwrap(),
+            None,
+            CapabilitySupport::Unsupported,
+            false,
+            |_, _| {},
+        )
+        .await
+        .document
+        .unwrap();
+    assert_eq!(document.origin, crate::lyrics::LyricsOrigin::Kugou);
+    assert!(document.plain);
+    assert_eq!(kugou.requests().len(), 2);
+    assert!(lrclib.requests().is_empty());
+}
+
+#[tokio::test]
+async fn complete_misses_fall_through_to_netease_and_cache_each_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![(404, "missing".into()), success(json!([]))]);
+    let kugou = Server::new(vec![success(json!({"status":200,"candidates":[]}))]);
+    let netease = Server::new(vec![
+        success(
+            json!({"code":200,"result":{"songs":[{"id":7,"name":"Test","artists":[{"name":"Artist"}],"duration":223000}]}}),
+        ),
+        success(json!({"code":200,"lrc":{"lyric":"[00:01]test"}})),
+    ]);
+    let service = multi_service(&lrclib, &kugou, &netease, cache(&dir));
+    let song = song();
+    let query = Query::for_song(&song);
+    for _ in 0..2 {
+        let outcome = service
+            .load(
+                &song,
+                &song.media_key().unwrap(),
+                None,
+                CapabilitySupport::Unsupported,
+                false,
+                |_, _| {},
+            )
+            .await;
+        assert_eq!(
+            outcome.document.unwrap().origin,
+            crate::lyrics::LyricsOrigin::Netease
+        );
+    }
+    for id in [ProviderId::Lrclib, ProviderId::Kugou] {
+        assert!(service.cache.automatic_from(id, &query).unwrap().is_none());
+    }
+    assert_eq!(
+        service
+            .cache
+            .automatic_from(ProviderId::Netease, &query)
+            .unwrap()
+            .unwrap()
+            .id,
+        7
+    );
+    assert_eq!(lrclib.requests().len(), 2);
+    assert_eq!(kugou.requests().len(), 1);
+    assert_eq!(netease.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn failed_candidate_downloads_are_never_negative_cached_or_auto_selected() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![]);
+    let kugou = Server::new(vec![
+        success(
+            json!({"status":200,"candidates":[kugou_record(), {"id":"8", "song":"Test", "singer":"Artist", "duration":223000, "accesskey":"temporary-key"}]}),
+        ),
+        success(kugou_lyrics()),
+        (500, "failed".into()),
+    ]);
+    let netease = Server::new(vec![
+        success(
+            json!({"code":200,"result":{"songs":[{"id":7,"name":"Test","artists":[{"name":"Artist"}],"duration":223000}, {"id":8,"name":"Test","artists":[{"name":"Artist"}],"duration":223000}]}}),
+        ),
+        success(json!({"code":200,"nolyric":true})),
+        (404, "failed".into()),
+    ]);
+    let mut service = multi_service(&lrclib, &kugou, &netease, cache(&dir));
+    service.settings.sources = vec![ProviderId::Kugou, ProviderId::Netease];
+    let song = song();
+    let query = Query::for_song(&song);
+    let outcome = service
+        .load(
+            &song,
+            &song.media_key().unwrap(),
+            None,
+            CapabilitySupport::Unsupported,
+            false,
+            |_, _| {},
+        )
+        .await;
+    assert_eq!(outcome.status, LyricsStatus::Unavailable);
+    assert!(outcome.document.is_none());
+    for id in service.settings.enabled_sources() {
+        assert!(service.cache.automatic_from(id, &query).is_none());
+    }
+    assert!(lrclib.requests().is_empty());
+}
+
+#[tokio::test]
+async fn no_enabled_sources_or_a_disabled_pin_never_issue_online_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let lrclib = Server::new(vec![]);
+    let kugou = Server::new(vec![]);
+    let netease = Server::new(vec![]);
+    let mut service = multi_service(&lrclib, &kugou, &netease, cache(&dir));
+    let song = song();
+    let media = song.media_key().unwrap();
+    service
+        .cache
+        .remember(
+            &media,
+            &Document::online(super::super::provider::Record {
+                source: ProviderId::Kugou,
+                id: 7,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    service.settings.sources.clear();
+    let outcome = service
+        .load(
+            &song,
+            &media,
+            None,
+            CapabilitySupport::Unsupported,
+            false,
+            |_, _| {},
+        )
+        .await;
+    assert_eq!(outcome.status, LyricsStatus::SourcesNeeded);
+    assert!(outcome.document.is_none());
+    assert_eq!(
+        service
+            .search(&Query::for_song(&song), None)
+            .await
+            .unwrap_err(),
+        ProviderError::Unavailable
+    );
+    assert!(lrclib.requests().is_empty());
+    assert!(kugou.requests().is_empty());
+    assert!(netease.requests().is_empty());
+}
+
+#[tokio::test]
+async fn cancelling_aggregate_search_closes_every_pending_provider_request() {
+    use tokio::io::AsyncReadExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (started, mut requests) = tokio::sync::mpsc::channel(3);
+    let connections = tokio::spawn(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let started = started.clone();
+            tasks.spawn(async move {
+                let mut header = Vec::new();
+                while !header.ends_with(b"\r\n\r\n") {
+                    header.push(stream.read_u8().await.unwrap());
+                    assert!(header.len() < 16 * 1024);
+                }
+                started.send(()).await.unwrap();
+                let mut buffer = [0];
+                assert_eq!(stream.read(&mut buffer).await.unwrap(), 0);
+            });
+        }
+        while let Some(result) = tasks.join_next().await {
+            result.unwrap();
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let service = LyricsService {
+        settings: LyricsSettings {
+            enabled: true,
+            sources: ProviderId::ALL.to_vec(),
+            ..Default::default()
+        },
+        provider: Ok(vec![
+            Provider::Lrclib(crate::lyrics::lrclib::Lrclib::test_client(base.clone())),
+            Provider::Kugou(crate::lyrics::kugou::Kugou::test_client(base.clone())),
+            Provider::Netease(crate::lyrics::netease::Netease::test_client(base)),
+        ]),
+        cache: cache(&dir),
+    };
+    let search = tokio::spawn(async move { service.search(&Query::for_song(&song()), None).await });
+    for _ in 0..3 {
+        tokio::time::timeout(Duration::from_secs(5), requests.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    search.abort();
+    assert!(search.await.unwrap_err().is_cancelled());
+    tokio::time::timeout(Duration::from_secs(5), connections)
+        .await
+        .unwrap()
+        .unwrap();
 }

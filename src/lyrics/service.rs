@@ -2,9 +2,9 @@
 
 use super::{
     cache::LyricsCache,
-    lrclib::Lrclib,
     matching,
-    provider::{LyricsProvider, ProviderError, Query},
+    online::Provider,
+    provider::{LyricsProvider, ProviderError, ProviderId, Query, SearchOutcome},
     Document, LyricsPolicy, LyricsSettings,
 };
 use crate::{
@@ -22,6 +22,7 @@ pub(crate) enum LyricsStatus {
     NoMatch,
     MetadataNeeded,
     TitleNeeded,
+    SourcesNeeded,
     Ambiguous,
     SourceUnavailable,
     SourceTimedOut,
@@ -105,7 +106,7 @@ impl From<ProviderError> for LyricsStatus {
 
 pub(crate) struct LyricsService {
     pub settings: LyricsSettings,
-    pub provider: Result<Lrclib, ProviderError>,
+    pub provider: Result<Vec<Provider>, ProviderError>,
     pub cache: LyricsCache,
 }
 
@@ -126,22 +127,34 @@ impl LyricsService {
         let preference = self.cache.preference(media);
         let mut online_deadline = None;
         if self.settings.enabled && self.settings.policy != LyricsPolicy::Manual {
-            if let (Some(id), Ok(provider)) = (preference.record_id, &self.provider) {
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+            if let (Some(id), Ok(providers)) = (preference.record_id, &self.provider) {
+                let provider = providers.iter().find(|provider| {
+                    provider.id() == preference.provider
+                        && self.settings.sources.contains(&provider.id())
+                });
+                let deadline = tokio::time::Instant::now() + self.online_budget();
                 online_deadline = Some(deadline);
-                if let Ok(Ok(Some(record))) =
-                    tokio::time::timeout_at(deadline, provider.fetch(id)).await
-                {
-                    if record.id == id && record.usable() {
-                        let mut document = Document::online(record);
-                        document.manual = true;
-                        document.plain = preference.plain;
-                        document.offset_ms = preference.offset_ms;
-                        document.query = preference.query.clone();
-                        if let Err(error) = self.cache.remember(media, &document) {
-                            log::warn!("could not recover remembered lyrics cache: {error:#}");
+                if let Some(provider) = provider {
+                    if let Ok(Ok(Some(record))) = tokio::time::timeout(
+                        Duration::from_secs(8),
+                        provider.fetch(id, preference.query.as_ref().or(Some(&query))),
+                    )
+                    .await
+                    {
+                        if record.id == id
+                            && record.source == preference.provider
+                            && record.usable()
+                        {
+                            let mut document = Document::online(record);
+                            document.manual = true;
+                            document.plain = preference.plain;
+                            document.offset_ms = preference.offset_ms;
+                            document.query = preference.query.clone();
+                            if let Err(error) = self.cache.remember(media, &document) {
+                                log::warn!("could not recover remembered lyrics cache: {error:#}");
+                            }
+                            return LoadOutcome::ready(document);
                         }
-                        return LoadOutcome::ready(document);
                     }
                 }
             }
@@ -168,12 +181,14 @@ impl LyricsService {
         }
         let mut outcome = if !online_enabled {
             LoadOutcome::empty(LyricsStatus::Empty)
+        } else if self.settings.enabled_sources().is_empty() {
+            LoadOutcome::empty(LyricsStatus::SourcesNeeded)
         } else if !query.automatic() {
             LoadOutcome::empty(LyricsStatus::MetadataNeeded)
         } else {
             progress(LyricsStatus::SearchingOnline, None);
             let deadline = online_deadline
-                .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(8));
+                .unwrap_or_else(|| tokio::time::Instant::now() + self.online_budget());
             match tokio::time::timeout_at(deadline, self.online(&query, refresh)).await {
                 Ok(outcome) => outcome,
                 Err(_) => LoadOutcome::empty(LyricsStatus::Unavailable),
@@ -208,22 +223,53 @@ impl LyricsService {
         outcome
     }
 
+    fn online_budget(&self) -> Duration {
+        Duration::from_secs(8 * self.settings.enabled_sources().len().max(1) as u64)
+    }
+
     async fn online(&self, query: &Query, refresh: bool) -> LoadOutcome {
+        let sources = self.settings.enabled_sources();
+        if sources.is_empty() {
+            return LoadOutcome::empty(LyricsStatus::SourcesNeeded);
+        }
+        let mut failure = None;
+        for id in sources {
+            let outcome =
+                tokio::time::timeout(Duration::from_secs(8), self.online_from(id, query, refresh))
+                    .await
+                    .unwrap_or_else(|_| LoadOutcome::empty(LyricsStatus::Unavailable));
+            if outcome.document.is_some() || outcome.status == LyricsStatus::Ambiguous {
+                return outcome;
+            }
+            if outcome.status != LyricsStatus::NoMatch {
+                failure = Some(outcome.status);
+            }
+        }
+        LoadOutcome::empty(failure.unwrap_or(LyricsStatus::NoMatch))
+    }
+
+    async fn online_from(&self, id: ProviderId, query: &Query, refresh: bool) -> LoadOutcome {
         if !refresh {
-            if let Some(hit) = self.cache.automatic(query) {
+            if let Some(hit) = self.cache.automatic_from(id, query) {
                 return hit
                     .map(Document::online)
                     .map(LoadOutcome::ready)
                     .unwrap_or_else(|| LoadOutcome::empty(LyricsStatus::NoMatch));
             }
         }
-        let provider = match &self.provider {
+        let providers = match &self.provider {
             Ok(p) => p,
             Err(e) => return LoadOutcome::empty((*e).into()),
         };
+        let Some(provider) = providers.iter().find(|provider| provider.id() == id) else {
+            return LoadOutcome::empty(LyricsStatus::Unavailable);
+        };
         match provider.lookup(query).await {
             Ok(Some(record)) if matching::assess(query, &record).trusted => {
-                if let Err(error) = self.cache.save_automatic(query, Some(record.clone())) {
+                if let Err(error) = self
+                    .cache
+                    .save_automatic_from(id, query, Some(record.clone()))
+                {
                     log::warn!("lyrics automatic cache save failed: {error:#}");
                 }
                 return LoadOutcome::ready(Document::online(record));
@@ -238,7 +284,7 @@ impl LyricsService {
         match matching::automatic(query, records) {
             Err(()) => LoadOutcome::empty(LyricsStatus::Ambiguous),
             Ok(record) => {
-                if let Err(error) = self.cache.save_automatic(query, record.clone()) {
+                if let Err(error) = self.cache.save_automatic_from(id, query, record.clone()) {
                     log::warn!("lyrics automatic cache save failed: {error:#}");
                 }
                 record
@@ -247,6 +293,62 @@ impl LyricsService {
                     .unwrap_or_else(|| LoadOutcome::empty(LyricsStatus::NoMatch))
             }
         }
+    }
+
+    pub async fn search(
+        &self,
+        query: &Query,
+        source: Option<ProviderId>,
+    ) -> Result<SearchOutcome, ProviderError> {
+        if !self.settings.enabled {
+            return Err(ProviderError::Unavailable);
+        }
+        let providers = self.provider.as_ref().map_err(|error| *error)?;
+        let mut tasks = tokio::task::JoinSet::new();
+        for (index, id) in self
+            .settings
+            .enabled_sources()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, id)| source.is_none_or(|source| source == *id))
+        {
+            let query = query.clone();
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id() == id)
+                .cloned();
+            tasks.spawn(async move {
+                let result = match provider {
+                    Some(provider) => {
+                        tokio::time::timeout(Duration::from_secs(8), provider.search(&query))
+                            .await
+                            .unwrap_or(Err(ProviderError::Unavailable))
+                    }
+                    None => Err(ProviderError::Unavailable),
+                };
+                (index, id, result)
+            });
+        }
+        if tasks.is_empty() {
+            return Err(ProviderError::Unavailable);
+        }
+        let mut results = Vec::new();
+        while let Some(result) = tasks.join_next().await {
+            results.push(result.map_err(|_| ProviderError::Unavailable)?);
+        }
+        results.sort_by_key(|(index, _, _)| *index);
+        let mut outcome = SearchOutcome::default();
+        for (_, id, result) in results {
+            match result {
+                Ok(mut records) => {
+                    records.truncate(6);
+                    outcome.records.extend(records);
+                }
+                Err(error) => outcome.failures.push((id, error)),
+            }
+        }
+        outcome.records = matching::ranked(query, outcome.records);
+        Ok(outcome)
     }
 }
 

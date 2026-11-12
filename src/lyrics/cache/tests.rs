@@ -343,3 +343,91 @@ fn pruning_counts_shared_query_references_and_exempts_pinned_bodies() {
     prune(&mut store);
     assert_eq!(store.queries.len(), 10_000);
 }
+
+#[test]
+fn provider_ids_scope_query_misses_bodies_and_remembered_choices() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cache.json");
+    let cache = LyricsCache::at(path.clone());
+    cache
+        .save_automatic_from(ProviderId::Lrclib, &query(), None)
+        .unwrap();
+    assert_eq!(
+        cache.automatic_from(ProviderId::Lrclib, &query()),
+        Some(None)
+    );
+    assert!(cache.automatic_from(ProviderId::Kugou, &query()).is_none());
+    let mut kugou = record(7);
+    kugou.source = ProviderId::Kugou;
+    let mut netease = record(7);
+    netease.source = ProviderId::Netease;
+    cache
+        .save_automatic_from(ProviderId::Kugou, &query(), Some(kugou.clone()))
+        .unwrap();
+    cache
+        .save_automatic_from(ProviderId::Netease, &query(), Some(netease))
+        .unwrap();
+    assert_eq!(cache.stats().0, 2);
+    assert_eq!(
+        cache
+            .automatic_from(ProviderId::Kugou, &query())
+            .unwrap()
+            .unwrap()
+            .source,
+        ProviderId::Kugou
+    );
+    assert_eq!(
+        cache
+            .automatic_from(ProviderId::Netease, &query())
+            .unwrap()
+            .unwrap()
+            .source,
+        ProviderId::Netease
+    );
+    let mut document = Document::online(kugou);
+    document.offset_ms = -800;
+    document.plain = true;
+    document.query = Some(query());
+    cache.remember(&media("a"), &document).unwrap();
+    cache.clear_automatic().unwrap();
+    cache.flush().unwrap();
+    let restored = LyricsCache::at(path);
+    let pin = restored.selected(&media("a")).unwrap();
+    assert_eq!(pin.origin, crate::lyrics::LyricsOrigin::Kugou);
+    assert_eq!(pin.offset_ms, -800);
+    assert!(pin.plain);
+    assert_eq!(restored.preference(&media("a")).provider, ProviderId::Kugou);
+    assert_eq!(restored.stats().0, 1);
+}
+
+#[test]
+fn legacy_lrclib_keys_and_preferences_remain_readable_without_provider_fields() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cache.json");
+    let record = record(7);
+    let body = digest(&("lrclib", &record));
+    let legacy = serde_json::json!({
+        "version":1,
+        "bodies":{body.clone():record},
+        "queries":{query_key(&query()):{"body":body,"saved":now()}},
+        "songs":{digest(&media("a")):{"media":media("a"),"body":body,"record_id":7,"query":query(),"plain":true,"offset_ms":750}}
+    });
+    assert!(legacy["songs"][digest(&media("a"))]
+        .get("provider")
+        .is_none());
+    assert!(legacy["bodies"][&body].get("source").is_none());
+    std::fs::write(&path, legacy.to_string()).unwrap();
+    let cache = LyricsCache::at(path);
+    assert_eq!(
+        cache
+            .automatic_from(ProviderId::Lrclib, &query())
+            .unwrap()
+            .unwrap()
+            .id,
+        7
+    );
+    let document = cache.selected(&media("a")).unwrap();
+    assert_eq!(document.origin, crate::lyrics::LyricsOrigin::Lrclib);
+    assert_eq!(document.offset_ms, 750);
+    assert!(document.plain);
+}

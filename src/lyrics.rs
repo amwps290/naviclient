@@ -1,14 +1,18 @@
 //! Lyrics providers are independent of audio sources and their credentials.
 
 pub(crate) mod cache;
+pub(crate) mod kugou;
 pub(crate) mod lrc;
 pub(crate) mod lrclib;
 pub(crate) mod matching;
+pub(crate) mod netease;
+pub(crate) mod online;
 pub(crate) mod provider;
 pub(crate) mod service;
+mod transport;
 
 use crate::models::{network::SourceConnection, Lyrics};
-use provider::{Query, Record};
+use provider::{ProviderId, Query, Record};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,12 +24,34 @@ pub(crate) enum LyricsPolicy {
     Manual,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LyricsSettings {
     pub enabled: bool,
     pub policy: LyricsPolicy,
     pub connection: SourceConnection,
+    pub sources: Vec<ProviderId>,
+}
+
+impl Default for LyricsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            policy: LyricsPolicy::default(),
+            connection: SourceConnection::default(),
+            // Upgrading preserves the set of services previously enabled.
+            sources: vec![ProviderId::Lrclib],
+        }
+    }
+}
+
+impl LyricsSettings {
+    pub fn enabled_sources(&self) -> Vec<ProviderId> {
+        ProviderId::ALL
+            .into_iter()
+            .filter(|id| self.sources.contains(id))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -33,6 +59,8 @@ pub(crate) enum LyricsOrigin {
     #[default]
     Native,
     Lrclib,
+    Kugou,
+    Netease,
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +93,11 @@ impl Document {
 
     pub fn online(record: Record) -> Self {
         let mut document = Self::native(record.lyrics());
-        document.origin = LyricsOrigin::Lrclib;
+        document.origin = match record.source {
+            ProviderId::Lrclib => LyricsOrigin::Lrclib,
+            ProviderId::Kugou => LyricsOrigin::Kugou,
+            ProviderId::Netease => LyricsOrigin::Netease,
+        };
         document.instrumental = record.instrumental;
         document.record = Some(record);
         document

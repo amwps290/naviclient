@@ -178,12 +178,17 @@ JavaScript runtime.
   now-playing rows; frequent actions stay inline while the full action set remains
   available from the row menu
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
-- Optional LRCLIB lyrics for any music source, with source-first, online-first,
-  and manual-only policies. Enable it in Settings → Lyrics; requests send song
-  title, artist, album and duration through an independent connection setting.
+- Optional LRCLIB, Kugou and NetEase Cloud Music lyrics for any music source,
+  with source-first, online-first, and manual-only policies. Enable online lyrics
+  and select individual sources in Settings → Lyrics; automatic lookup tries
+  LRCLIB → Kugou → NetEase, skipping disabled sources. Existing installations
+  keep LRCLIB as their only selected source until the new sources are enabled.
+  Requests send song metadata through an independent connection setting.
   Automatic matching checks titles, artists, performance versions and duration;
   Bilibili videos with no reliable artist metadata use manual search.
-- Search and preview alternative lyrics before applying them, remember a choice
+- Search all enabled sources together or select one source; candidates identify
+  their source and usable results remain available when another service fails.
+  Preview alternative lyrics before applying them, remember a choice
   per source and song, restore automatic selection, or display synced lyrics as
   plain text. Per-song timing adjustments apply to both highlighting and seeking.
   Remembered lyrics work offline, and clearing automatic cache keeps personal

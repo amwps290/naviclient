@@ -25,7 +25,7 @@ async fn utf8_queries_and_record_ids_use_public_metadata_only() {
         .lyrics()
         .is_synced());
     assert_eq!(client.search(&query).await.unwrap().len(), 1);
-    assert_eq!(client.fetch(7).await.unwrap().unwrap().id, 7);
+    assert_eq!(client.fetch(7, None).await.unwrap().unwrap().id, 7);
     let requests = server.requests();
     assert_eq!(
         requests.iter().map(|r| r.url.path()).collect::<Vec<_>>(),

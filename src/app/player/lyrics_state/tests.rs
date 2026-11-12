@@ -291,7 +291,9 @@ async fn native_http_failure_reaches_player_error_and_refresh_keeps_existing_con
     ] {
         let service = LyricsService {
             settings,
-            provider: Ok(Lrclib::test_client(online.url(""))),
+            provider: Ok(vec![crate::lyrics::online::Provider::Lrclib(
+                Lrclib::test_client(online.url("")),
+            )]),
             cache: LyricsCache::at(directory.path().join("cache.json")),
         };
         let mut state = LyricsState::default();

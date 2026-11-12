@@ -39,10 +39,10 @@ pub(crate) use style::theme::apply_app_theme;
 
 pub struct NavidromeApp {
     lyrics_cache: crate::lyrics::cache::LyricsCache,
-    lyrics_gate: crate::lyrics::lrclib::RequestGate,
+    lyrics_gate: HashMap<crate::lyrics::provider::ProviderId, crate::lyrics::lrclib::RequestGate>,
     lyrics_client: Option<(
         crate::models::network::NetworkRoute,
-        crate::lyrics::lrclib::Lrclib,
+        Vec<crate::lyrics::online::Provider>,
     )>,
     lyrics_ui: player::lyrics_search::LyricsUi,
     bilibili_accounts: HashMap<crate::source::SourceId, settings::bilibili_state::AccountStatus>,

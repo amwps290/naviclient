@@ -2,7 +2,7 @@
 
 use super::{
     matching,
-    provider::{Query, Record},
+    provider::{ProviderId, Query, Record},
     Document,
 };
 use crate::source::MediaKey;
@@ -74,6 +74,8 @@ pub(crate) struct Preference {
     pub body: Option<String>,
     #[serde(default)]
     pub record_id: Option<u64>,
+    #[serde(default)]
+    pub provider: ProviderId,
     pub query: Option<Query>,
     pub plain: bool,
     pub offset_ms: i64,
@@ -104,6 +106,15 @@ fn query_key(query: &Query) -> String {
         matching::normalize(&query.album),
         query.duration,
     ))
+}
+
+fn provider_query_key(provider: ProviderId, query: &Query) -> String {
+    // Keep LRCLIB v1 keys readable after the multi-provider upgrade.
+    if provider == ProviderId::Lrclib {
+        query_key(query)
+    } else {
+        digest(&(provider.key(), query_key(query)))
+    }
 }
 
 impl Default for LyricsCache {
@@ -162,7 +173,10 @@ impl LyricsCache {
             let record = store.bodies.get(preference.body.as_ref()?)?.clone();
             Some((preference, record))
         })?;
-        if !record.usable() || preference.record_id.is_some_and(|id| id != record.id) {
+        if !record.usable()
+            || record.source != preference.provider
+            || preference.record_id.is_some_and(|id| id != record.id)
+        {
             return None;
         }
         let mut document = Document::online((*record).clone());
@@ -174,8 +188,8 @@ impl LyricsCache {
     }
 
     /// None means stale/absent; Some(None) is a recent complete no-match query.
-    pub fn automatic(&self, query: &Query) -> Option<Option<Record>> {
-        let key = query_key(query);
+    pub fn automatic_from(&self, provider: ProviderId, query: &Query) -> Option<Option<Record>> {
+        let key = provider_query_key(provider, query);
         let (hit, record) = self.writer.read(|store| {
             let hit = store.queries.get(&key)?.clone();
             let record = hit
@@ -197,19 +211,32 @@ impl LyricsCache {
         match &hit.body {
             Some(_) => record
                 .as_ref()
-                .filter(|record| matching::assess(query, record).trusted)
+                .filter(|record| {
+                    record.source == provider && matching::assess(query, record).trusted
+                })
                 .map(|record| (**record).clone())
                 .map(Some),
             None => Some(None),
         }
     }
 
-    pub fn save_automatic(&self, query: &Query, record: Option<Record>) -> anyhow::Result<()> {
+    pub fn save_automatic_from(
+        &self,
+        provider: ProviderId,
+        query: &Query,
+        record: Option<Record>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            record
+                .as_ref()
+                .is_none_or(|record| record.source == provider),
+            "lyrics cache provider mismatch"
+        );
         let record = record.map(|record| {
             let bytes = serde_json::to_vec(&record).map_or(0, |body| body.len());
-            (digest(&("lrclib", &record)), record, bytes)
+            (digest(&(provider.key(), &record)), record, bytes)
         });
-        let key = query_key(query);
+        let key = provider_query_key(provider, query);
         self.change(|store| {
             let body = record.map(|(key, record, bytes)| {
                 store.insert_body(key.clone(), record, bytes);
@@ -223,7 +250,11 @@ impl LyricsCache {
         let key = digest(media);
         let record = document.record.as_ref().map(|record| {
             let bytes = serde_json::to_vec(record).map_or(0, |body| body.len());
-            (digest(&("lrclib", record)), record.clone(), bytes)
+            (
+                digest(&(record.source.key(), record)),
+                record.clone(),
+                bytes,
+            )
         });
         self.change(|store| {
             let preference = store.songs.entry(key).or_default();
@@ -233,6 +264,7 @@ impl LyricsCache {
             preference.offset_ms = document.offset_ms;
             if let Some((body, record, bytes)) = record {
                 preference.record_id = Some(record.id);
+                preference.provider = record.source;
                 preference.body = Some(body.clone());
                 store.insert_body(body, record, bytes);
             }
@@ -252,6 +284,16 @@ impl LyricsCache {
 
     pub fn stats(&self) -> (usize, usize) {
         self.writer.read(|store| (store.bodies.len(), store.bytes))
+    }
+
+    #[cfg(test)]
+    pub fn automatic(&self, query: &Query) -> Option<Option<Record>> {
+        self.automatic_from(ProviderId::Lrclib, query)
+    }
+
+    #[cfg(test)]
+    pub fn save_automatic(&self, query: &Query, record: Option<Record>) -> anyhow::Result<()> {
+        self.save_automatic_from(ProviderId::Lrclib, query, record)
     }
 }
 

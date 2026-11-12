@@ -113,6 +113,10 @@ fn lyrics_settings_upgrade_disabled_and_survive_reload() {
     let mut config = read_config_at(&path);
     assert!(!config.lyrics.enabled);
     assert_eq!(
+        config.lyrics.sources,
+        [crate::lyrics::provider::ProviderId::Lrclib]
+    );
+    assert_eq!(
         config.lyrics.policy,
         crate::lyrics::LyricsPolicy::SourceFirst
     );
@@ -123,6 +127,10 @@ fn lyrics_settings_upgrade_disabled_and_survive_reload() {
     assert!(!config.show_lyrics_translation);
     config.lyrics.enabled = true;
     config.lyrics.policy = crate::lyrics::LyricsPolicy::Manual;
+    config.lyrics.sources = vec![
+        crate::lyrics::provider::ProviderId::Kugou,
+        crate::lyrics::provider::ProviderId::Netease,
+    ];
     config.lyrics.connection = crate::models::network::SourceConnection::Direct;
     super::super::json::write_json_atomic(&path, &config, "config").unwrap();
     let restored = read_config_at(&path);

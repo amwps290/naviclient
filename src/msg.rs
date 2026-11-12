@@ -154,7 +154,7 @@ pub enum Msg {
     LyricsSearch {
         request: LibraryRequest,
         result:
-            Result<Vec<crate::lyrics::provider::Record>, crate::lyrics::provider::ProviderError>,
+            Result<crate::lyrics::provider::SearchOutcome, crate::lyrics::provider::ProviderError>,
     },
     Cover {
         request: CoverRequest,

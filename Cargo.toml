@@ -34,6 +34,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"
 url = "2"
 unicode-normalization = "0.1"
 biquad = "0.6.0"
+base64 = "0.22"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # 系统通知：D-Bus org.freedesktop.Notifications（服务器端显示封面图）。
