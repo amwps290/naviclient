@@ -11,10 +11,12 @@ mod audio;
 mod bilibili_check;
 mod bilibili_login_web;
 mod config;
+mod diagnostics;
 mod global_shortcuts;
 #[cfg(test)]
 mod i18n_tests;
 mod import;
+mod logging;
 mod lyrics;
 mod media_session;
 mod models;
@@ -34,71 +36,10 @@ mod typography;
 mod ui_input_tests;
 mod vinyl;
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-
-use anyhow::Context as _;
 use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
 
 use crate::models::ThemePreference;
-
-const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
-
-struct LogWriter {
-    file: File,
-    mirror_to_stderr: bool,
-}
-
-impl Write for LogWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.file.write_all(buffer)?;
-        if self.mirror_to_stderr {
-            let _ = io::stderr().write_all(buffer);
-        }
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.file.flush()?;
-        if self.mirror_to_stderr {
-            let _ = io::stderr().flush();
-        }
-        Ok(())
-    }
-}
-
-fn init_logging() -> anyhow::Result<std::path::PathBuf> {
-    let path = config::log_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create log directory")?;
-    }
-    if path
-        .metadata()
-        .is_ok_and(|metadata| metadata.len() >= MAX_LOG_BYTES)
-    {
-        let old_path = path.with_extension("log.old");
-        let _ = fs::remove_file(&old_path);
-        fs::rename(&path, old_path).context("failed to rotate log file")?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .context("failed to open log file")?;
-    let writer = LogWriter {
-        file,
-        mirror_to_stderr: cfg!(debug_assertions),
-    };
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,navidrome_client=debug"),
-    )
-    .format_timestamp_millis()
-    .target(env_logger::Target::Pipe(Box::new(writer)))
-    .try_init()
-    .context("failed to initialize logger")?;
-    Ok(path)
-}
 
 /// 渲染函数在 Debug 构建下会占用大量栈空间（`render_content` 单帧约 700 KB），
 /// 默认 1 MB 的主线程栈会在首次渲染时溢出。把应用跑在带大栈的专用线程上。
@@ -111,9 +52,13 @@ fn main() {
     if bilibili_login_web::try_run() {
         return;
     }
-    match init_logging() {
-        Ok(path) => log::info!("application starting; log_file={}", path.display()),
-        Err(error) => eprintln!("failed to initialize file logging: {error:#}"),
+    let file_logging = config::load().log_to_file;
+    match logging::init(file_logging) {
+        Ok(path) => log::info!(
+            "application starting; file_logging={file_logging} log_file={}",
+            path.display()
+        ),
+        Err(error) => eprintln!("failed to initialize logging: {error:#}"),
     }
 
     // 单实例：若已有实例在运行，通知其激活窗口后退出。

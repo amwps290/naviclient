@@ -97,6 +97,9 @@ fn normalize_server_url(url: &str) -> String {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
+    /// Persisted independently of the in-memory diagnostic log viewer.
+    #[serde(default = "default_true")]
+    pub log_to_file: bool,
     #[serde(default)]
     pub lyrics: crate::lyrics::LyricsSettings,
     /// Shared proxies and transport choices, independent of provider credentials.
@@ -163,6 +166,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            log_to_file: default_true(),
             lyrics: Default::default(),
             network: Default::default(),
             server_url: "http://127.0.0.1:4533".to_string(),

@@ -40,6 +40,7 @@ impl NavidromeApp {
         }
         self.maybe_save_session();
         changed |= self.poll_messages(window, cx);
+        changed |= self.poll_logs(window, cx);
         self.release_unused_cover_textures(window, cx);
         // 冲刷排队的 Toast：gpui-component 的通知系统由窗口 Root
         // 托管（自动消失、可关闭、主题化），需要 Window 句柄。

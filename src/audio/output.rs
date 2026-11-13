@@ -12,6 +12,12 @@ use super::{set_state, PlaybackState};
 
 const OUTPUT_BUFFER_FRAMES: u32 = 4096;
 
+fn log_output_error(error: cpal::StreamError) {
+    // Rodio's default callback writes to stderr, which is invisible in Windows
+    // release builds and bypasses the application's persistent log file.
+    log::error!("audio output stream error: {error}; the output stream may need reopening after sleep or a device change");
+}
+
 /// 可选择的输出设备，保留平台原始名称以供配置和设备打开时匹配。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputDevice {
@@ -125,7 +131,8 @@ fn open_named_sink(
 ) -> Result<(rodio::MixerDeviceSink, Option<String>), anyhow::Error> {
     let builder = DeviceSinkBuilder::from_device(device)
         .map_err(|error| anyhow!("{error}"))?
-        .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES));
+        .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
+        .with_error_callback(log_output_error);
     let sink = builder
         .open_sink_or_fallback()
         .map_err(|error| anyhow!("{error}"))?;
@@ -147,6 +154,7 @@ fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     match DeviceSinkBuilder::from_default_device().and_then(|builder| {
         builder
             .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
+            .with_error_callback(log_output_error)
             .open_sink_or_fallback()
     }) {
         Ok(sink) => {
@@ -155,9 +163,45 @@ fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
         }
         Err(error) => {
             log::warn!("fixed-buffer audio output failed, trying system default buffer: {error}");
-            DeviceSinkBuilder::open_default_sink()
+            open_default_sink_with_logging()
         }
     }
+}
+
+fn open_default_sink_with_logging() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    // Preserve Rodio's default-buffer/device fallback while installing our
+    // callback on every stream, including alternate devices.
+    DeviceSinkBuilder::from_default_device()
+        .and_then(|builder| builder.with_error_callback(log_output_error).open_stream())
+        .or_else(|original_error| {
+            let devices = match cpal::default_host().output_devices() {
+                Ok(devices) => devices,
+                Err(error) => {
+                    log::warn!("could not enumerate fallback audio devices: {error}");
+                    return Err(original_error);
+                }
+            };
+            devices
+                .filter(|device| {
+                    device
+                        .description()
+                        .map(|description| {
+                            description.driver().is_some_and(|driver| driver != "null")
+                        })
+                        .unwrap_or(false)
+                })
+                .find_map(|device| {
+                    DeviceSinkBuilder::from_device(device)
+                        .and_then(|builder| {
+                            builder
+                                .with_error_callback(log_output_error)
+                                .open_sink_or_fallback()
+                        })
+                        .ok()
+                })
+                .ok_or(original_error)
+        })
 }
 
 #[cfg(test)]

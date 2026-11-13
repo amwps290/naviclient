@@ -141,6 +141,9 @@ impl PlaybackWorker {
         let snapshot =
             self.current
                 .snapshot(device_snapshot, self.preparation.state(), Instant::now());
+        let mut diagnostic_state = snapshot.playback.clone();
+        diagnostic_state.command_serial = self.command_serial;
+        self.diagnostics.observe(&diagnostic_state, Instant::now());
         if self
             .current
             .take_terminal_log(device_snapshot.empty, self.preparation.preparing())

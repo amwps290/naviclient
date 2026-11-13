@@ -145,6 +145,7 @@ impl NavidromeApp {
             .collect();
 
         let mut app = Self {
+            logs: crate::app::settings::logs::LogViewer::new(window, cx),
             lyrics_cache: Default::default(),
             lyrics_gate: Default::default(),
             lyrics_client: None,
@@ -208,6 +209,7 @@ impl NavidromeApp {
         };
         app.state.playback_modes = app.config.playback_modes;
         app.subscribe_lyrics_inputs(cx);
+        app.subscribe_log_search(cx);
         // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
         {
             let prune_config = app.config.clone();

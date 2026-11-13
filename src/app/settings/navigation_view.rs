@@ -54,6 +54,12 @@ impl SettingsSection {
                 "settings-nav-shortcuts",
                 AppIcon::Keyboard,
             ),
+            Self::Logs => (
+                t!("Logs"),
+                t!("View recent logs and playback details to troubleshoot problems."),
+                "settings-nav-logs",
+                AppIcon::Queue,
+            ),
         };
         SettingsSectionPresentation {
             title: title.into(),
@@ -105,6 +111,9 @@ impl NavidromeApp {
                 }
                 this.cancel_shortcut_recording();
                 this.state.settings.section = section;
+                if section == SettingsSection::Logs {
+                    this.logs.refresh();
+                }
                 this.settings_scroll.scroll_to_top_of_item(0);
                 cx.notify();
             }));

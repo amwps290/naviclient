@@ -380,6 +380,16 @@ an already-ended track stays stopped instead of advancing its old queue.
 Diagnostic logs are written to the platform local data directory under
 `logs/navidrome-client.log`. The file rotates to `navidrome-client.log.old` at
 5 MiB. Stream URLs are logged without authentication query parameters.
+Open **Settings → Logs** to view recent entries, search by keyword, filter
+warnings/errors or playback events, and copy a report with the current playback
+snapshot. The viewer refreshes every two seconds while visible; turn off auto
+refresh to select text. **Write logs to file** defaults on, is saved locally and
+takes effect immediately. Turning it off keeps recent logs available in memory
+without adding to the file. **Open log directory** opens the folder in the file
+manager. File rotation also runs during playback once the file reaches 5 MiB.
+Audio output stream errors and persistent playback stalls are also recorded,
+including output format, position, buffering and worker state, to help diagnose
+sleep/wake and device changes. Logging does not automatically repair the output.
 
 ## Translations
 

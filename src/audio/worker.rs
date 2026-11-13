@@ -151,6 +151,7 @@ struct PlaybackWorker {
     rx: Receiver<WorkerCommand>,
     volume: f32,
     command_serial: u64,
+    diagnostics: crate::diagnostics::PlaybackDiagnostics,
 }
 
 impl PlaybackWorker {
@@ -188,6 +189,7 @@ impl PlaybackWorker {
             rx,
             volume,
             command_serial,
+            diagnostics: Default::default(),
         }
     }
 

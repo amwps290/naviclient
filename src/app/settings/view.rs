@@ -14,6 +14,7 @@ impl NavidromeApp {
             SettingsSection::Desktop => vec![self.render_desktop_settings(cx)],
             SettingsSection::Appearance => self.render_appearance_settings(cx),
             SettingsSection::Shortcuts => vec![self.render_shortcut_settings(cx)],
+            SettingsSection::Logs => vec![self.render_log_settings(cx)],
         };
         v_flex()
             .w_full()

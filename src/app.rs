@@ -38,6 +38,7 @@ pub(crate) use recommendations::radio_state::RadioRequest;
 pub(crate) use style::theme::apply_app_theme;
 
 pub struct NavidromeApp {
+    logs: settings::logs::LogViewer,
     lyrics_cache: crate::lyrics::cache::LyricsCache,
     lyrics_gate: HashMap<crate::lyrics::provider::ProviderId, crate::lyrics::lrclib::RequestGate>,
     lyrics_client: Option<(
