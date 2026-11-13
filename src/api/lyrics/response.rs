@@ -2,7 +2,88 @@
 
 use serde_json::Value;
 
-use crate::models::{LyricLine, Lyrics};
+use crate::models::{LyricLine, LyricSegment, Lyrics, WordTimedLine};
+
+fn adjusted_timestamp(time: i64, offset: i64) -> u64 {
+    (i128::from(time) + i128::from(offset)).clamp(0, i128::from(u64::MAX)) as u64
+}
+
+fn parse_word_line(
+    variant: &Value,
+    index: usize,
+    line: &Value,
+    offset: i64,
+) -> Option<WordTimedLine> {
+    if variant.get("synced").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let agents = variant.get("agents").and_then(Value::as_array);
+    let main_id = agents.and_then(|agents| {
+        let mut main = agents
+            .iter()
+            .filter(|agent| agent.get("role").and_then(Value::as_str) == Some("main"));
+        let id = main.next()?.get("id")?.as_str()?;
+        main.next().is_none().then_some(id)
+    });
+    if agents.is_some() && main_id.is_none() {
+        return None;
+    }
+    let cue_line = variant
+        .get("cueLine")?
+        .as_array()?
+        .iter()
+        .find(|cue_line| {
+            cue_line.get("index").and_then(Value::as_u64) == Some(index as u64)
+                && cue_line.get("agentId").and_then(Value::as_str) == main_id
+        })?;
+    let text = cue_line.get("value")?.as_str()?.to_string();
+    let cues = cue_line.get("cue")?.as_array()?;
+    if cues.is_empty() || cues.len() > 4096 {
+        return None;
+    }
+    let start = cue_line
+        .get("start")
+        .or_else(|| line.get("start"))?
+        .as_i64()?;
+    let end = cue_line
+        .get("end")
+        .or_else(|| line.get("end"))
+        .and_then(Value::as_i64);
+    if end.is_some_and(|end| end < start) {
+        return None;
+    }
+    let mut segments = Vec::with_capacity(cues.len());
+    let has_ends = cues.first()?.get("end").is_some();
+    for cue in cues {
+        let begin = usize::try_from(cue.get("byteStart")?.as_u64()?).ok()?;
+        let stop = usize::try_from(cue.get("byteEnd")?.as_u64()?)
+            .ok()?
+            .checked_add(1)?;
+        if text.get(begin..stop)? != cue.get("value")?.as_str()? {
+            return None;
+        }
+        let start = cue.get("start")?.as_i64()?;
+        let end = match cue.get("end") {
+            Some(value) => Some(value.as_i64()?),
+            None => None,
+        };
+        if end.is_some() != has_ends || end.is_some_and(|end| end < start) {
+            return None;
+        }
+        segments.push(LyricSegment {
+            text_range: begin..stop,
+            start_ms: adjusted_timestamp(start, offset),
+            end_ms: end.map(|end| adjusted_timestamp(end, offset)),
+        });
+    }
+    let words = WordTimedLine {
+        text,
+        start_ms: adjusted_timestamp(start, offset),
+        end_ms: end.map(|end| adjusted_timestamp(end, offset)),
+        segments,
+    };
+    words.is_valid().then_some(words)
+}
 
 /// 解析单个 structuredLyrics 变体为歌词行（不含翻译）。
 fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
@@ -12,7 +93,7 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
         .unwrap_or_default();
     let raw_lines = variant.get("line")?.as_array()?;
     let mut lines = Vec::with_capacity(raw_lines.len());
-    for line in raw_lines {
+    for (index, line) in raw_lines.iter().enumerate() {
         let start_ms = line.get("start").and_then(Value::as_i64).map(|start| {
             let adjusted = i128::from(start) + i128::from(offset);
             adjusted.clamp(0, i128::from(u64::MAX)) as u64
@@ -30,10 +111,24 @@ fn parse_lyric_lines(variant: &Value) -> Option<Vec<LyricLine>> {
             continue;
         }
 
+        let word_timing = parse_word_line(variant, index, line, offset);
         lines.push(LyricLine {
-            start_ms,
+            start_ms: word_timing
+                .as_ref()
+                .map(|words| words.start_ms)
+                .or(start_ms),
+            end_ms: word_timing
+                .as_ref()
+                .and_then(|words| words.end_ms)
+                .or_else(|| {
+                    line.get("end")
+                        .and_then(Value::as_i64)
+                        .map(|end| adjusted_timestamp(end, offset))
+                        .filter(|end| start_ms.is_some_and(|start| *end >= start))
+                }),
             text,
             translation: None,
+            word_timing,
         });
     }
     Some(lines)
@@ -138,11 +233,28 @@ pub(super) fn parse_structured_lyrics(body: &Value) -> Option<Lyrics> {
         .iter()
         .filter(|lyrics| non_empty_line_count(lyrics) > 0)
         .collect::<Vec<_>>();
-    let selected = pick_variant(&usable)?;
+    let primary_candidates: Vec<_> = usable
+        .iter()
+        .copied()
+        .filter(|variant| {
+            matches!(
+                variant.get("kind").and_then(Value::as_str),
+                None | Some("") | Some("main")
+            )
+        })
+        .collect();
+    let selected = pick_variant(&primary_candidates)?;
+    let typed = usable.iter().any(|variant| variant.get("kind").is_some());
     // 翻译候选：不同语言且行非空；同分时同样优先靠前者。
     let translation_candidates: Vec<&Value> = usable
         .into_iter()
-        .filter(|variant| variant_language(variant) != variant_language(selected))
+        .filter(|variant| {
+            if typed {
+                variant.get("kind").and_then(Value::as_str) == Some("translation")
+            } else {
+                variant_language(variant) != variant_language(selected)
+            }
+        })
         .collect();
     let translation_variant = pick_variant(&translation_candidates);
     let mut lines = parse_lyric_lines(selected)?;
@@ -189,6 +301,7 @@ pub(super) fn parse_plain_lyrics(body: &Value) -> Option<Lyrics> {
                 start_ms: None,
                 text: line.to_string(),
                 translation: None,
+                ..Default::default()
             })
             .collect(),
     })

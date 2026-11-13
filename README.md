@@ -178,6 +178,12 @@ JavaScript runtime.
   now-playing rows; frequent actions stay inline while the full action set remains
   available from the row menu
 - Dedicated now-playing screen with Navidrome lyrics and synced lyric highlighting
+- Word-by-word highlighting from OpenSubsonic songLyrics v2 and NetEase YRC,
+  with timed foreground fill and ordinary line highlighting as a fallback.
+  It is enabled by default; toggle it in Settings → Lyrics or the lyrics actions
+  menu. Enable NetEase as an online source, search and select a word-timed
+  candidate when the current lyrics have only line timing. The candidate list
+  can show only word-timed results. Saved choices and timing adjustments work offline.
 - Optional LRCLIB, Kugou and NetEase Cloud Music lyrics for any music source,
   with source-first, online-first, and manual-only policies. Enable online lyrics
   and select individual sources in Settings → Lyrics; automatic lookup tries

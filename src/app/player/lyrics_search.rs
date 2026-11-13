@@ -44,6 +44,7 @@ pub(in crate::app) struct LyricsUi {
     pub remember: bool,
     pub plain: bool,
     pub searched: bool,
+    pub word_only: bool,
     pub candidates_scroll: ScrollHandle,
     task: Option<tokio::task::JoinHandle<()>>,
     close_requested: bool,
@@ -69,6 +70,7 @@ impl LyricsUi {
             remember: true,
             plain: false,
             searched: false,
+            word_only: false,
             candidates_scroll: ScrollHandle::new(),
             task: None,
             close_requested: false,
@@ -192,6 +194,7 @@ impl NavidromeApp {
         self.lyrics_ui.source = None;
         self.lyrics_ui.failures.clear();
         self.lyrics_ui.searched = false;
+        self.lyrics_ui.word_only = false;
         self.lyrics_ui.remember = true;
         self.lyrics_ui.plain = false;
         self.lyrics_ui

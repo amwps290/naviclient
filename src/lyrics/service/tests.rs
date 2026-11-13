@@ -50,6 +50,42 @@ fn native_source(server: &Server) -> MusicSource {
 }
 
 #[tokio::test]
+async fn server_word_capabilities_reach_the_native_lyrics_request() {
+    let native = Server::new(vec![success(
+        json!({"subsonic-response":{"status":"ok","lyricsList":{"structuredLyrics":[{
+            "kind":"main","synced":true,"line":[{"start":1000,"end":2000,"value":"你好"}],
+            "cueLine":[{"index":0,"start":1000,"end":2000,"value":"你好","cue":[
+                {"start":1000,"end":1500,"value":"你","byteStart":0,"byteEnd":2},
+                {"start":1500,"end":2000,"value":"好","byteStart":3,"byteEnd":5}
+            ]}]
+        }]}}}),
+    )]);
+    let online = Server::new(vec![]);
+    let directory = tempfile::tempdir().unwrap();
+    let song = song();
+    let outcome = service(&online, cache(&directory), LyricsPolicy::SourceFirst, false)
+        .load(
+            &song,
+            &song.media_key().unwrap(),
+            Some(&native_source(&native)),
+            crate::models::ServerCapabilities {
+                structured_lyrics: CapabilitySupport::Supported,
+                enhanced_lyrics: CapabilitySupport::Supported,
+                ..Default::default()
+            },
+            false,
+            |_, _| {},
+        )
+        .await;
+    assert!(outcome.document.unwrap().lyrics.has_word_timing());
+    assert!(online.requests().is_empty());
+    assert!(native.requests()[0]
+        .url
+        .query_pairs()
+        .any(|(key, value)| key == "enhanced" && value == "true"));
+}
+
+#[tokio::test]
 async fn native_http_failure_stays_an_error_when_online_is_disabled_or_manual() {
     let dir = tempfile::tempdir().unwrap();
     let online = Server::new(vec![]);

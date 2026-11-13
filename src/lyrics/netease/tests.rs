@@ -34,9 +34,9 @@ async fn search_hydrates_synced_lyrics_and_fetch_verifies_metadata() {
             .collect::<Vec<_>>(),
         [
             "/api/search/get/web",
-            "/api/song/lyric",
+            "/api/song/lyric/v1",
             "/api/song/detail",
-            "/api/song/lyric"
+            "/api/song/lyric/v1"
         ]
     );
     assert_eq!(
@@ -135,4 +135,92 @@ async fn live_netease_search_and_fetch_chinese_lyrics() {
     assert_eq!(fetched.source, ProviderId::Netease);
     assert_eq!(fetched.id, record.id);
     assert!(fetched.lyrics().is_synced());
+}
+
+#[tokio::test]
+async fn enhanced_lyrics_preserve_yrc_and_lrc_and_work_without_lrc() {
+    for lrc in ["[00:01]fallback", ""] {
+        let server = Server::new(vec![
+            success(json!({"code":200,"songs":[song(7)]})),
+            success(
+                json!({"code":200,"lrc":{"lyric":lrc},"yrc":{"lyric":"[1000,1000](1000,500,0)你(1500,500,0)好"}}),
+            ),
+        ]);
+        let record = Netease::test_client(server.url(""))
+            .fetch(7, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(record.lyrics().has_word_timing());
+        assert_eq!(record.lyrics().lines[0].text, "你好");
+        assert_eq!(
+            record.synced_lyrics.as_deref(),
+            (!lrc.is_empty()).then_some(lrc)
+        );
+        let request = &server.requests()[1];
+        assert_eq!(request.url.path(), "/api/song/lyric/v1");
+        assert!(request
+            .url
+            .query_pairs()
+            .any(|(key, value)| key == "yv" && value == "0"));
+    }
+}
+
+#[tokio::test]
+async fn enhanced_endpoint_failure_falls_back_to_legacy_but_rate_limits_do_not() {
+    let server = Server::new(vec![
+        success(json!({"code":200,"songs":[song(7)]})),
+        (502, "offline".into()),
+        success(json!({"code":200,"lrc":{"lyric":"[00:01]fallback"}})),
+    ]);
+    let record = Netease::test_client(server.url(""))
+        .fetch(7, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.lyrics().lines[0].text, "fallback");
+    assert_eq!(server.requests()[2].url.path(), "/api/song/lyric");
+    let server = Server::new(vec![
+        success(json!({"code":200,"songs":[song(7)]})),
+        (429, "busy".into()),
+    ]);
+    assert!(matches!(
+        Netease::test_client(server.url("")).fetch(7, None).await,
+        Err(ProviderError::RateLimited { .. })
+    ));
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[tokio::test]
+#[ignore = "uses the live anonymous NetEase word lyrics service"]
+async fn live_netease_word_lyrics() {
+    let record = Netease::new(&NetworkRoute::Direct, RequestGate::default())
+        .unwrap()
+        .fetch(66842, None)
+        .await
+        .unwrap()
+        .unwrap();
+    let lyrics = record.lyrics();
+    assert!(lyrics.has_word_timing());
+    let timed_lines = lyrics
+        .lines
+        .iter()
+        .filter_map(|line| line.word_timing.as_ref())
+        .count();
+    let segments: usize = lyrics
+        .lines
+        .iter()
+        .filter_map(|line| line.word_timing.as_ref())
+        .map(|words| words.segments.len())
+        .sum();
+    println!("verified YRC: {timed_lines} timed lines, {segments} timed segments");
+    assert!(
+        timed_lines >= 20 && segments >= 200,
+        "expected the vocal timeline, not just a metadata cue"
+    );
+    assert!(lyrics
+        .lines
+        .iter()
+        .filter_map(|line| line.word_timing.as_ref())
+        .all(|words| words.is_valid()));
 }

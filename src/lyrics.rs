@@ -10,6 +10,7 @@ pub(crate) mod online;
 pub(crate) mod provider;
 pub(crate) mod service;
 mod transport;
+pub(crate) mod yrc;
 
 use crate::models::{network::SourceConnection, Lyrics};
 use provider::{ProviderId, Query, Record};
@@ -31,6 +32,7 @@ pub(crate) struct LyricsSettings {
     pub policy: LyricsPolicy,
     pub connection: SourceConnection,
     pub sources: Vec<ProviderId>,
+    pub word_timing: bool,
 }
 
 impl Default for LyricsSettings {
@@ -41,6 +43,7 @@ impl Default for LyricsSettings {
             connection: SourceConnection::default(),
             // Upgrading preserves the set of services previously enabled.
             sources: vec![ProviderId::Lrclib],
+            word_timing: true,
         }
     }
 }
@@ -106,6 +109,21 @@ impl Document {
     pub fn display_lyrics(&self) -> Lyrics {
         let mut lyrics = self.lyrics.clone();
         for line in &mut lyrics.lines {
+            line.end_ms = if self.plain {
+                None
+            } else {
+                line.end_ms.map(|ms| adjusted_time(ms, self.offset_ms))
+            };
+            if self.plain {
+                line.word_timing = None;
+            } else if let Some(words) = &mut line.word_timing {
+                words.start_ms = adjusted_time(words.start_ms, self.offset_ms);
+                words.end_ms = words.end_ms.map(|ms| adjusted_time(ms, self.offset_ms));
+                for segment in &mut words.segments {
+                    segment.start_ms = adjusted_time(segment.start_ms, self.offset_ms);
+                    segment.end_ms = segment.end_ms.map(|ms| adjusted_time(ms, self.offset_ms));
+                }
+            }
             line.start_ms = if self.plain {
                 None
             } else {

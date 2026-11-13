@@ -2,6 +2,11 @@
 # %{name} 是插值占位符，翻译时必须原样保留（含数量）。
 # 新增文案：先在源码写 t!("...")，再在三个语言文件里各补一条。
 
+"Word-by-word lyrics": "逐字歌词"
+"Highlight words when timing is available; otherwise follow whole lines.": "有逐字时间时逐字高亮，否则按行跟随。"
+"Only word-by-word lyrics": "仅显示逐字歌词"
+"No word-by-word lyrics found.": "没有找到逐字歌词。"
+
 "%{count} tracks selected for today": "今日已精选 %{count} 首"
 "A balanced mix of favorites, familiar artists, and new discoveries.": "融合收藏、熟悉艺人与新发现的均衡歌单。"
 "Create and play": "生成并播放"

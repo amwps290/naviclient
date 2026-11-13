@@ -1,4 +1,29 @@
 use super::*;
+
+#[test]
+fn word_lyrics_and_offsets_survive_restart_without_online_requests() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("word-cache.json");
+    let cache = LyricsCache::at(path.clone());
+    let mut record = record(7);
+    record.source = ProviderId::Netease;
+    record.yrc_lyrics = Some("[1000,1000](1000,500,0)你(1500,500,0)好".into());
+    let mut document = Document::online(record);
+    document.offset_ms = 250;
+    cache.remember(&media("word"), &document).unwrap();
+    cache.flush().unwrap();
+    drop(cache);
+    let restored = LyricsCache::at(path).selected(&media("word")).unwrap();
+    let words = restored
+        .display_lyrics()
+        .lines
+        .remove(0)
+        .word_timing
+        .unwrap();
+    assert_eq!(words.text, "你好");
+    assert_eq!(words.segments[0].start_ms, 1250);
+    assert_eq!(words.segments[1].end_ms, Some(2250));
+}
 use crate::source::{ProviderKind, SourceId};
 
 fn media(source: &str) -> MediaKey {

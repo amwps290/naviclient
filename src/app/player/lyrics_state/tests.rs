@@ -16,6 +16,7 @@ fn lyrics(text: &str) -> Lyrics {
             text: text.to_string(),
             start_ms: Some(0),
             translation: None,
+            ..Default::default()
         }],
         ..Lyrics::default()
     }

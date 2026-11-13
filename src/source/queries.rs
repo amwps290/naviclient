@@ -190,7 +190,11 @@ impl MusicSource {
         self.subsonic()?.edit_playlist(edit).await
     }
 
-    pub async fn lyrics(&self, song: &Song, support: CapabilitySupport) -> Result<Lyrics> {
+    pub async fn lyrics(
+        &self,
+        song: &Song,
+        support: impl Into<crate::models::ServerCapabilities>,
+    ) -> Result<Lyrics> {
         self.subsonic()?.lyrics(song, support).await
     }
 

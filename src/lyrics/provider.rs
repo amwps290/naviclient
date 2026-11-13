@@ -90,6 +90,8 @@ pub(crate) struct Record {
     pub instrumental: bool,
     pub plain_lyrics: Option<String>,
     pub synced_lyrics: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yrc_lyrics: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -131,6 +133,11 @@ impl Record {
             .map(super::lrc::parse)
             .filter(|l| l.is_synced())
             .unwrap_or_else(|| super::lrc::plain(self.plain_lyrics.as_deref().unwrap_or_default()));
+        if let Some(words) = self.yrc_lyrics.as_deref().map(super::yrc::parse) {
+            if words.has_word_timing() || lyrics.lines.is_empty() && !words.lines.is_empty() {
+                lyrics = words;
+            }
+        }
         lyrics.display_title = Some(self.track_name.clone());
         lyrics.display_artist = Some(self.artist_name.clone());
         lyrics

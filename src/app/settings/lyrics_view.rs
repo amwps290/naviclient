@@ -17,6 +17,18 @@ impl LyricsPolicy {
 }
 
 impl NavidromeApp {
+    pub(in crate::app) fn set_word_lyrics(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        let mut next = self.config.clone();
+        next.lyrics.word_timing = enabled;
+        match config::save(&next) {
+            Ok(()) => {
+                self.config = next;
+            }
+            Err(error) => self.notify_error(t!("Could not save lyrics: %{error}", error = error)),
+        }
+        cx.notify();
+    }
+
     pub(in crate::app) fn change_lyrics_settings(
         &mut self,
         change: impl FnOnce(&mut LyricsSettings),
@@ -59,6 +71,11 @@ impl NavidromeApp {
         let policy = self.config.lyrics.policy;
         let (count, bytes) = self.lyrics_cache.stats();
         v_flex().gap_5()
+            .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
+                .child(div().text_sm().child(t!("Word-by-word lyrics")))
+                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Highlight words when timing is available; otherwise follow whole lines."))))
+                .child(Switch::new("word-lyrics-enabled").checked(self.config.lyrics.word_timing).accessibility_label(t!("Word-by-word lyrics"))
+                    .on_change(cx.listener(|this, checked, _, cx| this.set_word_lyrics(*checked, cx)))))
             .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
                 .child(div().text_sm().child(t!("Online lyrics")))
                 .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("When enabled, song metadata is sent to the selected lyrics services."))))

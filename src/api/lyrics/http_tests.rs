@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 use super::*;
+use crate::models::CapabilitySupport;
 use crate::test_support::http::{success, Server};
 
 fn song() -> Song {
@@ -221,4 +222,54 @@ async fn unsupported_capability_preserves_legacy_failure_without_structured_cont
             .contains("legacy lyrics request also failed"));
         assert_requests(&server, &["getLyrics"]);
     }
+}
+
+#[tokio::test]
+async fn enhanced_capability_opts_in_and_accepts_usable_v1_responses() {
+    let server = Server::new(vec![structured()]);
+    let lyrics = api(&server)
+        .lyrics(
+            &song(),
+            ServerCapabilities {
+                structured_lyrics: CapabilitySupport::Supported,
+                enhanced_lyrics: CapabilitySupport::Supported,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(lyrics.is_synced());
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]
+        .url
+        .query_pairs()
+        .any(|(key, value)| key == "enhanced" && value == "true"));
+}
+
+#[tokio::test]
+async fn rejected_enhanced_request_retries_v1_before_legacy() {
+    let server = Server::new(vec![failures()[0].0.clone(), structured()]);
+    assert!(api(&server)
+        .lyrics(
+            &song(),
+            ServerCapabilities {
+                structured_lyrics: CapabilitySupport::Supported,
+                enhanced_lyrics: CapabilitySupport::Supported,
+                ..Default::default()
+            }
+        )
+        .await
+        .unwrap()
+        .is_synced());
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0]
+        .url
+        .query_pairs()
+        .any(|(key, _)| key == "enhanced"));
+    assert!(!requests[1]
+        .url
+        .query_pairs()
+        .any(|(key, _)| key == "enhanced"));
 }

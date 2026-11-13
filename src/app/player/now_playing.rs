@@ -84,7 +84,29 @@ impl NavidromeApp {
                     let distance = active_line
                         .map(|active| active.abs_diff(index))
                         .unwrap_or(usize::MAX);
-                    let text = lyric_line.text.clone();
+                    let word_timing = lyric_line
+                        .word_timing
+                        .as_ref()
+                        .filter(|_| self.config.lyrics.word_timing);
+                    let text = word_timing
+                        .map_or(&lyric_line.text, |words| &words.text)
+                        .clone();
+                    let primary = if current {
+                        word_timing
+                            .map(|words| {
+                                super::word_lyrics::WordLyrics::new(
+                                    words.clone(),
+                                    u64::try_from(playback.position.as_millis())
+                                        .unwrap_or(u64::MAX),
+                                    p.text.opacity(0.55),
+                                    p.brand,
+                                )
+                                .into_any_element()
+                            })
+                            .unwrap_or_else(|| div().child(text.clone()).into_any_element())
+                    } else {
+                        div().child(text).into_any_element()
+                    };
                     let start_ms = lyric_line.start_ms;
                     let translation = lyric_line
                         .translation
@@ -114,7 +136,7 @@ impl NavidromeApp {
                                 }))
                         })
                         // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。
-                        .child(v_flex().gap_1().child(div().child(text)).when_some(
+                        .child(v_flex().w_full().gap_1().child(primary).when_some(
                             translation,
                             |this, translation| {
                                 this.child(

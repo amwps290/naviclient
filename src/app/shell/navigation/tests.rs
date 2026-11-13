@@ -32,6 +32,7 @@ fn lyrics() -> Lyrics {
             text: "cached lyrics".into(),
             start_ms: Some(0),
             translation: None,
+            ..Default::default()
         }],
         ..Default::default()
     }

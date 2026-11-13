@@ -7,7 +7,73 @@ fn test_lyric_line(start_ms: Option<u64>, text: &str) -> LyricLine {
         start_ms,
         text: text.to_string(),
         translation: None,
+        ..Default::default()
     }
+}
+
+fn enhanced_variant() -> Value {
+    serde_json::json!({"kind":"main","lang":"zho","synced":true,"offset":-100,
+        "line":[{"start":0,"value":" "},{"start":1100,"end":3100,"value":" 你 love love "}],
+        "cueLine":[{"index":1,"start":1000,"end":3100,"value":"你 love love","cue":[
+            {"start":1000,"end":1500,"value":"你","byteStart":0,"byteEnd":2},
+            {"start":2100,"end":3100,"value":"love","byteStart":9,"byteEnd":12}
+        ]}]
+    })
+}
+
+#[test]
+fn enhanced_cues_keep_original_indices_utf8_text_and_explicit_track_kinds() {
+    let body = serde_json::json!({"lyricsList":{"structuredLyrics":[
+        {"kind":"pronunciation","lang":"latn","synced":true,"line":[{"start":1000,"value":"ni love love"}]},
+        {"kind":"translation","lang":"zho","synced":true,"line":[{"start":1000,"value":"你 爱 爱"}]},
+        enhanced_variant()
+    ]}});
+    let lyrics = parse_structured_lyrics(&body).unwrap();
+    assert_eq!(lyrics.lines.len(), 1);
+    let line = &lyrics.lines[0];
+    assert_eq!(line.start_ms, Some(900));
+    assert_eq!(line.translation.as_deref(), Some("你 爱 爱"));
+    let words = line.word_timing.as_ref().unwrap();
+    assert_eq!(words.text, "你 love love");
+    assert_eq!(words.segments[1].text_range, 9..13);
+    assert_eq!(words.segments[1].end_ms, Some(3000));
+    assert_eq!(lyrics.active_line_index(Duration::from_millis(3001)), None);
+}
+
+#[test]
+fn malformed_cues_downgrade_only_their_line() {
+    for (key, value) in [
+        ("byteEnd", serde_json::json!(1)),
+        ("value", serde_json::json!("wrong")),
+        ("end", serde_json::json!(4000)),
+    ] {
+        let mut variant = enhanced_variant();
+        variant["cueLine"][0]["cue"][0][key] = value;
+        let lyrics = parse_structured_lyrics(
+            &serde_json::json!({"lyricsList":{"structuredLyrics":[variant]}}),
+        )
+        .unwrap();
+        assert_eq!(lyrics.lines[0].text, "你 love love");
+        assert!(lyrics.lines[0].word_timing.is_none());
+    }
+}
+
+#[test]
+fn main_agent_uses_its_own_renderable_text() {
+    let mut variant = enhanced_variant();
+    variant["agents"] =
+        serde_json::json!([{"id":"lead","role":"main"},{"id":"backing","role":"background"}]);
+    variant["cueLine"][0]["agentId"] = serde_json::json!("lead");
+    variant["cueLine"][0]["value"] = serde_json::json!("你 love love");
+    variant["line"][1]["value"] = serde_json::json!("combined vocals");
+    let lyrics =
+        parse_structured_lyrics(&serde_json::json!({"lyricsList":{"structuredLyrics":[variant]}}))
+            .unwrap();
+    assert_eq!(lyrics.lines[0].text, "combined vocals");
+    assert_eq!(
+        lyrics.lines[0].word_timing.as_ref().unwrap().text,
+        "你 love love"
+    );
 }
 
 #[test]

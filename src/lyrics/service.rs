@@ -7,8 +7,10 @@ use super::{
     provider::{LyricsProvider, ProviderError, ProviderId, Query, SearchOutcome},
     Document, LyricsPolicy, LyricsSettings,
 };
+#[cfg(test)]
+use crate::models::CapabilitySupport;
 use crate::{
-    models::{CapabilitySupport, Song},
+    models::Song,
     source::{MediaKey, MusicSource},
 };
 use std::time::Duration;
@@ -116,10 +118,11 @@ impl LyricsService {
         song: &Song,
         media: &MediaKey,
         source: Option<&MusicSource>,
-        structured: CapabilitySupport,
+        capabilities: impl Into<crate::models::ServerCapabilities>,
         refresh: bool,
         progress: impl Fn(LyricsStatus, Option<Document>),
     ) -> LoadOutcome {
+        let capabilities = capabilities.into();
         if let Some(document) = self.cache.selected(media) {
             return LoadOutcome::ready(document);
         }
@@ -161,7 +164,7 @@ impl LyricsService {
         }
         let native = || async {
             match source.filter(|s| s.capabilities().lyrics) {
-                Some(source) => native_lyrics(source.lyrics(song, structured)).await,
+                Some(source) => native_lyrics(source.lyrics(song, capabilities)).await,
                 None => Ok(None),
             }
         };

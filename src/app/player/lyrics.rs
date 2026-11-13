@@ -63,10 +63,10 @@ impl NavidromeApp {
     ) {
         let api = self.source_for_song(song).cloned();
         let service = self.lyrics_service();
-        let structured_lyrics = self
+        let capabilities = self
             .playback_server
             .as_ref()
-            .map(|server| server.capabilities.structured_lyrics)
+            .map(|server| server.capabilities)
             .unwrap_or_default();
         let song = song.clone();
         let tx = self.tx.clone();
@@ -76,7 +76,7 @@ impl NavidromeApp {
                     &song,
                     &media,
                     api.as_ref(),
-                    structured_lyrics,
+                    capabilities,
                     refresh,
                     |status, _| {
                         let _ = tx.send(Msg::LyricsProgress { request, status });

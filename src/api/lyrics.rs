@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use super::OpenSubsonicProvider;
 
-use crate::models::{CapabilitySupport, Lyrics, Song};
+use crate::models::{Lyrics, ServerCapabilities, Song};
 
 mod response;
 
@@ -14,9 +14,23 @@ impl OpenSubsonicProvider {
     pub async fn lyrics(
         &self,
         song: &Song,
-        structured_lyrics: CapabilitySupport,
+        capabilities: impl Into<ServerCapabilities>,
     ) -> Result<Lyrics> {
-        let structured = if structured_lyrics.allows_optimistic_request() {
+        let capabilities = capabilities.into();
+        if capabilities.enhanced_lyrics.is_supported() {
+            if let Ok(body) = self
+                .get_json(
+                    "getLyricsBySongId",
+                    &[("id", &song.id), ("enhanced", "true")],
+                )
+                .await
+            {
+                if let Some(lyrics) = parse_structured_lyrics(&body) {
+                    return Ok(lyrics);
+                }
+            }
+        }
+        let structured = if capabilities.structured_lyrics.allows_optimistic_request() {
             Some(
                 self.get_json("getLyricsBySongId", &[("id", &song.id)])
                     .await,

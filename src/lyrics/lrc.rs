@@ -70,6 +70,7 @@ pub(crate) fn parse(text: &str) -> Lyrics {
                         start_ms: Some(time),
                         text: text.clone(),
                         translation: None,
+                        ..Default::default()
                     });
                 }
             }

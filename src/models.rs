@@ -1,6 +1,7 @@
 mod config;
 mod equalizer;
 mod listening;
+mod lyric_timing;
 mod media;
 pub(crate) mod network;
 mod playback;
@@ -15,8 +16,8 @@ pub use config::{Config, ServerProfile};
 pub use equalizer::EqSettings;
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
-    Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine, Lyrics,
-    Playlist, SearchResults, Song,
+    Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine,
+    LyricSegment, Lyrics, Playlist, SearchResults, Song, WordTimedLine,
 };
 pub use playback::{
     PlayModes, PlaybackId, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,

@@ -56,11 +56,23 @@ impl NavidromeApp {
         request: LibraryRequest,
         result: Result<ServerInfo, String>,
     ) {
+        let previously_enhanced = self
+            .playback_server
+            .as_ref()
+            .is_some_and(|server| server.capabilities.enhanced_lyrics.is_supported());
         let Some(result) = self.state.connection.complete_discovery(request, result) else {
             return;
         };
         match result {
-            Ok(()) => self.update_connection_status(),
+            Ok(()) => {
+                self.update_connection_status();
+                let now_enhanced = self.playback_server.as_ref()
+                    .is_some_and(|server| server.capabilities.enhanced_lyrics.is_supported());
+                if !previously_enhanced && now_enhanced && self.state.lyrics.document.as_ref()
+                    .is_none_or(|document| !document.manual && document.origin == crate::lyrics::LyricsOrigin::Native) {
+                    self.refresh_lyrics();
+                }
+            },
             Err(error) => log::debug!("OpenSubsonic capability discovery unavailable; using Subsonic compatibility mode: {error}"),
         }
     }

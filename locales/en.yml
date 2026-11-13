@@ -2,6 +2,11 @@
 # what the user sees. Keep %{name} placeholders intact when editing.
 # `src/i18n_tests.rs` fails the build if a t!() key is missing here.
 
+"Word-by-word lyrics": "Word-by-word lyrics"
+"Highlight words when timing is available; otherwise follow whole lines.": "Highlight words when timing is available; otherwise follow whole lines."
+"Only word-by-word lyrics": "Only word-by-word lyrics"
+"No word-by-word lyrics found.": "No word-by-word lyrics found."
+
 "%{count} tracks selected for today": "%{count} tracks selected for today"
 "A balanced mix of favorites, familiar artists, and new discoveries.": "A balanced mix of favorites, familiar artists, and new discoveries."
 "Create and play": "Create and play"

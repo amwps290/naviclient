@@ -248,6 +248,10 @@ pub struct Lyrics {
 }
 
 impl Lyrics {
+    pub fn has_word_timing(&self) -> bool {
+        self.lines.iter().any(|line| line.word_timing.is_some())
+    }
+
     pub fn is_synced(&self) -> bool {
         self.lines.iter().any(|line| line.start_ms.is_some())
     }
@@ -258,7 +262,12 @@ impl Lyrics {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, line)| line.start_ms.is_some_and(|start| start <= position_ms))
+            .find(|(_, line)| {
+                line.start_ms.is_some_and(|start| start <= position_ms)
+                    && line.end_ms.is_none_or(|end| {
+                        position_ms < end || line.start_ms == Some(end) && position_ms == end
+                    })
+            })
             .map(|(index, _)| index)
     }
 }
@@ -266,7 +275,26 @@ impl Lyrics {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LyricLine {
     pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
     pub text: String,
     /// 其他语言变体中按时间戳就近匹配到的翻译行；无可用变体时为 None。
     pub translation: Option<String>,
+    pub word_timing: Option<WordTimedLine>,
+}
+
+/// Ranges address the exact UTF-8 text, using Rust's half-open convention.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LyricSegment {
+    pub text_range: std::ops::Range<usize>,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+}
+
+/// A main vocal layer may have different text from the combined fallback line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WordTimedLine {
+    pub text: String,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+    pub segments: Vec<LyricSegment>,
 }

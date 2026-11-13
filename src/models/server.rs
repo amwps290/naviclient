@@ -40,6 +40,17 @@ pub struct ServerCapabilities {
     pub podcast_episode_lookup: CapabilitySupport,
 }
 
+impl From<CapabilitySupport> for ServerCapabilities {
+    fn from(structured_lyrics: CapabilitySupport) -> Self {
+        Self {
+            structured_lyrics,
+            // A v1-only caller has not opted into enhanced response fields.
+            enhanced_lyrics: CapabilitySupport::Unsupported,
+            ..Default::default()
+        }
+    }
+}
+
 impl ServerCapabilities {
     pub fn from_server_info(info: &ServerInfo) -> Self {
         let extension = |name, minimum_version| {

@@ -60,6 +60,7 @@ impl NavidromeApp {
         let original_synced = document.is_some_and(|d| d.lyrics.is_synced());
         let plain = document.is_some_and(|d| d.plain);
         let personal = document.is_some_and(|d| d.manual || d.offset_ms != 0 || d.plain);
+        let word_timing = self.config.lyrics.word_timing;
         let app = cx.entity().downgrade();
         let source = document.map(|d| {
             let origin = match d.origin {
@@ -70,6 +71,8 @@ impl NavidromeApp {
             };
             let format = if d.instrumental {
                 t!("Instrumental")
+            } else if !plain && word_timing && d.lyrics.has_word_timing() {
+                t!("Word-by-word lyrics")
             } else if synced {
                 t!("Synced lyrics")
             } else {
@@ -121,6 +124,18 @@ impl NavidromeApp {
                                     .dropdown_menu(move |menu, _, cx| {
                                         app.update(cx, |_, cx| {
                                             let mut menu = menu
+                                                .item(
+                                                    PopupMenuItem::new(t!("Word-by-word lyrics"))
+                                                        .checked(word_timing)
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.set_word_lyrics(
+                                                                    !word_timing,
+                                                                    cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                )
                                                 .item(
                                                     PopupMenuItem::new(t!(
                                                         "Search / change lyrics"
@@ -328,6 +343,23 @@ impl NavidromeApp {
                     .child(t!("Candidates")),
             )
             .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_xs().child(t!("Only word-by-word lyrics")))
+                    .child(
+                        Switch::new("word-lyrics-candidates-only")
+                            .checked(ui.word_only)
+                            .accessibility_label(t!("Only word-by-word lyrics"))
+                            .on_change(cx.listener(|this, checked, _, cx| {
+                                this.lyrics_ui.word_only = *checked;
+                                this.lyrics_ui.selected = None;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
                 v_flex()
                     .id("lyrics-candidates")
                     .flex_1()
@@ -335,90 +367,102 @@ impl NavidromeApp {
                     .overflow_y_scroll()
                     .track_scroll(&ui.candidates_scroll)
                     .gap_2()
-                    .children(ui.records.iter().enumerate().map(|(index, record)| {
-                        let info = matching::assess(&ui.query, record);
-                        Button::new(SharedString::from(format!(
-                            "lyrics-candidate-{}-{}",
-                            record.source.key(),
-                            record.id
-                        )))
-                        .w_full()
-                        .h_auto()
-                        .justify_start()
-                        .outline()
-                        .selected(ui.selected == Some(index))
-                        .custom(soft_toggle_style(ui.selected == Some(index), cx))
-                        .child(
-                            v_flex()
-                                .min_w_0()
-                                .w_full()
-                                .items_start()
-                                .gap_1()
-                                .child(div().text_sm().truncate().child(format!(
-                                    "{} · {}",
-                                    record.track_name, record.artist_name
+                    .children(
+                        ui.records
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, record)| {
+                                !ui.word_only || record.lyrics().has_word_timing()
+                            })
+                            .map(|(index, record)| {
+                                let info = matching::assess(&ui.query, record);
+                                Button::new(SharedString::from(format!(
+                                    "lyrics-candidate-{}-{}",
+                                    record.source.key(),
+                                    record.id
                                 )))
+                                .w_full()
+                                .h_auto()
+                                .justify_start()
+                                .outline()
+                                .selected(ui.selected == Some(index))
+                                .custom(soft_toggle_style(ui.selected == Some(index), cx))
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(palette(cx).text_secondary)
-                                        .child(format!(
-                                            "{} · {} · {} · {}",
-                                            record.source.label(),
-                                            record.album_name,
-                                            record_duration(record),
-                                            if record.instrumental {
-                                                t!("Instrumental")
-                                            } else if record.lyrics().is_synced() {
-                                                t!("Synced lyrics")
-                                            } else {
-                                                t!("Plain text lyrics")
-                                            }
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(palette(cx).text_secondary)
-                                        .child(if info.names {
-                                            t!("Song title and artist match")
-                                        } else {
-                                            t!("Song title or artist differs")
+                                    v_flex()
+                                        .min_w_0()
+                                        .w_full()
+                                        .items_start()
+                                        .gap_1()
+                                        .child(div().text_sm().truncate().child(format!(
+                                            "{} · {}",
+                                            record.track_name, record.artist_name
+                                        )))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(palette(cx).text_secondary)
+                                                .child(format!(
+                                                    "{} · {} · {} · {}",
+                                                    record.source.label(),
+                                                    record.album_name,
+                                                    record_duration(record),
+                                                    if record.instrumental {
+                                                        t!("Instrumental")
+                                                    } else if record.lyrics().has_word_timing() {
+                                                        t!("Word-by-word lyrics")
+                                                    } else if record.lyrics().is_synced() {
+                                                        t!("Synced lyrics")
+                                                    } else {
+                                                        t!("Plain text lyrics")
+                                                    }
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(palette(cx).text_secondary)
+                                                .child(if info.names {
+                                                    t!("Song title and artist match")
+                                                } else {
+                                                    t!("Song title or artist differs")
+                                                }),
+                                        )
+                                        .when_some(info.duration_delta, |this, delta| {
+                                            this.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(palette(cx).text_secondary)
+                                                    .child(t!(
+                                                        "Duration differs by %{seconds} seconds",
+                                                        seconds = format!("{delta:.1}")
+                                                    )),
+                                            )
+                                        })
+                                        .when(info.album == Some(false), |this| {
+                                            this.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(palette(cx).text_secondary)
+                                                    .child(t!("Different album")),
+                                            )
+                                        })
+                                        .when(!info.version, |this| {
+                                            this.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(palette(cx).text_secondary)
+                                                    .child(t!("Different performance version")),
+                                            )
                                         }),
                                 )
-                                .when_some(info.duration_delta, |this, delta| {
-                                    this.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(palette(cx).text_secondary)
-                                            .child(t!(
-                                                "Duration differs by %{seconds} seconds",
-                                                seconds = format!("{delta:.1}")
-                                            )),
-                                    )
-                                })
-                                .when(info.album == Some(false), |this| {
-                                    this.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(palette(cx).text_secondary)
-                                            .child(t!("Different album")),
-                                    )
-                                })
-                                .when(!info.version, |this| {
-                                    this.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(palette(cx).text_secondary)
-                                            .child(t!("Different performance version")),
-                                    )
-                                }),
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.lyrics_ui.selected = Some(index);
-                            cx.notify();
-                        }))
-                    }))
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.lyrics_ui.selected = Some(index);
+                                        cx.notify();
+                                    },
+                                ))
+                            }),
+                    )
                     .when(ui.request.is_some(), |this| {
                         this.child(
                             div()
@@ -429,6 +473,23 @@ impl NavidromeApp {
                     .when_some(ui.error, |this, error| {
                         this.child(div().text_sm().child(error.message()))
                     })
+                    .when(
+                        ui.word_only
+                            && ui.searched
+                            && ui.request.is_none()
+                            && !ui
+                                .records
+                                .iter()
+                                .any(|record| record.lyrics().has_word_timing()),
+                        |this| {
+                            this.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(palette(cx).text_secondary)
+                                    .child(t!("No word-by-word lyrics found.")),
+                            )
+                        },
+                    )
                     .children(ui.failures.iter().map(|(id, status)| {
                         div()
                             .text_xs()

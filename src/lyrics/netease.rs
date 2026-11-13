@@ -56,24 +56,50 @@ impl Netease {
     }
 
     async fn lyrics(&self, mut record: Record) -> Result<Option<Record>, ProviderError> {
-        let body = self
+        let enhanced = self
             .request(
-                "/api/song/lyric",
+                "/api/song/lyric/v1",
                 vec![
                     ("id".into(), record.id.to_string()),
-                    ("lv".into(), "-1".into()),
-                    ("kv".into(), "-1".into()),
-                    ("tv".into(), "-1".into()),
-                    ("rv".into(), "-1".into()),
+                    ("cp".into(), "false".into()),
+                    ("lv".into(), "0".into()),
+                    ("kv".into(), "0".into()),
+                    ("tv".into(), "0".into()),
+                    ("rv".into(), "0".into()),
+                    ("yv".into(), "0".into()),
+                    ("ytv".into(), "0".into()),
+                    ("yrv".into(), "0".into()),
                 ],
             )
-            .await?;
+            .await;
+        let body = match enhanced {
+            Ok(body) => body,
+            Err(error @ ProviderError::RateLimited { .. }) => return Err(error),
+            Err(_) => {
+                self.request(
+                    "/api/song/lyric",
+                    vec![
+                        ("id".into(), record.id.to_string()),
+                        ("lv".into(), "-1".into()),
+                        ("kv".into(), "-1".into()),
+                        ("tv".into(), "-1".into()),
+                        ("rv".into(), "-1".into()),
+                    ],
+                )
+                .await?
+            }
+        };
         // Absence of lyrics is not enough to infer an instrumental recording.
         let text = body
             .pointer("/lrc/lyric")
             .and_then(Value::as_str)
             .unwrap_or_default();
         record.set_text(text);
+        record.yrc_lyrics = body
+            .pointer("/yrc/lyric")
+            .and_then(Value::as_str)
+            .filter(|text| !super::yrc::parse(text).lines.is_empty())
+            .map(str::to_string);
         Ok(record.usable().then_some(record))
     }
 }
