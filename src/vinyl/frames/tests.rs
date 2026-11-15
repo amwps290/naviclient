@@ -17,6 +17,15 @@ fn rotation_is_clockwise_and_keeps_center() {
 }
 
 #[test]
+fn rotation_keeps_opaque_square_corners_for_later_filtering_and_clipping() {
+    let color = Rgba([30, 80, 170, 255]);
+    let source = RgbaImage::from_pixel(32, 32, color);
+    for phase in [0.0, 0.125, 0.25, 0.75] {
+        assert!(rotate(&source, phase).pixels().all(|pixel| *pixel == color));
+    }
+}
+
+#[test]
 fn portrait_and_landscape_are_center_cropped_and_bgra() {
     for (width, height) in [(12, 4), (4, 12)] {
         let mut source = RgbaImage::from_pixel(width, height, Rgba([255, 0, 0, 255]));

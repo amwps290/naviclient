@@ -348,8 +348,8 @@ fn mini_cover_frame(artwork: gpui_kit::AnyElement, cx: &App) -> gpui_kit::Div {
         .rounded_full()
         .bg(linear_gradient(
             135.0,
-            linear_color_stop(colors.text_muted.opacity(0.65), 0.0),
-            linear_color_stop(colors.raised.opacity(0.8), 1.0),
+            linear_color_stop(colors.text_muted.opacity(0.35), 0.0),
+            linear_color_stop(colors.raised.opacity(0.45), 1.0),
         ))
         .child(
             div()
@@ -357,14 +357,6 @@ fn mini_cover_frame(artwork: gpui_kit::AnyElement, cx: &App) -> gpui_kit::Div {
                 .inset(px(COVER_INSET))
                 .rounded_full()
                 .child(artwork),
-        )
-        .child(
-            div()
-                .absolute()
-                .inset(px(COVER_INSET))
-                .rounded_full()
-                .border_1()
-                .border_color(hsla(0.0, 0.0, 1.0, 0.24)),
         )
         .child(
             div()

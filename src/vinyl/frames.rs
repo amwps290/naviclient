@@ -76,15 +76,13 @@ pub(super) fn build_frames(
 fn rotate(source: &RgbaImage, phase: f32) -> RgbaImage {
     let side = source.width();
     let center = (side - 1) as f32 * 0.5;
-    let radius_squared = (side as f32 * 0.5 + 1.0).powi(2);
     let (sin, cos) = (phase * std::f32::consts::TAU).sin_cos();
     let mut output = RgbaImage::new(side, side);
     for (x, y, pixel) in output.enumerate_pixels_mut() {
         let dx = x as f32 - center;
         let dy = y as f32 - center;
-        if dx * dx + dy * dy > radius_squared {
-            continue;
-        }
+        // Keep the square opaque; the final composite receives one circular
+        // mask at display resolution, after resampling and frame blending.
         // Inverse mapping gives clockwise rotation, matching GPUI's SVG matrix.
         let sx = (cos * dx + sin * dy + center).clamp(0.0, (side - 1) as f32);
         let sy = (-sin * dx + cos * dy + center).clamp(0.0, (side - 1) as f32);

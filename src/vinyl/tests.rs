@@ -10,7 +10,6 @@ use super::{Pending, VinylCover};
 struct SnapshotProbe {
     cover: VinylCover,
     outgoing: bool,
-    extra: Option<Arc<RenderImage>>,
 }
 
 impl gpui_kit::Render for SnapshotProbe {
@@ -20,16 +19,15 @@ impl gpui_kit::Render for SnapshotProbe {
         _: &mut gpui_kit::Context<Self>,
     ) -> impl gpui_kit::IntoElement {
         use gpui_kit::{div, px, ParentElement, Styled};
-        let label = if self.outgoing {
-            self.cover.render_frozen(30.0)
-        } else {
-            self.cover.render(30.0, self.cover.phase())
-        };
-        div().size(px(60.0)).children(label).children(
-            self.extra
-                .as_ref()
-                .map(|frame| super::render_pair(30.0, frame.clone(), frame.clone(), 0.0)),
-        )
+        div()
+            .flex()
+            .size(px(60.0))
+            .children(
+                self.outgoing
+                    .then(|| self.cover.render_frozen(30.0))
+                    .flatten(),
+            )
+            .children(self.cover.render(30.0, self.cover.phase()))
     }
 }
 
@@ -42,7 +40,7 @@ fn outgoing_snapshot_retains_only_visible_textures_and_releases_them_after_remov
 
     cx.update(gpui_kit::init);
     let first = Arc::new(RenderImage::new(vec![Frame::new(RgbaImage::new(2, 2))]));
-    let next = Arc::new(RenderImage::new(vec![Frame::new(RgbaImage::new(3, 3))]));
+    let next = Arc::new(RenderImage::new(vec![Frame::new(RgbaImage::new(2, 2))]));
     let unused = Arc::new(RenderImage::new(vec![Frame::new(RgbaImage::new(4, 4))]));
     let mut probe = None;
     let window = cx.update(|cx| {
@@ -58,7 +56,6 @@ fn outgoing_snapshot_retains_only_visible_textures_and_releases_them_after_remov
                 SnapshotProbe {
                     cover,
                     outgoing: false,
-                    extra: Some(unused.clone()),
                 }
             });
             probe = Some(entity.clone());
@@ -75,38 +72,104 @@ fn outgoing_snapshot_retains_only_visible_textures_and_releases_them_after_remov
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.update(|window, cx| {
         let _ = window.draw(cx);
+        let initial = probe
+            .read(cx)
+            .cover
+            .composite
+            .borrow()
+            .displayed
+            .clone()
+            .unwrap();
+        assert!(window.has_image_atlas_entry(&initial));
+        // The rotation cache is CPU-only; displaying it uploads one composite.
         for frame in [&first, &next, &unused] {
-            assert!(window.has_image_atlas_entry(frame));
+            assert!(!window.has_image_atlas_entry(frame));
         }
+        let _ = window.draw(cx);
+        assert!(Arc::ptr_eq(
+            &initial,
+            probe
+                .read(cx)
+                .cover
+                .composite
+                .borrow()
+                .displayed
+                .as_ref()
+                .unwrap(),
+        ));
         probe.update(cx, |probe, cx| {
-            probe.cover.freeze(window);
-            // Same-album switches reuse their current textures after unfreezing.
-            probe.cover.release_frozen(window);
-            assert!(window.has_image_atlas_entry(&first));
-            assert!(window.has_image_atlas_entry(&next));
+            let now = Instant::now();
+            probe.cover.tick(now, false);
+            probe.cover.tick(now, true);
+            probe.cover.tick(now + Duration::from_millis(50), true);
+            cx.notify();
+        });
+        let _ = window.draw(cx);
+        let visible = probe
+            .read(cx)
+            .cover
+            .composite
+            .borrow()
+            .displayed
+            .clone()
+            .unwrap();
+        assert!(!window.has_image_atlas_entry(&initial));
+        assert!(window.has_image_atlas_entry(&visible));
+        probe.update(cx, |probe, cx| {
             probe.cover.freeze(window);
             let blend = probe.cover.frozen.as_ref().unwrap().blend;
             assert!(blend > 0.0 && blend < 1.0);
-            // A changed source releases all old frames except the visible pair.
             probe.cover.prepare(source.clone(), false, &runtime, window);
             assert!(probe.cover.frames.iter().all(Option::is_none));
             assert_eq!(probe.cover.frozen.as_ref().unwrap().blend, blend);
             probe.outgoing = true;
-            probe.extra = None;
+            // Simulate delivery of the incoming track while the old record is
+            // still rendered. Its texture must not evict the outgoing one.
+            probe.cover.frames[0] = Some(first.clone());
+            probe.cover.frames[1] = Some(next.clone());
             cx.notify();
         });
-        assert!(!window.has_image_atlas_entry(&unused));
-        assert!(window.has_image_atlas_entry(&first));
-        assert!(window.has_image_atlas_entry(&next));
+        assert!(window.has_image_atlas_entry(&visible));
         let _ = window.draw(cx);
+        let incoming = probe
+            .read(cx)
+            .cover
+            .composite
+            .borrow()
+            .displayed
+            .clone()
+            .unwrap();
+        assert!(!Arc::ptr_eq(&visible, &incoming));
+        assert!(window.has_image_atlas_entry(&visible));
+        assert!(window.has_image_atlas_entry(&incoming));
         probe.update(cx, |probe, cx| {
             probe.cover.release_frozen(window);
             probe.outgoing = false;
             cx.notify();
         });
-        assert!(!window.has_image_atlas_entry(&first));
-        assert!(!window.has_image_atlas_entry(&next));
+        assert!(!window.has_image_atlas_entry(&visible));
+        assert!(window.has_image_atlas_entry(&incoming));
         let _ = window.draw(cx);
+        assert!(Arc::ptr_eq(
+            &incoming,
+            probe
+                .read(cx)
+                .cover
+                .composite
+                .borrow()
+                .displayed
+                .as_ref()
+                .unwrap(),
+        ));
+        probe.update(cx, |probe, _| {
+            probe.cover.prepare(
+                Arc::new(Image::from_bytes(ImageFormat::Png, vec![])),
+                false,
+                &runtime,
+                window,
+            );
+        });
+        assert!(!window.has_image_atlas_entry(&incoming));
     });
 }
 

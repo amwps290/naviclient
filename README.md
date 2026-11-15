@@ -235,10 +235,12 @@ JavaScript runtime.
   pauses at the current angle when playback pauses or the window is hidden,
   and renders at up to 20 fps.
   Only the current cover is cached (120 frames at 192×192, about 17 MiB of
-  pixels plus GPU atlas storage); preparation runs once in a throttled background
+  CPU pixels); preparation runs once in a throttled background
   worker, delivering the next visible frames first so rotation starts without
   waiting for the full cache. Its resolution is capped on high-DPI displays to
-  keep memory bounded.
+  keep memory bounded. Two display-sized sources are reused for frame blending,
+  then drawn as one texture with one circular edge. Only the current and outgoing
+  composites enter the GPU atlas; replaced textures are explicitly released.
   Switching tracks on this page parks the tonearm, slides the old record out,
   inserts the new one and lowers the arm (about 2 seconds). The outgoing cover
   retains only two frozen frames; quick skips update the destination record.
@@ -525,6 +527,7 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
 - `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, progressive frame delivery and cancellation, and bounded background raster generation
 - `src/vinyl/rotation.rs` - texture-independent rotation timing and adjacent-frame selection, advancing only when both frames are drawable
+- `src/vinyl/composite.rs` - display-sized source filtering, single-texture frame blending, and bounded GPU composite ownership
 - `src/vinyl/motion.rs` and `src/app/covers/turntable.rs` - record-exchange timing, progress-driven tonearm motion and outgoing cover retention
 - `src/media_session.rs` and `src/media_session/` - shared media commands and snapshots, Linux MPRIS and Windows SMTC integration
 - `src/media_session/linux/interfaces.rs` and `src/media_session/linux/artwork.rs` - MPRIS interface contracts and connection-owned local artwork, with separate file preparation, publication, replacement and directory cleanup

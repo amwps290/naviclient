@@ -1,21 +1,23 @@
 //! Bounded rotation cache for GPUI versions without color-sprite transforms.
-//! Frames arrive progressively, off the UI thread. Steady-state drawing only
-//! blends two cached textures; there is no image encoding or per-tick rotation.
+//! Frames arrive progressively, off the UI thread. Drawing composites their
+//! pixels at display size and applies one circular mask, without image encoding
+//! or per-tick rotation. Only the current and outgoing composites enter the GPU.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
-use gpui_kit::{
-    canvas, div, px, AnyElement, Corners, Image, IntoElement, ParentElement, RenderImage, Styled,
-    Window,
-};
+use gpui_kit::{canvas, px, AnyElement, Corners, Image, IntoElement, RenderImage, Styled, Window};
 use tokio::runtime::Runtime;
 
+mod composite;
 mod frames;
 pub(crate) mod motion;
 mod rotation;
 
+use composite::CompositeCache;
 use frames::build_frames;
 use rotation::{frame_pair, Rotation, FRAMES};
 
@@ -36,23 +38,27 @@ pub struct VinylCover {
     pending: Option<Pending>,
     failed: bool,
     rotation: Rotation,
+    composite: Rc<RefCell<CompositeCache>>,
     frozen: Option<FrozenCover>,
 }
 
-/// Two textures retain the exact visible angle while the old record is removed.
+/// Retain the exact visible angle and texture while the old record is removed.
 struct FrozenCover {
     first: Arc<RenderImage>,
     next: Arc<RenderImage>,
     blend: f32,
+    composite: Rc<RefCell<CompositeCache>>,
 }
 
 impl FrozenCover {
-    fn contains(&self, frame: &Arc<RenderImage>) -> bool {
-        Arc::ptr_eq(&self.first, frame) || Arc::ptr_eq(&self.next, frame)
-    }
-
     fn render(&self, side: f32) -> AnyElement {
-        render_pair(side, self.first.clone(), self.next.clone(), self.blend)
+        render_pair(
+            side,
+            self.first.clone(),
+            self.next.clone(),
+            self.blend,
+            self.composite.clone(),
+        )
     }
 }
 
@@ -64,6 +70,7 @@ impl Default for VinylCover {
             pending: None,
             failed: false,
             rotation: Rotation::default(),
+            composite: Default::default(),
             frozen: None,
         }
     }
@@ -78,6 +85,9 @@ impl VinylCover {
                 first: first.clone(),
                 next: self.frames[next].as_ref().unwrap_or(first).clone(),
                 blend,
+                // The outgoing and incoming covers must own separate textures:
+                // both can be referenced by the same scene during an exchange.
+                composite: std::mem::take(&mut self.composite),
             });
         }
     }
@@ -90,23 +100,7 @@ impl VinylCover {
         let Some(frozen) = self.frozen.take() else {
             return;
         };
-        let same_frame = Arc::ptr_eq(&frozen.first, &frozen.next);
-        for frame in [Some(frozen.first), (!same_frame).then_some(frozen.next)]
-            .into_iter()
-            .flatten()
-        {
-            // A same-album exchange can still use these in the current cache.
-            if !self
-                .frames
-                .iter()
-                .flatten()
-                .any(|current| Arc::ptr_eq(current, &frame))
-            {
-                if let Err(error) = window.drop_image(frame) {
-                    log::warn!("failed to release outgoing vinyl texture: {error}");
-                }
-            }
-        }
+        frozen.composite.borrow_mut().release(window);
     }
 
     pub fn cancel_pending(&mut self) {
@@ -160,19 +154,10 @@ impl VinylCover {
     ) {
         if self.source_id != Some(source.id) {
             self.cancel_pending();
-            for frame in self.frames.iter_mut().filter_map(Option::take) {
-                if self
-                    .frozen
-                    .as_ref()
-                    .is_some_and(|frozen| frozen.contains(&frame))
-                {
-                    continue;
-                }
-                // Dropping the Arc alone does not release GPUI's atlas entries.
-                if let Err(error) = window.drop_image(frame) {
-                    log::warn!("failed to release vinyl textures: {error}");
-                }
-            }
+            self.composite.borrow_mut().release(window);
+            // Cached rotations stay on the CPU. A frozen cover retains the
+            // two sources and its own composite until the exchange finishes.
+            self.frames.fill(None);
             self.source_id = Some(source.id);
             self.failed = false;
             self.rotation.reset();
@@ -211,7 +196,13 @@ impl VinylCover {
         let (first, next, blend) = frame_pair(phase);
         let first = self.frames[first].as_ref()?.clone();
         let next = self.frames[next].as_ref().unwrap_or(&first).clone();
-        Some(render_pair(side, first, next, blend))
+        Some(render_pair(
+            side,
+            first,
+            next,
+            blend,
+            self.composite.clone(),
+        ))
     }
 }
 
@@ -220,34 +211,35 @@ fn render_pair(
     first: Arc<RenderImage>,
     next: Arc<RenderImage>,
     blend: f32,
+    composite: Rc<RefCell<CompositeCache>>,
 ) -> AnyElement {
-    let layer = |frame, opacity| {
-        canvas(
-            |_, _, _| (),
-            move |bounds, (), window, _| {
-                if let Err(error) = window.paint_image(
-                    bounds,
-                    bounds,
-                    Corners::all(bounds.size.width / 2.0),
-                    frame,
-                    0,
-                    false,
-                ) {
-                    log::warn!("failed to paint vinyl cover: {error}");
-                }
-            },
-        )
-        .absolute()
-        .inset_0()
-        .opacity(opacity)
-    };
-    div()
-        .relative()
-        .size(px(side))
-        .flex_none()
-        .child(layer(first, 1.0))
-        .child(layer(next, blend))
-        .into_any_element()
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| {
+            let raster_side = (f32::from(bounds.size.width) * window.scale_factor()).ceil() as u32;
+            let result = composite
+                .borrow_mut()
+                .image(&first, &next, blend, raster_side, window)
+                .and_then(|image| {
+                    // Apply coverage once, after mixing. Independently masked
+                    // layers made the rim thicken as the blend approached 1.
+                    window.paint_image(
+                        bounds,
+                        bounds,
+                        Corners::all(bounds.size.width / 2.0),
+                        image,
+                        0,
+                        false,
+                    )
+                });
+            if let Err(error) = result {
+                log::warn!("failed to paint vinyl cover: {error}");
+            }
+        },
+    )
+    .size(px(side))
+    .flex_none()
+    .into_any_element()
 }
 
 #[cfg(test)]
