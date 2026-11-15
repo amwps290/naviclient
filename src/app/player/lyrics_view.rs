@@ -224,7 +224,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> Dialog {
         if self.lyrics_ui.dialog == Some(LyricsDialog::Timing) {
-            return self.render_lyrics_timing_dialog(dialog, cx);
+            return self.render_lyrics_timing_dialog(dialog, window, cx);
         }
         let compact = f32::from(window.viewport_size().width) < 820.0;
         let viewport_height = f32::from(window.viewport_size().height);
@@ -653,40 +653,4 @@ impl NavidromeApp {
             )
     }
 
-    fn render_lyrics_timing_dialog(&self, dialog: Dialog, cx: &Context<Self>) -> Dialog {
-        let offset = self
-            .state
-            .lyrics
-            .document
-            .as_ref()
-            .map_or(0, |d| d.offset_ms);
-        dialog.title(t!("Lyrics timing")).w(px(480.0))
-            .child(v_flex().gap_3()
-                .child(h_flex().gap_2().items_center().justify_between()
-                    .child(Button::new("lyrics-earlier").label(t!("Earlier 0.5 s")).outline().on_click(cx.listener(|this,_,window,cx| { this.adjust_lyrics_offset(-500,window,cx); })))
-                    .child(div().text_sm().child(t!("Offset: %{seconds} s",seconds=format!("{:+.1}",offset as f64/1000.0))))
-                    .child(Button::new("lyrics-later").label(t!("Later 0.5 s")).outline().on_click(cx.listener(|this,_,window,cx| { this.adjust_lyrics_offset(500,window,cx); }))))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Positive values delay lyrics; negative values show them earlier. Only this song is affected.")))
-                .child(h_flex().gap_2().items_center().child(Input::new(&self.lyrics_ui.offset).flex_1()).child(div().text_sm().child(t!("ms")))
-                    .child(Button::new("apply-lyrics-offset").label(t!("Apply")).primary().on_click(cx.listener(|this,_,_,cx| this.apply_lyrics_offset_input(cx))))
-                    .child(Button::new("reset-lyrics-offset").label(t!("Reset")).ghost().on_click(cx.listener(|this,_,window,cx| {
-                        this.change_lyrics_display(|d| d.offset_ms=0,cx);
-                        let offset=this.state.lyrics.document.as_ref().map_or(0,|d| d.offset_ms);
-                        this.lyrics_ui.offset.update(cx,|i,cx| i.set_value(offset.to_string(),window,cx));
-                    })))))
-            .footer(Button::new("close-lyrics-timing").label(t!("Done")).on_click(cx.listener(|this,_,window,cx| this.close_lyrics_dialog(window,cx))))
-    }
-
-    fn adjust_lyrics_offset(&mut self, delta: i64, window: &mut Window, cx: &mut Context<Self>) {
-        self.change_lyrics_display(|d| d.offset_ms = d.offset_ms.saturating_add(delta), cx);
-        let offset = self
-            .state
-            .lyrics
-            .document
-            .as_ref()
-            .map_or(0, |d| d.offset_ms);
-        self.lyrics_ui
-            .offset
-            .update(cx, |i, cx| i.set_value(offset.to_string(), window, cx));
-    }
 }

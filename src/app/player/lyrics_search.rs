@@ -31,6 +31,7 @@ pub(in crate::app) struct LyricsUi {
     pub artist: Entity<InputState>,
     pub album: Entity<InputState>,
     pub offset: Entity<InputState>,
+    pub(super) timing: Option<super::lyrics_timing::TimingEditor>,
     pub dialog: Option<LyricsDialog>,
     pub media: Option<MediaKey>,
     pub song_title: String,
@@ -57,6 +58,7 @@ impl LyricsUi {
             artist: cx.new(|cx| InputState::new(window, cx)),
             album: cx.new(|cx| InputState::new(window, cx)),
             offset: cx.new(|cx| InputState::new(window, cx)),
+            timing: None,
             dialog: None,
             media: None,
             song_title: String::new(),
@@ -82,6 +84,7 @@ impl LyricsUi {
         }
         self.request = None;
         self.media = None;
+        self.timing = None;
         if self.dialog.take().is_some() {
             self.close_requested = true;
         }
@@ -173,10 +176,25 @@ impl NavidromeApp {
         let Some(media) = self.lyrics_media(&song) else {
             return;
         };
+        if kind == LyricsDialog::Timing
+            && self
+                .state
+                .lyrics
+                .document
+                .as_ref()
+                .is_none_or(|d| !d.display_lyrics().is_synced())
+        {
+            return;
+        }
         self.lyrics_ui.cancel();
         self.lyrics_ui.close_requested = false;
         self.lyrics_ui.media = Some(media.clone());
         self.lyrics_ui.dialog = Some(kind);
+        if kind == LyricsDialog::Timing {
+            self.lyrics_ui.timing = self.state.lyrics.document.clone().map(|d| {
+                super::lyrics_timing::TimingEditor::new(d, self.playback_for_display().position)
+            });
+        }
         self.lyrics_ui.song_title = song.title.clone();
         let query = self
             .state
@@ -243,6 +261,24 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let position = self.playback_for_display().position;
+        if let Some(editor) = &mut self.lyrics_ui.timing {
+            if self
+                .state
+                .lyrics
+                .document
+                .as_ref()
+                .is_none_or(|d| d.timing_fingerprint() != editor.fingerprint)
+            {
+                self.lyrics_ui.cancel();
+            } else {
+                if !window.is_window_active() {
+                    editor.cancel_drag();
+                }
+                editor.sync_playback(position);
+                editor.center_anchor();
+            }
+        }
         if self.lyrics_ui.dialog.is_some()
             && self.lyrics_ui.media.as_ref()
                 != self
@@ -439,7 +475,10 @@ impl NavidromeApp {
 
     pub(in crate::app) fn apply_lyrics_offset_input(&mut self, cx: &mut Context<Self>) {
         if let Ok(offset) = self.lyrics_ui.offset.read(cx).value().trim().parse::<i64>() {
-            self.change_lyrics_display(|d| d.offset_ms = offset, cx);
+            if let Some(editor) = &mut self.lyrics_ui.timing {
+                editor.change(|d| d.offset_ms = offset);
+                cx.notify();
+            }
         } else {
             self.notify_error(t!("Enter a whole number of milliseconds."));
         }

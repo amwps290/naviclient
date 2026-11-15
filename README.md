@@ -197,6 +197,11 @@ JavaScript runtime.
   Preview alternative lyrics before applying them, remember a choice
   per source and song, restore automatic selection, or display synced lyrics as
   plain text. Per-song timing adjustments apply to both highlighting and seeking.
+  In Lyrics timing, drag the whole lyric preview up/down to move all lines and
+  words earlier/later; scrolling only browses. Word-timed lyrics use the same
+  progressive highlight as the player. Clicks do not select individual words or
+  open timestamps. Changes preview live, with 0.1-second nudges, undo and an
+  optional numeric Fine adjustment; Done saves and Cancel discards the draft.
   Remembered lyrics work offline, and clearing automatic cache keeps personal
   choices and timing adjustments.
 - Create, rename, and delete Navidrome playlists; add songs or whole albums,

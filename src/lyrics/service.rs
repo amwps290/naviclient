@@ -150,8 +150,7 @@ impl LyricsService {
                         {
                             let mut document = Document::online(record);
                             document.manual = true;
-                            document.plain = preference.plain;
-                            document.offset_ms = preference.offset_ms;
+                            preference.apply_display(&mut document);
                             document.query = preference.query.clone();
                             if let Err(error) = self.cache.remember(media, &document) {
                                 log::warn!("could not recover remembered lyrics cache: {error:#}");
@@ -174,8 +173,7 @@ impl LyricsService {
             progress(LyricsStatus::ReadingSource, None);
             match native().await {
                 Ok(Some(mut document)) => {
-                    document.plain = preference.plain;
-                    document.offset_ms = preference.offset_ms;
+                    preference.apply_display(&mut document);
                     return LoadOutcome::ready(document);
                 }
                 Err(error) => native_error = Some(error),
@@ -220,8 +218,7 @@ impl LyricsService {
             }
         }
         if let Some(document) = outcome.document.as_mut() {
-            document.plain = preference.plain;
-            document.offset_ms = preference.offset_ms;
+            preference.apply_display(document);
         }
         outcome
     }

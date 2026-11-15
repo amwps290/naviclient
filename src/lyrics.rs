@@ -10,6 +10,7 @@ pub(crate) mod online;
 pub(crate) mod provider;
 pub(crate) mod service;
 mod transport;
+pub(crate) mod timing;
 pub(crate) mod yrc;
 
 use crate::models::{network::SourceConnection, Lyrics};
@@ -76,6 +77,7 @@ pub(crate) struct Document {
     pub temporary: bool,
     pub plain: bool,
     pub offset_ms: i64,
+    pub timing_edits: Option<timing::TimingEdits>,
     pub query: Option<Query>,
 }
 
@@ -90,6 +92,7 @@ impl Document {
             temporary: false,
             plain: false,
             offset_ms: 0,
+            timing_edits: None,
             query: None,
         }
     }
@@ -107,7 +110,7 @@ impl Document {
     }
 
     pub fn display_lyrics(&self) -> Lyrics {
-        let mut lyrics = self.lyrics.clone();
+        let mut lyrics = self.edited_lyrics();
         for line in &mut lyrics.lines {
             line.end_ms = if self.plain {
                 None

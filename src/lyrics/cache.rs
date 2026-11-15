@@ -79,6 +79,16 @@ pub(crate) struct Preference {
     pub query: Option<Query>,
     pub plain: bool,
     pub offset_ms: i64,
+    #[serde(default)]
+    pub timing_edits: Option<super::timing::TimingEdits>,
+}
+
+impl Preference {
+    pub fn apply_display(&self, document: &mut Document) {
+        document.plain = self.plain;
+        document.offset_ms = self.offset_ms;
+        document.restore_timing_edits(self.timing_edits.clone());
+    }
 }
 
 #[derive(Clone)]
@@ -181,8 +191,7 @@ impl LyricsCache {
         }
         let mut document = Document::online((*record).clone());
         document.manual = true;
-        document.plain = preference.plain;
-        document.offset_ms = preference.offset_ms;
+        preference.apply_display(&mut document);
         document.query = preference.query.clone();
         Some(document)
     }
@@ -262,6 +271,7 @@ impl LyricsCache {
             preference.query = document.query.clone();
             preference.plain = document.plain;
             preference.offset_ms = document.offset_ms;
+            preference.timing_edits = document.timing_edits.clone();
             if let Some((body, record, bytes)) = record {
                 preference.record_id = Some(record.id);
                 preference.provider = record.source;
