@@ -1,7 +1,15 @@
-//! 迷你播放器窗口的封面、歌曲信息和播放控制渲染。
+//! Compact cover, metadata, transport and seek controls for the mini window.
+
+use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderTrack};
 
 use crate::app::prelude::*;
 use crate::app::style::cover_tint::{cover_tint, tint_background, TintSurface};
+
+const COVER_SIZE: f32 = 64.0;
+const COVER_INSET: f32 = 2.0;
+const CONTENT_PADDING: f32 = 12.0;
+const COVER_GAP: f32 = 10.0;
+const META_GAP: f32 = 8.0;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_mini(
@@ -10,15 +18,16 @@ impl NavidromeApp {
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let theme = cx.theme().clone();
+        let colors = palette(cx);
         let song = self.state.now_playing.clone();
         let has_track = song.is_some();
         let playback = self.playback_for_display();
         let is_playing = playback.active && !playback.paused;
         let duration = playback.duration.unwrap_or_default();
-        let progress_percent = if duration.is_zero() {
+        let progress = if duration.is_zero() {
             0.0
         } else {
-            (playback.position.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
+            (playback.position.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
         };
 
         let cover = song
@@ -27,228 +36,233 @@ impl NavidromeApp {
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
-
-        let accent = palette(cx).brand;
-        let background = tint_background(
-            cover_tint(
-                TintSurface::MiniPlayer,
-                self.now_playing_cover_palette(),
-                theme.background,
-                theme.is_dark(),
-            ),
+        let tint = cover_tint(
+            TintSurface::MiniPlayer,
+            self.now_playing_cover_palette(),
             theme.background,
-            120.0,
-        );
+            theme.is_dark(),
+        )
+        .unwrap_or((colors.brand_soft, colors.sunken));
+        let background = tint_background(Some(tint), theme.background, 115.0);
+
+        // The shared cache retains the angle when paused; the shell advances it.
+        let artwork_size = COVER_SIZE - COVER_INSET * 2.0;
+        let artwork = self
+            .vinyl_cover
+            .render(artwork_size, self.vinyl_cover.phase())
+            .unwrap_or_else(|| {
+                img(cover)
+                    .size(px(artwork_size))
+                    .aspect_square()
+                    .object_fit(ObjectFit::Cover)
+                    .rounded_full()
+                    .into_any_element()
+            });
+        let cover_button = div()
+            .size(px(COVER_SIZE))
+            .flex_none()
+            .rounded_full()
+            .shadow(cover_shadow(is_playing, cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .occlude()
+            .child(
+                Button::new("mini-cover")
+                    .accessibility_label(t!("Exit mini player"))
+                    .tooltip(t!("Exit mini player"))
+                    .ghost()
+                    .rounded_full()
+                    .size(px(COVER_SIZE))
+                    .p_0()
+                    .child(mini_cover_frame(artwork, cx))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.exit_mini_mode(window, cx);
+                        this.open_now_playing();
+                    })),
+            );
 
         let title = song
             .as_ref()
             .map(|song| song.title.clone())
             .unwrap_or_else(|| t!("No track playing").to_string());
-        let artist = song
-            .as_ref()
-            .map(|song| {
-                if let Some(part) = &song.bilibili_part {
-                    song.bilibili_subtitle().unwrap_or_else(|| {
-                        t!("Uploader: %{name}", name = part.uploader).to_string()
-                    })
-                } else {
-                    song.artist.clone()
-                }
-            })
-            .unwrap_or_else(|| t!("Choose a song").to_string());
+        let artist = if let Some(stall) = playback.stall {
+            t!("Buffering… %{seconds}s", seconds = stall.as_secs()).to_string()
+        } else if playback.error.is_some() {
+            t!("Playback failed — open for details").to_string()
+        } else {
+            song.as_ref()
+                .map(|song| {
+                    if let Some(part) = &song.bilibili_part {
+                        song.bilibili_subtitle().unwrap_or_else(|| {
+                            t!("Uploader: %{name}", name = part.uploader).to_string()
+                        })
+                    } else {
+                        song.artist.clone()
+                    }
+                })
+                .unwrap_or_else(|| t!("Choose a song").to_string())
+        };
 
-        let cover_element = img(cover)
-            // `on_click` only fires for elements with an id: it needs element state
-            // to track the press/release pair.
-            .id("mini-cover")
-            .size(px(34.0))
-            .aspect_square()
-            .object_fit(ObjectFit::Cover)
-            .flex_none()
-            .rounded_md()
-            .cursor_pointer()
-            // 播放中封面外发光随封面调色板同步，静止时保留一层柔和阴影。
-            .when(is_playing, |this| {
-                this.shadow(vec![
-                    box_shadow(px(0.0), px(0.0), px(8.0), px(0.0), accent.opacity(0.4)),
-                    box_shadow(px(0.0), px(0.0), px(16.0), px(0.0), accent.opacity(0.2)),
-                ])
-            })
-            .when(!is_playing, |this| this.shadow(cover_shadow(false, cx)))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.exit_mini_mode(window, cx);
-                this.open_now_playing();
-            }))
-            .occlude();
-
-        // Fixed widths in the mini row that leave room for the scrolling info text:
-        // px_1p5 padding (12) + cover (34) + gap_1p5 between the 4 row children (18)
-        // + controls (18+4+26+4+18 = 70) + expand button (18) = 152. On Linux the
-        // window shadow shrinks the content, so use the content (inner) width.
+        // Wheel changes briefly replace both time and progress with volume.
+        let volume_flash = self.volume.mini_flash_visible(std::time::Instant::now());
+        let volume = self.volume.output_volume(self.config.volume);
+        let time = if volume_flash {
+            format!("{}%", (volume * 100.0).round() as u32)
+        } else {
+            format_playback(playback.position)
+        };
+        // Hour-long tracks need more space than an ordinary m:ss label.
+        let time_width = (time.len() as f32 * 6.0).max(31.0);
         let paddings = window_paddings(window);
         let content_width = window.viewport_size().width - paddings.left - paddings.right;
-        let info_width = f32::from(content_width - px(152.0)).max(1.0);
+        let info_width =
+            f32::from(content_width - px(2.0 + CONTENT_PADDING * 2.0 + COVER_SIZE + COVER_GAP))
+                .max(1.0);
+        let artist_width = (info_width - time_width - META_GAP).max(1.0);
         let track_id = song
             .as_ref()
-            .map(|song| song.id.clone())
+            .map(|song| song.id.as_str())
             .unwrap_or_default();
         let title_id = SharedString::from(format!("mini-title-{track_id}"));
         let artist_id = SharedString::from(format!("mini-artist-{track_id}"));
-
-        let info = v_flex()
-            .flex_1()
-            .min_w_0()
-            .gap_0p5()
-            .overflow_hidden()
-            .id("mini-now-playing-info")
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.exit_mini_mode(window, cx);
-                this.open_now_playing();
-            }))
-            .occlude()
-            .child(self.render_scrolling_text(
-                title.clone().into(),
-                info_width,
-                rems(0.75).to_pixels(window.rem_size()),
-                FontWeight::SEMIBOLD,
-                title_id,
-                window,
-            ))
-            .child(
-                // 迷你窗口没有播放条，用灰字换掉艺人行来区分「在等网络」和
-                // 「真的出错」，否则用户看到的只是界面静止。
-                div()
-                    .text_color(theme.muted_foreground)
-                    .when(playback.stall.is_some(), |this| {
-                        this.child(t!(
-                            "Buffering… %{seconds}s",
-                            seconds = playback.stall.unwrap_or_default().as_secs()
-                        ))
-                    })
-                    .when(
-                        playback.stall.is_none() && playback.error.is_some(),
-                        |this| this.child(t!("Playback failed — open for details")),
-                    )
-                    .when(
-                        playback.stall.is_none() && playback.error.is_none(),
-                        |this| {
-                            this.child(self.render_scrolling_text(
-                                artist.clone().into(),
-                                info_width,
-                                px(10.0),
-                                FontWeight::NORMAL,
-                                artist_id,
-                                window,
-                            ))
-                        },
-                    ),
-            );
+        let title_tooltip = title.clone();
+        let artist_tooltip = artist.clone();
 
         let controls = h_flex()
-            .flex_none()
+            .w_full()
+            .h(px(30.0))
+            .mt(px(4.0))
             .items_center()
-            .gap_1()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .occlude()
-            .child(
+            .child(mini_control_slot(
                 Button::new("mini-previous")
-                    .icon(PlayerIcon::Previous)
+                    .child(Icon::new(PlayerIcon::Previous).with_size(px(14.0)))
+                    .accessibility_label(t!("Previous track"))
                     .tooltip(t!("Previous track"))
                     .ghost()
-                    .with_size(px(18.0))
+                    .with_size(px(27.0))
+                    .size(px(27.0))
+                    .p_0()
                     .rounded_full()
+                    .text_color(colors.text_secondary)
                     .disabled(!has_track)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.skip(-1);
                         cx.notify();
                     })),
-            )
-            .child(
-                Button::new("mini-play-pause")
-                    .icon(if is_playing {
-                        PlayerIcon::Pause
-                    } else {
-                        PlayerIcon::Play
-                    })
-                    .tooltip(if is_playing { t!("Pause") } else { t!("Play") })
-                    .primary()
-                    .with_size(px(26.0))
-                    .rounded_full()
-                    .disabled(!has_track)
-                    .on_click(cx.listener(|this, _, _, cx| {
+            ))
+            .child(mini_control_slot(
+                mini_play_button(is_playing, has_track, cx).on_click(cx.listener(
+                    |this, _, _, cx| {
                         this.toggle_playback();
                         cx.notify();
-                    })),
-            )
-            .child(
+                    },
+                )),
+            ))
+            .child(mini_control_slot(
                 Button::new("mini-next")
-                    .icon(PlayerIcon::Next)
+                    .child(Icon::new(PlayerIcon::Next).with_size(px(14.0)))
+                    .accessibility_label(t!("Next track"))
                     .tooltip(t!("Next track"))
                     .ghost()
-                    .with_size(px(18.0))
+                    .with_size(px(27.0))
+                    .size(px(27.0))
+                    .p_0()
                     .rounded_full()
+                    .text_color(colors.text_secondary)
                     .disabled(!has_track)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.skip(1);
                         cx.notify();
                     })),
-            );
+            ));
 
-        // 滚轮调音量后 1 秒内，进度线位置改为显示当前音量，给无面板的迷你窗口
-        // 一个即时反馈；平时仍显示播放进度。
-        let volume_flash = self.volume.mini_flash_visible(std::time::Instant::now());
-        let (bar_fraction, bar_color) = if volume_flash {
-            (
-                self.volume.output_volume(self.config.volume),
-                accent.opacity(0.95),
-            )
-        } else {
-            (progress_percent / 100.0, accent.opacity(0.9))
-        };
-        let progress_line = div()
-            .absolute()
-            .bottom_0()
-            .left_0()
-            .right_0()
-            .h(px(2.5))
-            .bg(accent.opacity(0.2))
+        let info = v_flex()
+            .flex_1()
+            .min_w_0()
             .child(
                 div()
-                    .h_full()
-                    .rounded_r_full()
-                    .w(relative(bar_fraction.clamp(0.0, 1.0)))
-                    .bg(bar_color),
-            );
+                    .id("mini-title")
+                    .h(px(18.0))
+                    .line_height(px(18.0))
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(title_tooltip.clone()).build(window, cx)
+                    })
+                    .child(self.render_scrolling_text(
+                        title.into(),
+                        info_width,
+                        px(14.0),
+                        FontWeight::SEMIBOLD,
+                        title_id,
+                        window,
+                    )),
+            )
+            .child(
+                h_flex()
+                    .h(px(15.0))
+                    .mt(px(1.0))
+                    .gap(px(META_GAP))
+                    .items_center()
+                    .text_color(colors.text_secondary)
+                    .child(
+                        div()
+                            .id("mini-artist")
+                            .flex_1()
+                            .min_w_0()
+                            .line_height(px(15.0))
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(artist_tooltip.clone()).build(window, cx)
+                            })
+                            .child(self.render_scrolling_text(
+                                artist.into(),
+                                artist_width,
+                                px(10.0),
+                                FontWeight::NORMAL,
+                                artist_id,
+                                window,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(time_width))
+                            .text_size(px(9.0))
+                            .line_height(px(15.0))
+                            .text_right()
+                            .child(time),
+                    ),
+            )
+            .child(controls);
 
-        let expand_button = Button::new("mini-expand")
-            .icon(AppIcon::Maximize)
-            .tooltip(t!("Exit mini player"))
-            .ghost()
-            .with_size(px(18.0))
-            .rounded_full()
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.exit_mini_mode(window, cx);
-            }));
-
-        // The mini player root is a window drag area, so the expand button needs to
-        // block the drag behind it (like the `controls` row) or its clicks would be
-        // turned into window moves.
-        let expand_button = h_flex()
-            .flex_none()
-            .items_center()
-            .occlude()
-            .child(expand_button);
+        // The shared slider's transport subscription handles seeking. A 16px
+        // track around its 2px indicator owns clicks/drags instead of window moves.
+        let seek_disabled = !has_track || duration.is_zero();
+        let bar_fraction = if volume_flash { volume } else { progress };
+        let progress_line = mini_seek_control(
+            &self.playback_slider,
+            seek_disabled,
+            bar_fraction,
+            colors.brand,
+            if is_playing || volume_flash {
+                0.62
+            } else {
+                0.35
+            },
+        );
 
         v_flex()
             .relative()
             .size_full()
+            .rounded(px(16.0))
+            .overflow_hidden()
             .bg(background)
             .border_1()
-            .border_color(theme.border.opacity(0.5))
-            .text_color(theme.foreground)
+            .border_color(if theme.is_dark() {
+                colors.border
+            } else {
+                hsla(0.0, 0.0, 1.0, 0.75)
+            })
+            .text_color(colors.text)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 if this.adjust_volume_from_scroll(event, window, cx) {
                     this.show_mini_volume_flash(cx);
@@ -262,17 +276,154 @@ impl NavidromeApp {
             })
             .child(
                 h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .px_1p5()
-                    .gap_1p5()
+                    .size_full()
+                    .px(px(CONTENT_PADDING))
+                    .pt(px(7.0))
+                    .pb(px(17.0))
+                    .gap(px(COVER_GAP))
                     .items_center()
-                    .child(cover_element)
-                    .child(info)
-                    .child(controls)
-                    .child(expand_button),
+                    .child(cover_button)
+                    .child(info),
             )
             .child(progress_line)
             .into_any_element()
     }
 }
+
+fn mini_play_button(playing: bool, has_track: bool, cx: &App) -> Button {
+    let colors = palette(cx);
+    let label = if playing { t!("Pause") } else { t!("Play") };
+    let background = if cx.theme().is_dark() {
+        colors.text
+    } else {
+        gpui_kit::rgb(tokens::MINI_PLAY_BACKGROUND).into()
+    };
+    let foreground = colors.page;
+    let hover = background.blend(colors.brand.opacity(0.16));
+    // Button owns its hover/active registration. Supply colors through its
+    // variant instead of adding another InteractiveElement::hover style.
+    let style = ButtonCustomVariant::new(cx)
+        .color(background)
+        .foreground(foreground)
+        .hover(hover)
+        .active(background.blend(colors.brand.opacity(0.24)))
+        .shadow(false);
+    Button::new("mini-play-pause")
+        .child(
+            Icon::new(if playing {
+                PlayerIcon::Pause
+            } else {
+                PlayerIcon::Play
+            })
+            .with_size(px(13.0)),
+        )
+        .accessibility_label(label.clone())
+        .tooltip(label)
+        .custom(style)
+        .with_size(px(30.0))
+        .size(px(30.0))
+        .p_0()
+        .rounded_full()
+        .bg(background)
+        .text_color(foreground)
+        .disabled(!has_track)
+        .when(!has_track, |this| this.opacity(0.45))
+}
+
+fn mini_control_slot(button: Button) -> gpui_kit::Div {
+    h_flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .justify_center()
+        .child(button)
+}
+
+fn mini_cover_frame(artwork: gpui_kit::AnyElement, cx: &App) -> gpui_kit::Div {
+    let colors = palette(cx);
+    div()
+        .relative()
+        .size(px(COVER_SIZE))
+        .flex_none()
+        .rounded_full()
+        .bg(linear_gradient(
+            135.0,
+            linear_color_stop(colors.text_muted.opacity(0.65), 0.0),
+            linear_color_stop(colors.raised.opacity(0.8), 1.0),
+        ))
+        .child(
+            div()
+                .absolute()
+                .inset(px(COVER_INSET))
+                .rounded_full()
+                .child(artwork),
+        )
+        .child(
+            div()
+                .absolute()
+                .inset(px(COVER_INSET))
+                .rounded_full()
+                .border_1()
+                .border_color(hsla(0.0, 0.0, 1.0, 0.24)),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px((COVER_SIZE - 5.0) / 2.0))
+                .top(px((COVER_SIZE - 5.0) / 2.0))
+                .size(px(5.0))
+                .rounded_full()
+                .border_1()
+                .border_color(hsla(0.0, 0.0, 0.85, 1.0))
+                .bg(hsla(0.0, 0.0, 0.25, 1.0)),
+        )
+}
+
+fn mini_seek_control(
+    slider: &Entity<SliderState>,
+    disabled: bool,
+    fraction: f32,
+    accent: Hsla,
+    opacity: f32,
+) -> gpui_kit::Div {
+    div()
+        .absolute()
+        .left(px(16.0))
+        .right(px(16.0))
+        .bottom(px(2.0))
+        .h(px(16.0))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .occlude()
+        .child(
+            BaseSlider::new(slider)
+                .disabled(disabled)
+                .size_full()
+                .child(
+                    SliderTrack::new(slider)
+                        .disabled(disabled)
+                        .relative()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .when(!disabled, |this| this.cursor_pointer())
+                        .child(
+                            SliderIndicator::new(slider)
+                                .relative()
+                                .w_full()
+                                .h(px(2.0))
+                                .rounded_full()
+                                .bg(accent.opacity(0.12))
+                                .child(
+                                    div()
+                                        .h_full()
+                                        .w(relative(fraction.clamp(0.0, 1.0)))
+                                        .rounded_full()
+                                        .bg(accent.opacity(opacity)),
+                                ),
+                        ),
+                ),
+        )
+}
+
+#[cfg(test)]
+mod tests;

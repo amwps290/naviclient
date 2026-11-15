@@ -231,8 +231,9 @@ JavaScript runtime.
   Controls work while minimized; a missing session bus does not prevent startup.
 - Repeated songs and albums have independent hover controls, including across
   Home sections and within the playback queue
-- Rotating vinyl cover art while the lyrics page is visible;
-  pauses only when the window is hidden and reuses cached textures at up to 20 fps.
+- Rotating vinyl cover art on the lyrics page and mini player;
+  pauses at the current angle when playback pauses or the window is hidden,
+  and renders at up to 20 fps.
   Only the current cover is cached (120 frames at 192×192, about 17 MiB of
   pixels plus GPU atlas storage); preparation runs once in a throttled background
   worker, delivering the next visible frames first so rotation starts without
@@ -248,10 +249,13 @@ JavaScript runtime.
   artwork, and explicitly evicts decoded GPUI textures with a 96-item LRU to
   bound the largest cover-related GPU/system-memory allocation.
 - Mini-player mode that shrinks the main window into a compact, always-on-top
-  widget (260x56) with cover art, song title, prev/next/play controls, a thin
-  bottom progress line, and a dynamic cover-colored animated background. The
-  cover glows with the track's accent color while playing; scrolling the wheel
-  over the window adjusts volume and briefly flashes it on the progress line
+  widget (272x96) with a rotating circular cover on the left and the song title,
+  artist, elapsed time and evenly spaced prev/play/next controls on the right.
+  It uses a rounded surface with transparent corners, a soft cover-colored
+  gradient and a thin, draggable seek bar. Clicking
+  the cover returns to the lyrics page; dragging the background moves the window.
+  Scrolling the wheel adjusts volume and briefly shows it in the time label
+  and progress line. Long metadata and buffering/error feedback remain readable.
 - Server settings persisted locally as JSON
 - Language preference persisted locally (`System` by default); the Windows tray
   menu keeps the language it was built with until the next launch, while the

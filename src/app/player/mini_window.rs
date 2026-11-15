@@ -12,6 +12,8 @@ impl NavidromeApp {
             return;
         };
         self.state.settings.close();
+        set_mini_window_surface(window, true, cx);
+        self.mini_window.frame.set_mini(window, true);
         window.resize(target);
         set_always_on_top(window, true);
         cx.notify();
@@ -21,6 +23,8 @@ impl NavidromeApp {
         let Some(restore) = self.mini_window.exit() else {
             return;
         };
+        set_mini_window_surface(window, false, cx);
+        self.mini_window.frame.set_mini(window, false);
         window.resize(restore.size);
         if restore.maximized && !window.is_maximized() {
             window.zoom_window();
@@ -43,3 +47,21 @@ impl NavidromeApp {
         }
     }
 }
+
+fn set_mini_window_surface(window: &mut Window, mini: bool, cx: &mut App) {
+    // The kit's Root paints a rectangular theme background behind our rounded
+    // card. Both that surface and the native window must support transparency.
+    gpui_kit::base::Root::update(window, cx, |root, _, cx| {
+        root.style().background = mini.then(|| gpui_kit::transparent_black().into());
+        cx.notify();
+    });
+    window.set_background_appearance(if mini {
+        gpui_kit::WindowBackgroundAppearance::Transparent
+    } else {
+        // Removing the Root override also restores the current theme color.
+        gpui_kit::WindowBackgroundAppearance::Opaque
+    });
+}
+
+#[cfg(test)]
+mod tests;

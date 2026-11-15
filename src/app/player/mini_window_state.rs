@@ -2,11 +2,12 @@
 
 use gpui_kit::{px, size, Edges, Pixels, Size};
 
+use crate::app::desktop::mini_frame::MiniWindowFrame;
+
 // WindowBorder adds client-side shadow padding on Linux. Adding those edges
-// keeps the mini player's drawable content at 260x56 on every platform.
-// This width leaves the title/artist column enough room to avoid constant scrolling.
-const MINI_CONTENT_WIDTH: Pixels = px(260.0);
-const MINI_CONTENT_HEIGHT: Pixels = px(56.0);
+// keeps the mini player's drawable content at 272x96 on every platform.
+const MINI_CONTENT_WIDTH: Pixels = px(272.0);
+const MINI_CONTENT_HEIGHT: Pixels = px(96.0);
 const RESIZE_TOLERANCE: Pixels = px(1.0);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,6 +24,7 @@ struct MiniWindow {
 #[derive(Default)]
 pub(in crate::app) struct MiniWindowState {
     mini: Option<MiniWindow>,
+    pub(in crate::app) frame: MiniWindowFrame,
 }
 
 impl MiniWindowState {

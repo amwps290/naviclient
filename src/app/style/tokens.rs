@@ -122,6 +122,7 @@ pub(in crate::app) const PLAYER_MARGIN: f32 = 12.0;
 pub(in crate::app) const PLAYER_COMPACT_MARGIN: f32 = 8.0;
 pub(in crate::app) const PLAY_BUTTON: f32 = 40.0;
 pub(in crate::app) const PLAY_BUTTON_COMPACT: f32 = 36.0;
+pub(in crate::app) const MINI_PLAY_BACKGROUND: u32 = 0x443B4D;
 pub(in crate::app) const PAGE_PADDING: f32 = 32.0;
 pub(in crate::app) const PAGE_PADDING_COMPACT: f32 = 20.0;
 

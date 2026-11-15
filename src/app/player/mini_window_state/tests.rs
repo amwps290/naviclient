@@ -18,7 +18,7 @@ fn entering_and_exiting_preserves_custom_main_window_geometry() {
     let mut state = MiniWindowState::default();
     let target = state.enter(main_size(), false, Edges::default()).unwrap();
     assert!(state.is_mini());
-    assert_eq!(target, size(px(260.0), px(56.0)));
+    assert_eq!(target, size(px(272.0), px(96.0)));
     assert!(state.resize_target(target).is_none());
     assert_eq!(
         state.exit().unwrap(),
@@ -40,9 +40,9 @@ fn client_side_decoration_edges_are_added_to_the_content_size() {
         bottom: px(18.0),
     };
     let target = state.enter(main_size(), false, paddings).unwrap();
-    assert_eq!(target, size(px(288.0), px(82.0)));
-    assert_eq!(target.width - paddings.left - paddings.right, px(260.0));
-    assert_eq!(target.height - paddings.top - paddings.bottom, px(56.0));
+    assert_eq!(target, size(px(300.0), px(122.0)));
+    assert_eq!(target.width - paddings.left - paddings.right, px(272.0));
+    assert_eq!(target.height - paddings.top - paddings.bottom, px(96.0));
     assert_eq!(state.resize_target(main_size()), Some(target));
 }
 
@@ -161,7 +161,7 @@ fn fractional_decoration_sizes_preserve_the_drawable_content_dimensions() {
         bottom: px(4.5),
     };
     let target = state.enter(main_size(), false, paddings).unwrap();
-    assert_eq!(target.width - paddings.left - paddings.right, px(260.0));
-    assert_eq!(target.height - paddings.top - paddings.bottom, px(56.0));
+    assert_eq!(target.width - paddings.left - paddings.right, px(272.0));
+    assert_eq!(target.height - paddings.top - paddings.bottom, px(96.0));
     assert!(state.resize_target(target).is_none());
 }

@@ -282,7 +282,7 @@ fn lyric_scroll_redraws_paused_playback_until_scroll_finishes() {
 }
 
 #[test]
-fn settings_mini_and_browsing_views_use_standard_presentation() {
+fn mini_presentation_takes_priority_over_the_underlying_view() {
     assert_eq!(
         PlaybackPresentation::for_view(View::NowPlaying, false, false),
         PlaybackPresentation::NowPlaying
@@ -304,7 +304,11 @@ fn settings_mini_and_browsing_views_use_standard_presentation() {
             for mini in [false, true] {
                 assert_eq!(
                     PlaybackPresentation::for_view(view, settings_open, mini),
-                    PlaybackPresentation::Standard
+                    if mini {
+                        PlaybackPresentation::MiniPlayer
+                    } else {
+                        PlaybackPresentation::Standard
+                    }
                 );
             }
         }
@@ -312,14 +316,19 @@ fn settings_mini_and_browsing_views_use_standard_presentation() {
     for (settings_open, mini) in [(true, false), (false, true), (true, true)] {
         assert_eq!(
             PlaybackPresentation::for_view(View::NowPlaying, settings_open, mini),
-            PlaybackPresentation::Standard
+            if mini {
+                PlaybackPresentation::MiniPlayer
+            } else {
+                PlaybackPresentation::Standard
+            }
         );
     }
 }
 
 #[test]
-fn cover_animation_requires_visible_active_unpaused_now_playing() {
+fn cover_animation_requires_visible_active_unpaused_playback_in_a_cover_view() {
     assert!(PlaybackPresentation::NowPlaying.animate_cover(&playing(), true));
+    assert!(PlaybackPresentation::MiniPlayer.animate_cover(&playing(), true));
     for (visible, active, paused) in [
         (false, true, false),
         (true, false, false),
@@ -335,6 +344,7 @@ fn cover_animation_requires_visible_active_unpaused_now_playing() {
             ..PlaybackState::default()
         };
         assert!(!PlaybackPresentation::NowPlaying.animate_cover(&playback, visible));
+        assert!(!PlaybackPresentation::MiniPlayer.animate_cover(&playback, visible));
     }
     for visible in [false, true] {
         for active in [false, true] {
@@ -348,4 +358,20 @@ fn cover_animation_requires_visible_active_unpaused_now_playing() {
             }
         }
     }
+}
+
+#[test]
+fn mini_player_clock_uses_the_animation_cadence_without_forcing_idle_redraws() {
+    let mut playback = playing();
+    let mini = |playback: &PlaybackState| RedrawRequest {
+        presentation: PlaybackPresentation::MiniPlayer,
+        ..request(playback)
+    };
+    let mut polls = Polls::new();
+    assert!(polls.at(0, mini(&playback)));
+    playback.position = Duration::from_millis(49);
+    assert!(!polls.at(49, mini(&playback)));
+    assert!(polls.at(50, mini(&playback)));
+    assert!(!polls.at(100, mini(&playback)));
+    assert!(!polls.at(60_000, mini(&playback)));
 }
