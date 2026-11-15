@@ -7,6 +7,7 @@ pub(in crate::app) mod lyrics_search;
 pub(in crate::app) mod lyrics_state;
 pub(in crate::app) mod lyrics_timing;
 pub(in crate::app) mod lyrics_view;
+mod mini_surface;
 pub(in crate::app) mod mini_view;
 pub(in crate::app) mod mini_window;
 pub(in crate::app) mod mini_window_state;

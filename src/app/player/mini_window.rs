@@ -23,6 +23,7 @@ impl NavidromeApp {
         let Some(restore) = self.mini_window.exit() else {
             return;
         };
+        self.mini_window.surface.borrow_mut().release(window);
         set_mini_window_surface(window, false, cx);
         self.mini_window.frame.set_mini(window, false);
         window.resize(restore.size);

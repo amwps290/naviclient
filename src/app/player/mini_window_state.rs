@@ -2,6 +2,7 @@
 
 use gpui_kit::{px, size, Edges, Pixels, Size};
 
+use super::mini_surface::MiniSurface;
 use crate::app::desktop::mini_frame::MiniWindowFrame;
 
 // WindowBorder adds client-side shadow padding on Linux. Adding those edges
@@ -25,6 +26,7 @@ struct MiniWindow {
 pub(in crate::app) struct MiniWindowState {
     mini: Option<MiniWindow>,
     pub(in crate::app) frame: MiniWindowFrame,
+    pub(super) surface: std::rc::Rc<std::cell::RefCell<MiniSurface>>,
 }
 
 impl MiniWindowState {

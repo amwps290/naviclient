@@ -3,7 +3,7 @@
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderTrack};
 
 use crate::app::prelude::*;
-use crate::app::style::cover_tint::{cover_tint, tint_background, TintSurface};
+use crate::app::style::cover_tint::{cover_tint, TintSurface};
 
 const COVER_SIZE: f32 = 64.0;
 const COVER_INSET: f32 = 2.0;
@@ -43,7 +43,35 @@ impl NavidromeApp {
             theme.is_dark(),
         )
         .unwrap_or((colors.brand_soft, colors.sunken));
-        let background = tint_background(Some(tint), theme.background, 115.0);
+        let border = if theme.is_dark() {
+            colors.border
+        } else {
+            hsla(0.0, 0.0, 1.0, 0.22)
+        };
+        let surface_cache = self.mini_window.surface.clone();
+        let surface = gpui_kit::canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                let scale = window.scale_factor();
+                let width = (f32::from(bounds.size.width) * scale).round().max(1.0) as u32;
+                let height = (f32::from(bounds.size.height) * scale).round().max(1.0) as u32;
+                let image = surface_cache
+                    .borrow_mut()
+                    .image(width, height, scale, tint, border, window);
+                if let Err(error) = window.paint_image(
+                    bounds,
+                    bounds,
+                    gpui_kit::Corners::all(px(0.0)),
+                    image,
+                    0,
+                    false,
+                ) {
+                    log::warn!("failed to paint mini surface: {error}");
+                }
+            },
+        )
+        .absolute()
+        .inset_0();
 
         // The shared cache retains the angle when paused; the shell advances it.
         let artwork_size = COVER_SIZE - COVER_INSET * 2.0;
@@ -253,15 +281,11 @@ impl NavidromeApp {
         v_flex()
             .relative()
             .size_full()
-            .rounded(px(16.0))
+            .rounded(px(super::mini_surface::RADIUS))
             .overflow_hidden()
-            .bg(background)
-            .border_1()
-            .border_color(if theme.is_dark() {
-                colors.border
-            } else {
-                hsla(0.0, 0.0, 1.0, 0.75)
-            })
+            // Retain the former border's layout inset. Padding lets the
+            // absolute surface reach the outer bounds without border clipping.
+            .p(px(1.0))
             .text_color(colors.text)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 if this.adjust_volume_from_scroll(event, window, cx) {
@@ -274,6 +298,7 @@ impl NavidromeApp {
             .when(cfg!(not(target_os = "windows")), |this| {
                 this.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             })
+            .child(surface)
             .child(
                 h_flex()
                     .size_full()
@@ -380,9 +405,10 @@ fn mini_seek_control(
 ) -> gpui_kit::Div {
     div()
         .absolute()
-        .left(px(16.0))
-        .right(px(16.0))
-        .bottom(px(2.0))
+        // Include the former 1px border inset in absolute coordinates.
+        .left(px(17.0))
+        .right(px(17.0))
+        .bottom(px(3.0))
         .h(px(16.0))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .occlude()
