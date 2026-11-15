@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <defs>
+        <linearGradient id="sky" x1=".1" y1="0" x2=".95" y2="1"><stop stop-color="#f4eadc"/><stop offset=".55" stop-color="#e5d7d6"/><stop offset="1" stop-color="#c6c5d9"/></linearGradient>
+        <radialGradient id="glow" cx=".8" cy=".17" r=".7"><stop stop-color="#fff7df" stop-opacity=".9"/><stop offset="1" stop-color="#fff7df" stop-opacity="0"/></radialGradient>
+        <linearGradient id="violet" x1=".08" y1=".3" x2=".9" y2=".8"><stop stop-color="#555575"/><stop offset=".38" stop-color="#777da6"/><stop offset=".71" stop-color="#9295b8"/><stop offset="1" stop-color="#b3b1c6"/></linearGradient>
+        <linearGradient id="cream" x1=".06" y1="1" x2=".9" y2=".16"><stop stop-color="#cf9788"/><stop offset=".45" stop-color="#e5c0ab"/><stop offset=".8" stop-color="#f6e5cb"/><stop offset="1" stop-color="#fdf2d9"/></linearGradient>
+        <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#fff6e9" stop-opacity="0"/><stop offset=".68" stop-color="#fff6e9" stop-opacity=".5"/><stop offset="1" stop-color="#fff6e9" stop-opacity=".1"/></linearGradient>
+        <radialGradient id="orb" cx=".28" cy=".26" r=".8"><stop stop-color="#e9b99e"/><stop offset="1" stop-color="#c58b87"/></radialGradient>
+        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#605279" flood-opacity=".15"/></filter>
+        <filter id="orb-shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="-2" dy="8" stdDeviation="7" flood-color="#8d6c7d" flood-opacity=".12"/></filter>
+      </defs>
+      <path fill="url(#sky)" d="M0 0h512v512H0z"/><path fill="url(#glow)" d="M0 0h512v512H0z"/>
+      <circle cx="377" cy="129" r="49" fill="url(#orb)" filter="url(#orb-shadow)"/>
+      <path d="M-71 355C32 117 171 134 242 278S425 383 573 156" fill="none" stroke="url(#violet)" stroke-width="126" stroke-linecap="round" filter="url(#soft)"/>
+      <path d="M-49 460C8 288 112 331 193 371S419 311 558 94" fill="none" stroke="url(#cream)" stroke-width="78" stroke-linecap="round" filter="url(#soft)"/>
+      <path d="M-43 423C18 262 122 297 209 335S432 275 548 78" fill="none" stroke="url(#edge)" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>

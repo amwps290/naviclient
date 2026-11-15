@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>NaviClient · 默认封面设计</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: light; --page: #f5f3ef; --surface: #fbfaf7; --ink: #38343d; --muted: #91868d; --line: #e4dedc; --accent: #936978; --selected: #ae8996; --board: #eae6e3; --tint-a: #e8dfd4; --tint-b: #ddd9e4; }
+    :root[data-theme="dark"] { color-scheme: dark; --page: #1b1c22; --surface: #23242c; --ink: #e8e3e0; --muted: #a59ca6; --line: #393841; --accent: #c59aaa; --selected: #ab7f96; --board: #2a2a33; --tint-a: #373139; --tint-b: #30313f; }
+    body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.6 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    button, input { font: inherit; }
+    button { cursor: pointer; color: inherit; }
+    button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+    button { -webkit-tap-highlight-color: transparent; }
+    h1, h2, h3, p { margin: 0; }
+    img { display: block; }
+    .page { width: min(1140px, calc(100% - 80px)); margin: 0 auto; }
+    .masthead { padding: 28px 0 23px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; letter-spacing: -.3px; }
+    .brand svg { width: 27px; height: 27px; }
+    .top-tools { display: flex; align-items: center; gap: 24px; }
+    .study { font: 10px/1.4 Consolas, monospace; letter-spacing: 1.5px; color: var(--muted); }
+    .theme-button { display: flex; align-items: center; gap: 7px; padding: 5px 0 5px 12px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; }
+    .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .intro { padding: 33px 0 27px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+    .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: 2.6px; margin-bottom: 6px; }
+    h1 { font-size: 34px; line-height: 1.35; font-weight: 550; letter-spacing: -1px; }
+    .intro p { margin-top: 9px; color: var(--muted); font-size: 12px; }
+    .intro-note { font-size: 10px; color: var(--muted); padding-bottom: 3px; white-space: nowrap; }
+    .directions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+    .direction { display: block; padding: 0; border: 0; background: transparent; text-align: left; min-width: 0; }
+    .artboard { display: grid; place-items: center; height: 254px; border: 1px solid var(--line); border-radius: 16px; background: var(--board); position: relative; transition: border-color .2s; }
+    .direction:hover .artboard { border-color: var(--selected); }
+    .direction[aria-pressed="true"] .artboard { border-color: var(--selected); box-shadow: 0 0 0 1px var(--selected); }
+    .cover-large { width: 190px; height: 190px; border-radius: 10px; box-shadow: 0 15px 28px -12px #352b424a, 0 2px 5px #3027360a; }
+    .choice { position: absolute; top: 14px; right: 14px; width: 17px; height: 17px; border: 1px solid var(--muted); opacity: .45; border-radius: 50%; }
+    .direction[aria-pressed="true"] .choice { background: var(--selected); border-color: var(--selected); opacity: 1; }
+    .direction[aria-pressed="true"] .choice::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid white; border-bottom: 1.5px solid white; transform: rotate(-45deg); position: absolute; left: 4px; top: 4px; }
+    .caption { padding: 15px 2px 0; }
+    .caption-heading { display: flex; align-items: center; gap: 10px; }
+    .number { font: 11px/1 Consolas, monospace; color: var(--muted); }
+    .caption h2 { font-size: 15px; font-weight: 550; }
+    .caption p { color: var(--muted); font-size: 11px; margin: 6px 0 0 26px; }
+    .selection-heading { margin: 33px 0 15px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .selection-heading h2 { font-size: 16px; font-weight: 550; }
+    .selection-heading h2 span { color: var(--muted); margin-left: 12px; font-size: 11px; font-weight: 400; }
+    .downloads { display: flex; gap: 8px; }
+    .download { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; }
+    .download:hover { color: var(--ink); border-color: var(--selected); }
+    .download:disabled { cursor: wait; opacity: .5; }
+    .download .icon { width: 13px; height: 13px; }
+    .contexts { display: grid; grid-template-columns: minmax(0, 1.42fr) minmax(0, 1fr); gap: 22px; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; min-width: 0; }
+    .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 19px; }
+    .panel-heading h3 { font-size: 11px; font-weight: 550; }
+    .panel-heading span { font: 10px/1.4 Consolas, monospace; color: var(--muted); }
+    .mini-stage { min-height: 205px; padding: 40px 20px; display: flex; overflow: auto; background: linear-gradient(125deg, #eae7e2, #dedee5); }
+    :root[data-theme="dark"] .mini-stage { background: linear-gradient(125deg, #2c2b32, #222530); }
+    .mini-mount { --zoom: 1; position: relative; flex: none; width: calc(272px * var(--zoom)); height: calc(96px * var(--zoom)); margin: auto; }
+    .mini { width: 272px; height: 96px; position: absolute; top: 0; left: 0; transform: scale(var(--zoom)); transform-origin: top left; border-radius: 14px; background: linear-gradient(115deg, var(--tint-a), var(--tint-b)); box-shadow: 0 10px 20px -12px #45374685, inset 0 0 0 1px #ffffff24; padding: 8px 13px 18px; display: flex; align-items: center; gap: 10px; color: #3b3441; }
+    :root[data-theme="dark"] .mini { color: #e9e1e7; box-shadow: 0 10px 20px -12px #000b, inset 0 0 0 1px #ffffff0e; }
+    .cover-frame { width: 64px; height: 64px; padding: 2px; flex: none; border-radius: 50%; background: linear-gradient(135deg, #ffffff60, #6d607c28); box-shadow: 0 4px 10px -4px #42344260; }
+    .disc { width: 60px; height: 60px; border-radius: 50%; overflow: hidden; position: relative; }
+    .disc img { width: 100%; height: 100%; animation: spin 20s linear infinite; animation-play-state: paused; }
+    :root[data-playing="true"][data-rotation="true"] .disc img { animation-play-state: running; }
+    .spindle { position: absolute; width: 5px; height: 5px; top: 27.5px; left: 27.5px; border-radius: 50%; background: #3e3a3b; border: 1px solid #dad5d2; }
+    .track-info { min-width: 0; flex: 1; }
+    .track-title { font-size: 14px; font-weight: 650; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track-meta { display: flex; gap: 8px; margin-top: 1px; align-items: center; line-height: 15px; color: #7c707e; }
+    :root[data-theme="dark"] .track-meta { color: #b2a5b5; }
+    .track-artist { font-size: 10px; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .time { font-size: 9px; font-variant-numeric: tabular-nums; flex: none; }
+    .transport { display: flex; margin-top: 4px; height: 30px; align-items: center; justify-content: space-around; }
+    .control { width: 27px; height: 27px; padding: 7px; border: 0; border-radius: 50%; background: transparent; color: #746b75; display: grid; place-items: center; }
+    .control:hover { background: #746b7512; }
+    :root[data-theme="dark"] .control { color: #c9bbc9; }
+    .control .icon { width: 13px; height: 13px; }
+    .control.play { width: 30px; height: 30px; background: #443b4d; color: #f8f5f0; }
+    :root[data-theme="dark"] .control.play { background: #e9e1e7; color: #29232e; }
+    .seek { position: absolute; left: 17px; right: 17px; bottom: 9px; height: 2px; background: #aa859525; border-radius: 3px; }
+    .seek-fill { width: 28%; height: 100%; border-radius: inherit; background: var(--accent); opacity: .62; }
+    .seek input { position: absolute; top: -7px; left: 0; width: 100%; height: 16px; opacity: 0; margin: 0; cursor: pointer; }
+    .seek:focus-within { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .preview-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 19px; }
+    .rotation-label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .rotation-label input { accent-color: var(--accent); width: 12px; height: 12px; margin: 0; }
+    .segments { display: flex; gap: 2px; border: 1px solid var(--line); padding: 2px; border-radius: 6px; }
+    .segments button { border: 0; border-radius: 4px; background: transparent; color: var(--muted); padding: 3px 8px; font-size: 10px; }
+    .segments button[aria-pressed="true"] { background: var(--board); color: var(--ink); }
+    .library { padding: 2px 19px 16px; }
+    .album { display: flex; align-items: center; gap: 18px; padding-bottom: 20px; }
+    .album img { width: 116px; height: 116px; flex: none; border-radius: 8px; box-shadow: 0 5px 14px -6px #352b4230; }
+    .album-kicker { font-size: 9px; letter-spacing: 1.6px; color: var(--muted); margin-bottom: 7px; }
+    .album h3 { font-size: 17px; font-weight: 550; line-height: 1.5; }
+    .album p { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .album small { display: block; color: var(--muted); font-size: 9px; margin-top: 12px; }
+    .song { display: flex; align-items: center; gap: 11px; border-top: 1px solid var(--line); padding: 10px 0; }
+    .song img { width: 40px; height: 40px; border-radius: 5px; flex: none; }
+    .song-text { min-width: 0; flex: 1; }
+    .song-text strong { display: block; font-size: 11px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .song-text small { color: var(--muted); font-size: 10px; }
+    .song-duration { font: 10px/1.5 Consolas, monospace; color: var(--muted); }
+    .baseline { margin-top: 22px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .baseline summary { padding: 15px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .comparison { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 32px; padding: 10px 0 26px; }
+    .comparison figure { margin: 0; }
+    .comparison figure > img { width: 144px; height: 144px; border-radius: 10px; }
+    .comparison figcaption { margin-top: 10px; font-size: 10px; color: var(--muted); }
+    .comparison .round img { width: 60px; height: 60px; border-radius: 50%; }
+    .comparison-note { max-width: 280px; color: var(--muted); font-size: 11px; margin: 3px 0 0 8px; }
+    .footer { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 32px; color: var(--muted); font-size: 10px; gap: 20px; }
+    .footer .selection { color: var(--accent); }
+    .download-status { min-height: 16px; font-size: 10px; color: var(--muted); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 920px) { .page { width: calc(100% - 40px); } .directions { gap: 14px; } .artboard { height: 218px; } .cover-large { width: 154px; height: 154px; } .contexts { grid-template-columns: 1fr; } .mini-stage { min-height: 218px; } .library { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; } .album { grid-row: span 2; padding: 0; } .song { border-top: 0; } }
+    @media (max-width: 600px) { .page { width: calc(100% - 36px); } .masthead { padding: 22px 0 18px; } .study { display: none; } .top-tools { gap: 10px; } .intro { padding: 27px 0 22px; } h1 { font-size: 29px; } .intro-note { display: none; } .intro p { font-size: 11px; } .directions { grid-template-columns: 1fr; gap: 24px; } .artboard { height: 246px; } .cover-large { width: 182px; height: 182px; } .caption { padding-top: 11px; } .selection-heading { flex-wrap: wrap; margin-top: 30px; gap: 11px; } .selection-heading h2 span { margin-left: 9px; } .contexts { gap: 16px; } .mini-stage { min-height: 195px; padding: 32px 16px; } .preview-tools { padding: 13px 15px; } .library { display: block; padding: 0 16px 9px; } .album { padding-bottom: 18px; } .album img { width: 108px; height: 108px; } .song { border-top: 1px solid var(--line); } .comparison { gap: 23px; } .comparison figure > img { width: 138px; height: 138px; } .comparison-note { margin: 0; } .footer { flex-direction: column; align-items: flex-start; gap: 5px; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } .disc img { animation: none !important; } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m7 4 13 8-13 8Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="5" y="4" width="5" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="14" y="4" width="5" height="16" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="m18 5-10 7 10 7Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="m6 5 10 7-10 7Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></symbol>
+  </defs></svg>
+
+  <div class="page">
+    <header class="masthead">
+      <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#443b4d"/><circle cx="16" cy="16" r="6" fill="#d9ad90"/><circle cx="16" cy="16" r="1.8" fill="#443b4d"/><path d="M7 16a9 9 0 0 1 9-9" fill="none" stroke="#dfd8e5" opacity=".45" stroke-width="1.2"/></svg>NaviClient</div>
+      <div class="top-tools"><span class="study">COVER STUDY / 02</span><button class="theme-button" id="theme" aria-pressed="false" aria-label="切换到深色界面"><svg class="icon"><use href="#i-theme"/></svg><span id="theme-label">深色界面</span></button></div>
+    </header>
+    <main>
+      <div class="intro"><div><p class="eyebrow">A PLACE FOR EVERY SONG</p><h1>默认封面</h1><p>唱片、色块与符号。放进真实尺寸里，选一种喜欢的。</p></div><span class="intro-note">点击任意封面，查看界面里的样子</span></div>
+
+      <section class="directions" aria-label="三种默认封面设计">
+        <button class="direction" data-design="vinyl" aria-pressed="false" aria-label="选择静谧唱片">
+          <div class="artboard"><img class="cover-large" data-art="vinyl" alt="灰紫背景上的黑胶唱片与暖铜色中心标签"><span class="choice" aria-hidden="true"></span></div>
+          <div class="caption"><div class="caption-heading"><span class="number">01</span><h2>静谧唱片</h2></div><p>暖铜标签，柔和反光，留一点唱片的质感。</p></div>
+        </button>
+        <button class="direction" data-design="abstract" aria-pressed="true" aria-label="选择流动声场">
+          <div class="artboard"><img class="cover-large" data-art="abstract" alt="奶油底色上交织的蓝紫与杏色流动曲线"><span class="choice" aria-hidden="true"></span></div>
+          <div class="caption"><div class="caption-heading"><span class="number">02</span><h2>流动声场</h2></div><p>层叠的色带，像声音慢慢经过空气。</p></div>
+        </button>
+        <button class="direction" data-design="minimal" aria-pressed="false" aria-label="选择一枚音符">
+          <div class="artboard"><img class="cover-large" data-art="minimal" alt="暖灰纸色上的深梅紫音乐符号"><span class="choice" aria-hidden="true"></span></div>
+          <div class="caption"><div class="caption-heading"><span class="number">03</span><h2>一枚音符</h2></div><p>干净的留白，小尺寸里也能一眼认出来。</p></div>
+        </button>
+      </section>
+
+      <div class="selection-heading"><h2>在界面里<span id="selected-name">02 · 流动声场</span></h2><div class="downloads"><button class="download" id="download-png" aria-label="下载当前封面的 1024 像素 PNG"><svg class="icon"><use href="#i-save"/></svg>下载 PNG</button><button class="download" id="download-svg" aria-label="下载当前封面的 SVG">SVG</button></div></div>
+      <section class="contexts" aria-label="所选封面在不同位置的预览">
+        <div class="panel">
+          <div class="panel-heading"><h3>迷你播放器</h3><span>272 × 96</span></div>
+          <div class="mini-stage"><div class="mini-mount" id="mini-mount"><section class="mini" aria-label="迷你播放器示意">
+            <div class="cover-frame"><div class="disc"><img data-selected-art alt="所选默认封面"><span class="spindle" aria-hidden="true"></span></div></div>
+            <div class="track-info"><div class="track-title" id="track-title">风经过窗边</div><div class="track-meta"><span class="track-artist" id="track-artist">房东的猫</span><span class="time" id="time">0:42</span></div><div class="transport">
+              <button class="control" id="previous" aria-label="上一首示意歌曲"><svg class="icon"><use href="#i-prev"/></svg></button>
+              <button class="control play" id="play" aria-label="播放"><svg class="icon"><use id="play-icon" href="#i-play"/></svg></button>
+              <button class="control" id="next" aria-label="下一首示意歌曲"><svg class="icon"><use href="#i-next"/></svg></button>
+            </div></div>
+            <div class="seek"><div class="seek-fill" id="seek-fill"></div><input type="range" id="seek" min="0" max="248" value="42" step="1" aria-label="示意播放进度"></div>
+          </section></div></div>
+          <div class="preview-tools"><label class="rotation-label"><input type="checkbox" id="rotation" checked>播放时旋转封面</label><div class="segments" aria-label="预览比例"><button data-zoom="1" aria-pressed="true">实际尺寸</button><button data-zoom="2" aria-pressed="false">放大 2 倍</button></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-heading"><h3>专辑与歌曲列表</h3><span>116 / 40</span></div>
+          <div class="library">
+            <article class="album"><img data-selected-art alt="专辑使用所选默认封面"><div><div class="album-kicker">ALBUM</div><h3>生活的片刻</h3><p>房东的猫</p><small>2025 · 8 首歌曲</small></div></article>
+            <div class="song"><img data-selected-art alt="歌曲使用所选默认封面"><div class="song-text"><strong>风经过窗边</strong><small>房东的猫 · 生活的片刻</small></div><span class="song-duration">4:08</span></div>
+            <div class="song"><img data-selected-art alt="歌曲使用所选默认封面"><div class="song-text"><strong>把日子慢慢唱给你听</strong><small>房东的猫 · 生活的片刻</small></div><span class="song-duration">3:46</span></div>
+          </div>
+        </div>
+      </section>
+      <details class="baseline"><summary>展开原版对照</summary><div class="comparison">
+        <figure><img src="default-cover-original.png" alt="原版紫红背景、密集沟槽和橙色标签的默认封面"><figcaption>原版 · 方形</figcaption></figure>
+        <figure><img data-selected-art alt="所选新版默认封面"><figcaption>所选方向 · 方形</figcaption></figure>
+        <figure class="round"><img src="default-cover-original.png" alt="原版默认封面的圆形裁切"><figcaption>原版 · 60px</figcaption></figure>
+        <figure class="round"><img data-selected-art alt="所选新版封面的圆形裁切"><figcaption>所选方向 · 60px</figcaption></figure>
+        <p class="comparison-note">重点看看缩小后的轮廓、中心图形与留白。点击播放，也可以比较圆形封面转起来的感觉。</p>
+      </div></details>
+      <p class="download-status" id="download-status" role="status" aria-live="polite"></p>
+    </main>
+    <footer class="footer"><span>封面设计稿 · 示意歌曲与播放进度</span><span class="selection" id="footer-selection">当前方向：流动声场</span></footer>
+  </div>
+
+  <template id="art-vinyl">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <defs>
+        <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ede8df"/><stop offset=".52" stop-color="#dfd8d6"/><stop offset="1" stop-color="#c8c5d4"/></linearGradient>
+        <radialGradient id="air" cx=".23" cy=".14" r=".92"><stop stop-color="#fff7e7" stop-opacity=".65"/><stop offset="1" stop-color="#fff7e7" stop-opacity="0"/></radialGradient>
+        <linearGradient id="disc" x1=".1" y1="0" x2=".85" y2="1"><stop stop-color="#36333c"/><stop offset=".42" stop-color="#22222b"/><stop offset="1" stop-color="#161923"/></linearGradient>
+        <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#b1a8b7" stop-opacity=".75"/><stop offset=".42" stop-color="#7f778d" stop-opacity=".08"/><stop offset="1" stop-color="#0c111b" stop-opacity=".5"/></linearGradient>
+        <linearGradient id="light" x1="0" y1="1" x2="1" y2="0"><stop offset=".28" stop-color="#dad7e8" stop-opacity="0"/><stop offset=".47" stop-color="#dad7e8" stop-opacity=".10"/><stop offset=".58" stop-color="#dad7e8" stop-opacity=".02"/><stop offset=".78" stop-color="#dad7e8" stop-opacity="0"/></linearGradient>
+        <linearGradient id="label" x1=".16" y1="0" x2=".83" y2="1"><stop stop-color="#e9c3a4"/><stop offset=".52" stop-color="#d5aa8e"/><stop offset="1" stop-color="#b9826e"/></linearGradient>
+        <linearGradient id="label-rim" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff0d4" stop-opacity=".6"/><stop offset="1" stop-color="#866456" stop-opacity=".2"/></linearGradient>
+        <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="11" stdDeviation="10" flood-color="#302636" flood-opacity=".22"/></filter>
+        <clipPath id="disc-clip"><circle cx="256" cy="256" r="194"/></clipPath>
+      </defs>
+      <path fill="url(#paper)" d="M0 0h512v512H0z"/><path fill="url(#air)" d="M0 0h512v512H0z"/>
+      <circle cx="256" cy="256" r="194" fill="url(#disc)" filter="url(#shadow)"/>
+      <circle cx="256" cy="256" r="193.5" fill="none" stroke="url(#rim)" stroke-width="1.8"/>
+      <g fill="none" stroke="#b8b0c5" stroke-width="1.1"><circle cx="256" cy="256" r="181" opacity=".11"/><circle cx="256" cy="256" r="169" opacity=".07"/><circle cx="256" cy="256" r="157" opacity=".09"/><circle cx="256" cy="256" r="145" opacity=".06"/><circle cx="256" cy="256" r="133" opacity=".08"/><circle cx="256" cy="256" r="121" opacity=".05"/><circle cx="256" cy="256" r="109" opacity=".07"/><circle cx="256" cy="256" r="97" opacity=".04"/></g>
+      <path d="M44 42h424v428H44z" fill="url(#light)" clip-path="url(#disc-clip)"/>
+      <circle cx="256" cy="256" r="72" fill="url(#label)"/>
+      <circle cx="256" cy="256" r="71.5" fill="none" stroke="url(#label-rim)" stroke-width="1.5"/>
+      <circle cx="256" cy="256" r="59" fill="none" stroke="#fff0d5" stroke-opacity=".22" stroke-width=".85"/>
+      <path d="M226 234c4-6 9-10 15-13" fill="none" stroke="#fff4df" stroke-opacity=".21" stroke-width="1.4" stroke-linecap="round"/>
+      <circle cx="256" cy="256" r="9" fill="#62504e"/><circle cx="256" cy="256" r="6.8" fill="#22212a"/>
+      <path d="M251 251a7 7 0 0 1 8-1" fill="none" stroke="#f3dbc4" stroke-opacity=".65" stroke-width="1.2" stroke-linecap="round"/>
+    </svg>
+  </template>
+  <template id="art-abstract">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <defs>
+        <linearGradient id="sky" x1=".1" y1="0" x2=".95" y2="1"><stop stop-color="#f4eadc"/><stop offset=".55" stop-color="#e5d7d6"/><stop offset="1" stop-color="#c6c5d9"/></linearGradient>
+        <radialGradient id="glow" cx=".8" cy=".17" r=".7"><stop stop-color="#fff7df" stop-opacity=".9"/><stop offset="1" stop-color="#fff7df" stop-opacity="0"/></radialGradient>
+        <linearGradient id="violet" x1=".08" y1=".3" x2=".9" y2=".8"><stop stop-color="#555575"/><stop offset=".38" stop-color="#777da6"/><stop offset=".71" stop-color="#9295b8"/><stop offset="1" stop-color="#b3b1c6"/></linearGradient>
+        <linearGradient id="cream" x1=".06" y1="1" x2=".9" y2=".16"><stop stop-color="#cf9788"/><stop offset=".45" stop-color="#e5c0ab"/><stop offset=".8" stop-color="#f6e5cb"/><stop offset="1" stop-color="#fdf2d9"/></linearGradient>
+        <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#fff6e9" stop-opacity="0"/><stop offset=".68" stop-color="#fff6e9" stop-opacity=".5"/><stop offset="1" stop-color="#fff6e9" stop-opacity=".1"/></linearGradient>
+        <radialGradient id="orb" cx=".28" cy=".26" r=".8"><stop stop-color="#e9b99e"/><stop offset="1" stop-color="#c58b87"/></radialGradient>
+        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#605279" flood-opacity=".15"/></filter>
+        <filter id="orb-shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="-2" dy="8" stdDeviation="7" flood-color="#8d6c7d" flood-opacity=".12"/></filter>
+      </defs>
+      <path fill="url(#sky)" d="M0 0h512v512H0z"/><path fill="url(#glow)" d="M0 0h512v512H0z"/>
+      <circle cx="377" cy="129" r="49" fill="url(#orb)" filter="url(#orb-shadow)"/>
+      <path d="M-71 355C32 117 171 134 242 278S425 383 573 156" fill="none" stroke="url(#violet)" stroke-width="126" stroke-linecap="round" filter="url(#soft)"/>
+      <path d="M-49 460C8 288 112 331 193 371S419 311 558 94" fill="none" stroke="url(#cream)" stroke-width="78" stroke-linecap="round" filter="url(#soft)"/>
+      <path d="M-43 423C18 262 122 297 209 335S432 275 548 78" fill="none" stroke="url(#edge)" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>
+  </template>
+  <template id="art-minimal">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+      <defs>
+        <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eee8df"/><stop offset="1" stop-color="#ddd4d7"/></linearGradient>
+        <radialGradient id="light" cx=".23" cy=".16" r=".9"><stop stop-color="#fff9ec" stop-opacity=".62"/><stop offset="1" stop-color="#fff9ec" stop-opacity="0"/></radialGradient>
+        <linearGradient id="ink" x1=".1" y1="0" x2=".85" y2="1"><stop stop-color="#69545f"/><stop offset="1" stop-color="#46384e"/></linearGradient>
+      </defs>
+      <path fill="url(#paper)" d="M0 0h512v512H0z"/><path fill="url(#light)" d="M0 0h512v512H0z"/>
+      <path d="M248 153c0-10 8-18 18-18 42 0 73 23 81 59-28-15-49-17-73-10v134c0 30-25 52-56 52-30 0-52-18-52-43 0-28 27-50 59-50 8 0 15 1 23 4Z" fill="url(#ink)"/>
+      <path d="M272 147c23 1 44 10 58 25" fill="none" stroke="#a88c98" stroke-opacity=".42" stroke-width="1.7" stroke-linecap="round"/>
+      <circle cx="346" cy="351" r="8" fill="#c79d88"/>
+    </svg>
+  </template>
+  <script>
+    const $ = selector => document.querySelector(selector);
+    const root = document.documentElement;
+    const designs = {
+      vinyl: { name: '静谧唱片', number: '01', light: ['#e8dfd4', '#ddd9e4'], dark: ['#373139', '#30313f'], accent: ['#936978', '#c59aaa'] },
+      abstract: { name: '流动声场', number: '02', light: ['#ece0d5', '#dcddec'], dark: ['#3c333a', '#31384c'], accent: ['#7976a2', '#aaa3d1'] },
+      minimal: { name: '一枚音符', number: '03', light: ['#e9e2d9', '#e5dce1'], dark: ['#383237', '#3b303f'], accent: ['#8d6c7e', '#c29cac'] }
+    };
+    const artwork = Object.fromEntries(Object.keys(designs).map(id => [id, $('#art-' + id).innerHTML.trim()]));
+    const artUrls = Object.fromEntries(Object.entries(artwork).map(([id, svg]) => [id, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)]));
+    const songs = [
+      { title: '风经过窗边', artist: '房东的猫', duration: 248 },
+      { title: '把日子慢慢唱给你听', artist: '房东的猫', duration: 226 },
+      { title: '夜色将至', artist: '陈粒', duration: 237 }
+    ];
+    let selected = 'abstract';
+    let dark = false;
+    let playing = false;
+    let songIndex = 0;
+    let position = 42;
+    let lastTick = performance.now();
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    $('#rotation').checked = !reducedMotion.matches;
+    root.dataset.rotation = String($('#rotation').checked);
+    root.dataset.playing = 'false';
+    document.querySelectorAll('[data-art]').forEach(img => { img.src = artUrls[img.dataset.art]; });
+
+    function selectDesign(id) {
+      if (!designs[id]) return;
+      selected = id;
+      const design = designs[id];
+      document.querySelectorAll('[data-design]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.design === id)));
+      document.querySelectorAll('[data-selected-art]').forEach(img => { img.src = artUrls[id]; });
+      $('#selected-name').textContent = design.number + ' · ' + design.name;
+      $('#footer-selection').textContent = '当前方向：' + design.name;
+      $('#download-status').textContent = '';
+      updatePalette();
+    }
+    function updatePalette() {
+      const design = designs[selected];
+      const colors = design[dark ? 'dark' : 'light'];
+      root.style.setProperty('--tint-a', colors[0]);
+      root.style.setProperty('--tint-b', colors[1]);
+      root.style.setProperty('--accent', design.accent[Number(dark)]);
+    }
+    function setTheme(value) {
+      dark = value;
+      root.dataset.theme = dark ? 'dark' : 'light';
+      $('#theme').setAttribute('aria-pressed', String(dark));
+      $('#theme').setAttribute('aria-label', dark ? '切换到浅色界面' : '切换到深色界面');
+      $('#theme-label').textContent = dark ? '浅色界面' : '深色界面';
+      updatePalette();
+    }
+    const formatTime = seconds => Math.floor(seconds / 60) + ':' + String(Math.floor(seconds % 60)).padStart(2, '0');
+    function renderProgress() {
+      $('#time').textContent = formatTime(position);
+      $('#seek').value = position;
+      $('#seek').setAttribute('aria-valuetext', formatTime(position) + ' / ' + formatTime(songs[songIndex].duration));
+      $('#seek-fill').style.width = position / songs[songIndex].duration * 100 + '%';
+    }
+    function setPlaying(value) {
+      playing = value;
+      lastTick = performance.now();
+      root.dataset.playing = String(value);
+      $('#play-icon').setAttribute('href', value ? '#i-pause' : '#i-play');
+      $('#play').setAttribute('aria-label', value ? '暂停' : '播放');
+    }
+    function selectSong(index) {
+      songIndex = (index + songs.length) % songs.length;
+      const song = songs[songIndex];
+      $('#track-title').textContent = song.title;
+      $('#track-title').title = song.title;
+      $('#track-artist').textContent = song.artist;
+      $('#seek').max = song.duration;
+      position = 0;
+      renderProgress();
+    }
+    function downloadBlob(blob, extension, id) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'default-cover-' + id + '.' + extension;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    document.querySelectorAll('[data-design]').forEach(button => button.addEventListener('click', () => selectDesign(button.dataset.design)));
+    $('#theme').addEventListener('click', () => setTheme(!dark));
+    $('#play').addEventListener('click', () => setPlaying(!playing));
+    $('#previous').addEventListener('click', () => selectSong(songIndex - 1));
+    $('#next').addEventListener('click', () => selectSong(songIndex + 1));
+    $('#rotation').addEventListener('change', () => { root.dataset.rotation = String($('#rotation').checked); });
+    $('#seek').addEventListener('input', () => { position = Number($('#seek').value); renderProgress(); });
+    document.querySelectorAll('[data-zoom]').forEach(button => button.addEventListener('click', () => {
+      $('#mini-mount').style.setProperty('--zoom', button.dataset.zoom);
+      document.querySelectorAll('[data-zoom]').forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+    }));
+    $('#download-svg').addEventListener('click', () => {
+      downloadBlob(new Blob([artwork[selected]], { type: 'image/svg+xml;charset=utf-8' }), 'svg', selected);
+      $('#download-status').textContent = designs[selected].name + ' · SVG 已准备好';
+    });
+    $('#download-png').addEventListener('click', async () => {
+      const button = $('#download-png');
+      const id = selected;
+      button.disabled = true;
+      try {
+        const image = new Image();
+        image.src = artUrls[id];
+        await image.decode();
+        const source = document.createElement('canvas');
+        source.width = source.height = 2048;
+        source.getContext('2d').drawImage(image, 0, 0, 2048, 2048);
+        const output = document.createElement('canvas');
+        output.width = output.height = 1024;
+        const context = output.getContext('2d');
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(source, 0, 0, 1024, 1024);
+        const blob = await new Promise(resolve => output.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('PNG export failed');
+        downloadBlob(blob, 'png', id);
+        $('#download-status').textContent = designs[id].name + ' · 1024 × 1024 PNG 已准备好';
+      } catch (_) {
+        $('#download-status').textContent = '图片暂时无法下载，请再试一次。';
+      } finally { button.disabled = false; }
+    });
+    setInterval(() => {
+      const now = performance.now();
+      if (playing && !document.hidden) {
+        position = (position + Math.min((now - lastTick) / 1000, 1)) % songs[songIndex].duration;
+        renderProgress();
+      }
+      lastTick = now;
+    }, 200);
+    const params = new URLSearchParams(location.search);
+    selectDesign(params.get('design') || 'abstract');
+    setTheme(params.get('theme') === 'dark');
+    renderProgress();
+  </script>
+</body>
+</html>

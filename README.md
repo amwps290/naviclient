@@ -451,6 +451,12 @@ application asset source combines custom player icons with Kit's built-in icons.
 Application icon loading and enumeration use one embedded-file registry, keeping
 custom asset precedence and the existing icon paths.
 
+The default cover uses abstract blue-violet and peach ribbons. Its editable
+source is `assets/default-cover.svg`; the client embeds the generated 1024px
+`assets/default-cover.png`. To regenerate it, run `python assets/gen_default_cover.py`
+with Pillow and a local Chrome, Chromium, or Edge installation. The generator
+renders at twice the output size and downsamples with Lanczos filtering.
+
 Audio implementation modules import dependencies explicitly from their owning
 modules rather than relying on parent wildcard imports. Decoder buffer sizes,
 startup/stall timing, HTTP retry counts and disk-cache capacity live with their
