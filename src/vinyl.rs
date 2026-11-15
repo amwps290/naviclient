@@ -13,6 +13,7 @@ use gpui_kit::{
 use tokio::runtime::Runtime;
 
 mod frames;
+pub(crate) mod motion;
 mod rotation;
 
 use frames::build_frames;
@@ -35,6 +36,24 @@ pub struct VinylCover {
     pending: Option<Pending>,
     failed: bool,
     rotation: Rotation,
+    frozen: Option<FrozenCover>,
+}
+
+/// Two textures retain the exact visible angle while the old record is removed.
+struct FrozenCover {
+    first: Arc<RenderImage>,
+    next: Arc<RenderImage>,
+    blend: f32,
+}
+
+impl FrozenCover {
+    fn contains(&self, frame: &Arc<RenderImage>) -> bool {
+        Arc::ptr_eq(&self.first, frame) || Arc::ptr_eq(&self.next, frame)
+    }
+
+    fn render(&self, side: f32) -> AnyElement {
+        render_pair(side, self.first.clone(), self.next.clone(), self.blend)
+    }
 }
 
 impl Default for VinylCover {
@@ -45,11 +64,51 @@ impl Default for VinylCover {
             pending: None,
             failed: false,
             rotation: Rotation::default(),
+            frozen: None,
         }
     }
 }
 
 impl VinylCover {
+    pub(crate) fn freeze(&mut self, window: &mut Window) {
+        self.release_frozen(window);
+        let (first, next, blend) = frame_pair(self.phase());
+        if let Some(first) = self.frames[first].as_ref() {
+            self.frozen = Some(FrozenCover {
+                first: first.clone(),
+                next: self.frames[next].as_ref().unwrap_or(first).clone(),
+                blend,
+            });
+        }
+    }
+
+    pub(crate) fn render_frozen(&self, side: f32) -> Option<AnyElement> {
+        self.frozen.as_ref().map(|frozen| frozen.render(side))
+    }
+
+    pub(crate) fn release_frozen(&mut self, window: &mut Window) {
+        let Some(frozen) = self.frozen.take() else {
+            return;
+        };
+        let same_frame = Arc::ptr_eq(&frozen.first, &frozen.next);
+        for frame in [Some(frozen.first), (!same_frame).then_some(frozen.next)]
+            .into_iter()
+            .flatten()
+        {
+            // A same-album exchange can still use these in the current cache.
+            if !self
+                .frames
+                .iter()
+                .flatten()
+                .any(|current| Arc::ptr_eq(current, &frame))
+            {
+                if let Err(error) = window.drop_image(frame) {
+                    log::warn!("failed to release outgoing vinyl texture: {error}");
+                }
+            }
+        }
+    }
+
     pub fn cancel_pending(&mut self) {
         self.pending = None;
     }
@@ -102,6 +161,13 @@ impl VinylCover {
         if self.source_id != Some(source.id) {
             self.cancel_pending();
             for frame in self.frames.iter_mut().filter_map(Option::take) {
+                if self
+                    .frozen
+                    .as_ref()
+                    .is_some_and(|frozen| frozen.contains(&frame))
+                {
+                    continue;
+                }
                 // Dropping the Arc alone does not release GPUI's atlas entries.
                 if let Err(error) = window.drop_image(frame) {
                     log::warn!("failed to release vinyl textures: {error}");
@@ -145,36 +211,43 @@ impl VinylCover {
         let (first, next, blend) = frame_pair(phase);
         let first = self.frames[first].as_ref()?.clone();
         let next = self.frames[next].as_ref().unwrap_or(&first).clone();
-        let layer = |frame, opacity| {
-            canvas(
-                |_, _, _| (),
-                move |bounds, (), window, _| {
-                    if let Err(error) = window.paint_image(
-                        bounds,
-                        bounds,
-                        Corners::all(bounds.size.width / 2.0),
-                        frame,
-                        0,
-                        false,
-                    ) {
-                        log::warn!("failed to paint vinyl cover: {error}");
-                    }
-                },
-            )
-            .absolute()
-            .inset_0()
-            .opacity(opacity)
-        };
-        Some(
-            div()
-                .relative()
-                .size(px(side))
-                .flex_none()
-                .child(layer(first, 1.0))
-                .child(layer(next, blend))
-                .into_any_element(),
-        )
+        Some(render_pair(side, first, next, blend))
     }
+}
+
+fn render_pair(
+    side: f32,
+    first: Arc<RenderImage>,
+    next: Arc<RenderImage>,
+    blend: f32,
+) -> AnyElement {
+    let layer = |frame, opacity| {
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                if let Err(error) = window.paint_image(
+                    bounds,
+                    bounds,
+                    Corners::all(bounds.size.width / 2.0),
+                    frame,
+                    0,
+                    false,
+                ) {
+                    log::warn!("failed to paint vinyl cover: {error}");
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+        .opacity(opacity)
+    };
+    div()
+        .relative()
+        .size(px(side))
+        .flex_none()
+        .child(layer(first, 1.0))
+        .child(layer(next, blend))
+        .into_any_element()
 }
 
 #[cfg(test)]

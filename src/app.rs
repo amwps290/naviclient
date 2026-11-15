@@ -66,6 +66,7 @@ pub struct NavidromeApp {
     global_shortcuts: GlobalShortcutManager,
     default_cover: Arc<GpuiImage>,
     vinyl_cover: VinylCover,
+    turntable: covers::turntable::Turntable,
     state: AppState,
     playlist_ui: PlaylistUi,
     import_ui: ImportUi,

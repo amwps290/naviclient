@@ -15,6 +15,7 @@ impl Render for NavidromeApp {
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
         self.mark_cover_image_used(&cover);
+        self.sync_turntable(cover.clone(), &playback, window);
         let animate_cover = self
             .playback_presentation()
             .animate_cover(&playback, window.is_visible());

@@ -59,19 +59,23 @@ impl NavidromeApp {
 
     pub(in crate::app) fn render_vinyl_record(
         &self,
-        cover_id: Option<&str>,
         size: f32,
-        rotation_phase: f32,
-        tonearm_engaged: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let cover = self
-            .state
-            .now_playing
-            .as_ref()
-            .and_then(|song| self.song_cover_image(song))
-            .cloned()
-            .unwrap_or_else(|| self.default_cover.clone());
+        let motion = self.turntable.motion.frame();
+        let cover = if motion.outgoing {
+            self.turntable.outgoing_cover.as_ref()
+        } else {
+            self.turntable.cover.as_ref()
+        }
+        .cloned()
+        .unwrap_or_else(|| self.default_cover.clone());
+        let rotation_phase = if motion.outgoing {
+            self.turntable.outgoing_phase
+        } else {
+            self.vinyl_cover.phase()
+        };
+        let tonearm_engaged = motion.arm_degrees > 0.5;
         self.mark_cover_image_used(&cover);
         let label_size = size * 0.5;
         let label_offset = (size - label_size) * 0.5;
@@ -84,35 +88,21 @@ impl NavidromeApp {
         let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
         let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
         let tonearm_base_size = size * 0.105;
-        let tonearm_engaged_turns = 28.0 / 360.0;
         let metal_tint = self
             .now_playing_cover_palette()
             .map_or(palette(cx).text_muted, |(_, accent)| accent);
         let metal_body = hsla(0.1, 0.025, 0.78, 1.0).blend(metal_tint.opacity(0.06));
-        let cover_key = cover_id.unwrap_or("default");
-        let tonearm_layer =
-            |icon: AppIcon, layer: &'static str, offset_x: f32, offset_y: f32, color: Hsla| {
-                Icon::new(icon)
-                    .absolute()
-                    .left(px(tonearm_left + offset_x))
-                    .top(px(tonearm_top + offset_y))
-                    .with_size(px(tonearm_size))
-                    .text_color(color)
-                    .with_animation(
-                        SharedString::from(format!(
-                            "tonearm-{layer}-{cover_key}-{tonearm_engaged}"
-                        )),
-                        Animation::new(Duration::from_millis(650)).with_easing(ease_out_quint()),
-                        move |icon, delta| {
-                            let rotation = if tonearm_engaged {
-                                delta * tonearm_engaged_turns
-                            } else {
-                                (1.0 - delta) * tonearm_engaged_turns
-                            };
-                            icon.transform(Transformation::rotate(percentage(rotation)))
-                        },
-                    )
-            };
+        let tonearm_layer = |icon: AppIcon, offset_x: f32, offset_y: f32, color: Hsla| {
+            Icon::new(icon)
+                .absolute()
+                .left(px(tonearm_left + offset_x))
+                .top(px(tonearm_top + offset_y))
+                .with_size(px(tonearm_size))
+                .text_color(color)
+                .transform(Transformation::rotate(percentage(
+                    motion.arm_degrees / 360.0,
+                )))
+        };
         let tonearm_base = div()
             .absolute()
             .left(px(tonearm_pivot_x - tonearm_base_size * 0.5))
@@ -182,10 +172,13 @@ impl NavidromeApp {
             .with_size(px(size))
             .text_color(hsla(0.0, 0.0, 1.0, 0.12));
 
-        div()
-            .relative()
+        let record = div()
+            .absolute()
+            .left(px(size * motion.record.x))
+            .top(px(size * motion.record.y))
             .w(px(size))
             .h(px(size))
+            .opacity(motion.record.opacity)
             .flex_none()
             .rounded_full()
             .bg(linear_gradient(
@@ -268,17 +261,20 @@ impl NavidromeApp {
                     .items_center()
                     .justify_center()
                     .child(
-                        self.vinyl_cover
-                            .render(inner_cover_size, rotation_phase)
-                            .unwrap_or_else(|| {
-                                img(cover)
-                                    .size(px(inner_cover_size))
-                                    .aspect_square()
-                                    .object_fit(ObjectFit::Cover)
-                                    .flex_none()
-                                    .rounded_full()
-                                    .into_any_element()
-                            }),
+                        if motion.outgoing {
+                            self.vinyl_cover.render_frozen(inner_cover_size)
+                        } else {
+                            self.vinyl_cover.render(inner_cover_size, rotation_phase)
+                        }
+                        .unwrap_or_else(|| {
+                            img(cover)
+                                .size(px(inner_cover_size))
+                                .aspect_square()
+                                .object_fit(ObjectFit::Cover)
+                                .flex_none()
+                                .rounded_full()
+                                .into_any_element()
+                        }),
                     )
                     .child(
                         div()
@@ -304,45 +300,40 @@ impl NavidromeApp {
                                     .bg(hsla(0.0, 0.0, 0.025, 1.0)),
                             ),
                     ),
-            )
+            );
+
+        div()
+            .relative()
+            .size(px(size))
+            .flex_none()
+            .child(record)
             .child(tonearm_layer(
                 AppIcon::Tonearm,
-                "shadow-close",
                 size * 0.005,
                 size * 0.008,
                 hsla(0.0, 0.0, 0.0, 0.24),
             ))
-            .child(tonearm_layer(
-                AppIcon::Tonearm,
-                "body",
-                0.0,
-                0.0,
-                metal_body,
-            ))
+            .child(tonearm_layer(AppIcon::Tonearm, 0.0, 0.0, metal_body))
             .child(tonearm_layer(
                 AppIcon::TonearmShade,
-                "shade",
                 0.0,
                 0.0,
                 hsla(0.1, 0.025, 0.12, 0.94),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmHighlight,
-                "highlight",
                 0.0,
                 0.0,
                 hsla(0.0, 0.0, 1.0, 0.5),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
-                "stylus-shadow",
                 size * 0.005,
                 size * 0.008,
                 hsla(0.0, 0.0, 0.0, 0.24),
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
-                "stylus",
                 0.0,
                 0.0,
                 hsla(0.0, 0.0, 1.0, 0.65),

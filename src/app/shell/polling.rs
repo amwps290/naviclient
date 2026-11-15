@@ -71,9 +71,17 @@ impl NavidromeApp {
         // 隐藏/最小化时才暂停重绘，避免切到别的应用后界面“冻住”。
         let visible = window.is_visible();
         let presentation = self.playback_presentation();
+        let display_playback = self.playback_for_display();
+        let now = std::time::Instant::now();
+        changed |= self.tick_turntable(
+            now,
+            &display_playback,
+            self.turntable_visible(window),
+            window,
+        );
         changed |= self.vinyl_cover.tick(
-            std::time::Instant::now(),
-            presentation.animate_cover(&playback, visible),
+            now,
+            presentation.animate_cover(&playback, visible) && !self.turntable.motion.exchanging(),
         );
         if !visible {
             self.vinyl_cover.cancel_pending();

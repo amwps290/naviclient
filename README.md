@@ -238,6 +238,12 @@ JavaScript runtime.
   worker, delivering the next visible frames first so rotation starts without
   waiting for the full cache. Its resolution is capped on high-DPI displays to
   keep memory bounded.
+  Switching tracks on this page parks the tonearm, slides the old record out,
+  inserts the new one and lowers the arm (about 2 seconds). The outgoing cover
+  retains only two frozen frames; quick skips update the destination record.
+  The stylus follows playback progress from the outer to the inner groove,
+  with smooth seeking and pause/resume motion. Exchanges finish immediately
+  when the page is hidden, settings open or the mini player is active.
 - Cover loading keeps at most four downloads/decodes in flight, requests 384px
   artwork, and explicitly evicts decoded GPUI textures with a 96-item LRU to
   bound the largest cover-related GPU/system-memory allocation.
@@ -515,6 +521,7 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
 - `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, progressive frame delivery and cancellation, and bounded background raster generation
 - `src/vinyl/rotation.rs` - texture-independent rotation timing and adjacent-frame selection, advancing only when both frames are drawable
+- `src/vinyl/motion.rs` and `src/app/covers/turntable.rs` - record-exchange timing, progress-driven tonearm motion and outgoing cover retention
 - `src/media_session.rs` and `src/media_session/` - shared media commands and snapshots, Linux MPRIS and Windows SMTC integration
 - `src/media_session/linux/interfaces.rs` and `src/media_session/linux/artwork.rs` - MPRIS interface contracts and connection-owned local artwork, with separate file preparation, publication, replacement and directory cleanup
 - `src/tray.rs` and `src/tray/` - shared commands and platform routing, backend-owned Linux SNI handles and Windows message loops, centralized Linux menu callbacks and isolated ARGB conversion

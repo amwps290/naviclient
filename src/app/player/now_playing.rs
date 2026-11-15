@@ -199,7 +199,6 @@ impl NavidromeApp {
                 .into_any_element()
         };
 
-        let rotation_phase = self.vinyl_cover.phase();
         h_flex()
             .size_full()
             .min_h_0()
@@ -213,13 +212,7 @@ impl NavidromeApp {
                     .flex_none()
                     .items_center()
                     .gap_4()
-                    .child(self.render_vinyl_record(
-                        song.cover_art.as_deref(),
-                        cover_size,
-                        rotation_phase,
-                        playback.active && !playback.paused,
-                        cx,
-                    ))
+                    .child(self.render_vinyl_record(cover_size, cx))
                     .child(
                         v_flex()
                             .items_center()
