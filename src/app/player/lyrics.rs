@@ -93,12 +93,18 @@ impl NavidromeApp {
             return;
         }
 
+        // A new document can have no started cue during its intro. Reset the
+        // actual viewport even when both the old and new active indices are None.
+        if std::mem::take(&mut self.state.lyrics.follow_reset) {
+            self.lyrics_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+        }
+
         let active = self
             .state
             .lyrics
             .lyrics()
             .filter(|lyrics| lyrics.is_synced())
-            .and_then(|lyrics| lyrics.active_line_index(self.playback_for_display().position));
+            .and_then(|lyrics| lyrics.display_line_index(self.playback_for_display().position));
 
         if active != self.state.lyrics.active_index {
             self.state.lyrics.active_index = active;
@@ -112,6 +118,9 @@ impl NavidromeApp {
                 } else {
                     self.lyrics_scroll_handle.scroll_to_item(item_index);
                 }
+            } else {
+                // Seeking backwards into the intro must also leave the outro.
+                self.lyrics_scroll_handle.set_offset(point(px(0.0), px(0.0)));
             }
         }
 

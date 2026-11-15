@@ -21,6 +21,7 @@ pub(in crate::app) struct LyricsState {
     pub(in crate::app) task: Option<tokio::task::JoinHandle<()>>,
     pub(in crate::app) active_index: Option<usize>,
     pub(in crate::app) scroll_target: Option<Pixels>,
+    pub(in crate::app) follow_reset: bool,
 }
 
 impl LyricsState {
@@ -41,11 +42,13 @@ impl LyricsState {
 
     pub(in crate::app) fn clear(&mut self) {
         *self = Self::default();
+        self.reset_follow();
     }
 
     pub(in crate::app) fn reset_follow(&mut self) {
         self.active_index = None;
         self.scroll_target = None;
+        self.follow_reset = true;
     }
 
     /// Keep cached lyrics and coalesce in-flight loads for the same song. A

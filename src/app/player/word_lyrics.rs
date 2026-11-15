@@ -70,7 +70,8 @@ impl Element for WordLyrics {
         let text: SharedString = self.words.text.clone().into();
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line_height = window.pixel_snap(style.line_height_in_pixels(window.rem_size()));
+        let requested_line_height =
+            window.pixel_snap(style.line_height_in_pixels(window.rem_size()));
         let mut base_run = style.to_run(text.len());
         base_run.color = self.base_color;
         let mut accent_run = base_run.clone();
@@ -108,6 +109,7 @@ impl Element for WordLyrics {
                         None,
                     )
                     .unwrap_or_default();
+                let line_height = layout_line_height(requested_line_height, &base);
                 let measured = size(
                     base.iter()
                         .map(|line| line.width())
@@ -218,6 +220,15 @@ impl Element for WordLyrics {
             byte_offset += base.len() + 1;
         }
     }
+}
+
+fn layout_line_height(requested: Pixels, lines: &[WrappedLine]) -> Pixels {
+    // GPUI centers the baseline using ascent/descent. The foreground masks
+    // must fit those metrics even if an inherited line height is too small.
+    // Leave one pixel on each side for antialiasing and fallback font glyphs.
+    lines.iter().fold(requested, |height, line| {
+        height.max((line.ascent() + line.descent()).ceil() + px(2.0))
+    })
 }
 
 fn segment_clips(

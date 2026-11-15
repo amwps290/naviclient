@@ -43,11 +43,11 @@ impl NavidromeApp {
         let serif = crate::typography::serif_font_family(cx);
         let radio_seed = song.clone();
         let radio_loading = self.song_radio_loading(&song.id);
-        let active_line = self
+        let display_line = self
             .state
             .lyrics
             .lyrics()
-            .and_then(|lyrics| lyrics.active_line_index(playback.position));
+            .and_then(|lyrics| lyrics.display_line_index(playback.position));
         let lyrics = self.state.lyrics.lyrics();
         let lyrics_body = if self.state.lyrics.loading() && lyrics.is_none() {
             div()
@@ -80,8 +80,8 @@ impl NavidromeApp {
                 .track_scroll(&self.lyrics_scroll_handle)
                 .child(div().h(px(240.0)).flex_none())
                 .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
-                    let current = synced && active_line == Some(index);
-                    let distance = active_line
+                    let current = synced && display_line == Some(index);
+                    let distance = display_line
                         .map(|active| active.abs_diff(index))
                         .unwrap_or(usize::MAX);
                     let word_timing = lyric_line
@@ -127,7 +127,7 @@ impl NavidromeApp {
                         .items_center()
                         .justify_center()
                         .text_center()
-                        .line_height(rems(1.45))
+                        .line_height(relative(1.45))
                         .when_some(start_ms, |this, start_ms| {
                             this.cursor_pointer()
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -153,8 +153,6 @@ impl NavidromeApp {
                         line.text_size(px(tokens::LYRIC_ACTIVE))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.brand)
-                            .rounded(px(tokens::radius::LARGE))
-                            .bg(p.brand_soft)
                             .px_6()
                             .py_3()
                             .with_animation(

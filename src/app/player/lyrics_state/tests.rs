@@ -30,6 +30,32 @@ fn set_follow(state: &mut LyricsState) {
 fn assert_follow_cleared(state: &LyricsState) {
     assert_eq!(state.active_index, None);
     assert_eq!(state.scroll_target, None);
+    assert!(state.follow_reset);
+}
+
+#[test]
+fn next_song_intro_requests_viewport_reset_even_without_an_active_cue() {
+    let mut requests = LibraryRequests::default();
+    let mut state = LyricsState::default();
+    let request = state.begin(&media("outro"), &mut requests).unwrap();
+    state.complete(request, Ok(lyrics("last line")));
+    set_follow(&mut state);
+    state.follow_reset = false;
+    let request = state.begin(&media("intro"), &mut requests).unwrap();
+    assert_follow_cleared(&state);
+    // Simulate the loading frame consuming the first reset.
+    state.follow_reset = false;
+    let mut intro = lyrics("first line");
+    intro.lines[0].start_ms = Some(15_000);
+    state.complete(request, Ok(intro));
+    assert_follow_cleared(&state);
+    assert_eq!(
+        state
+            .lyrics()
+            .unwrap()
+            .display_line_index(std::time::Duration::ZERO),
+        None
+    );
 }
 
 #[test]

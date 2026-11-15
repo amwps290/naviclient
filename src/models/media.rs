@@ -270,6 +270,26 @@ impl Lyrics {
             })
             .map(|(index, _)| index)
     }
+
+    /// Keep the most recently started visible row emphasized between vocal
+    /// cues. End times still govern vocal/word timing, but should not collapse
+    /// the display or move its scroll anchor during a pause or instrumental.
+    pub fn display_line_index(&self, position: std::time::Duration) -> Option<usize> {
+        let position_ms = u64::try_from(position.as_millis()).unwrap_or(u64::MAX);
+        self.lines
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, line)| {
+                line.start_ms.is_some_and(|start| start <= position_ms)
+                    && (!line.text.trim().is_empty()
+                        || line
+                            .word_timing
+                            .as_ref()
+                            .is_some_and(|words| !words.text.trim().is_empty()))
+            })
+            .map(|(index, _)| index)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
