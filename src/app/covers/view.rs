@@ -23,16 +23,7 @@ impl NavidromeApp {
             .and_then(|id| self.browsing_cover_image(id))
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
-        self.mark_cover_image_used(&cover);
-        img(cover)
-            .size(px(size))
-            // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
-            .aspect_square()
-            .object_fit(ObjectFit::Cover)
-            .flex_none()
-            .rounded(px(radius))
-            .shadow(shadows)
-            .into_any_element()
+        self.render_cover_image(cover, size, radius, shadows)
     }
 
     pub(in crate::app) fn render_song_cover_styled(
@@ -46,9 +37,56 @@ impl NavidromeApp {
             .song_cover_image(song)
             .cloned()
             .unwrap_or_else(|| self.default_cover.clone());
+        self.render_cover_image(cover, size, radius, shadows)
+    }
+
+    pub(in crate::app) fn render_cover_image(
+        &self,
+        cover: Arc<GpuiImage>,
+        size: f32,
+        radius: f32,
+        shadows: Vec<gpui_kit::BoxShadow>,
+    ) -> gpui_kit::AnyElement {
         self.mark_cover_image_used(&cover);
+        if cover.id() == self.default_cover.id() {
+            let cache = self.default_cover_thumbnails.clone();
+            return gpui_kit::canvas(
+                |_, _, _| (),
+                move |bounds, (), window, cx| {
+                    let side = super::default_image::device_side(
+                        f32::from(bounds.size.width),
+                        window.scale_factor(),
+                    );
+                    let image = match cache.borrow_mut().image(side) {
+                        Ok(image) => Some(image),
+                        Err(error) => {
+                            log::warn!("failed to filter default cover: {error}");
+                            cover.get_render_image(window, cx)
+                        }
+                    };
+                    if let Some(image) = image {
+                        if let Err(error) = window.paint_image(
+                            bounds,
+                            bounds,
+                            gpui_kit::Corners::all(px(radius)),
+                            image,
+                            0,
+                            false,
+                        ) {
+                            log::warn!("failed to paint default cover: {error}");
+                        }
+                    }
+                },
+            )
+            .size(px(size))
+            .flex_none()
+            .rounded(px(radius))
+            .shadow(shadows)
+            .into_any_element();
+        }
         img(cover)
             .size(px(size))
+            // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
             .aspect_square()
             .object_fit(ObjectFit::Cover)
             .flex_none()
@@ -267,13 +305,12 @@ impl NavidromeApp {
                             self.vinyl_cover.render(inner_cover_size, rotation_phase)
                         }
                         .unwrap_or_else(|| {
-                            img(cover)
-                                .size(px(inner_cover_size))
-                                .aspect_square()
-                                .object_fit(ObjectFit::Cover)
-                                .flex_none()
-                                .rounded_full()
-                                .into_any_element()
+                            self.render_cover_image(
+                                cover,
+                                inner_cover_size,
+                                inner_cover_size * 0.5,
+                                Vec::new(),
+                            )
                         }),
                     )
                     .child(

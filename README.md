@@ -456,6 +456,11 @@ source is `assets/default-cover.svg`; the client embeds the generated 1024px
 `assets/default-cover.png`. To regenerate it, run `python assets/gen_default_cover.py`
 with Pillow and a local Chrome, Chromium, or Edge installation. The generator
 renders at twice the output size and downsamples with Lanczos filtering.
+It also generates 64–512px mip levels. The client uses these to cache thumbnails
+filtered at the display's device-pixel size, keeping curves smooth when the
+default artwork is reduced on Home, in the library, or in player fallbacks.
+Run `python assets/gen_default_cover.py --mips-only` to regenerate the smaller
+levels from the existing master PNG without a browser.
 
 Audio implementation modules import dependencies explicitly from their owning
 modules rather than relying on parent wildcard imports. Decoder buffer sizes,

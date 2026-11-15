@@ -79,12 +79,7 @@ impl NavidromeApp {
             .vinyl_cover
             .render(artwork_size, self.vinyl_cover.phase())
             .unwrap_or_else(|| {
-                img(cover)
-                    .size(px(artwork_size))
-                    .aspect_square()
-                    .object_fit(ObjectFit::Cover)
-                    .rounded_full()
-                    .into_any_element()
+                self.render_cover_image(cover, artwork_size, artwork_size * 0.5, Vec::new())
             });
         let cover_button = div()
             .size(px(COVER_SIZE))

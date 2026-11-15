@@ -18,6 +18,16 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent
 SIZE = 1024
 RASTER_SIZE = SIZE * 2
+MIP_SIZES = (64, 128, 256, 512)
+
+
+def save_mipmaps(cover, output):
+    if cover.size != (SIZE, SIZE) or cover.convert("RGBA").getextrema()[3] != (255, 255):
+        raise ValueError("Expected an opaque 1024 x 1024 default cover.")
+    for side in MIP_SIZES:
+        path = output.with_name(f"{output.stem}-{side}{output.suffix}")
+        cover.resize((side, side), Image.Resampling.LANCZOS).save(path, optimize=True)
+        print(f"Saved {path} ({side} x {side})")
 
 
 def find_browser(override):
@@ -83,6 +93,7 @@ def generate(browser, output):
             if cover.getextrema()[3] != (255, 255):
                 raise ValueError("Default cover must have an opaque background.")
             cover.save(output, optimize=True)
+            save_mipmaps(cover, output)
     print(f"Saved {output} ({SIZE} x {SIZE})")
 
 
@@ -90,5 +101,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", help="Path to Chrome, Chromium, or Edge")
     parser.add_argument("--output", type=Path, default=ROOT / "default-cover.png")
+    parser.add_argument("--mips-only", action="store_true", help="Generate smaller levels from the existing PNG")
     arguments = parser.parse_args()
-    generate(find_browser(arguments.browser), arguments.output.resolve())
+    output = arguments.output.resolve()
+    if arguments.mips_only:
+        with Image.open(output) as cover:
+            save_mipmaps(cover.convert("RGBA"), output)
+    else:
+        generate(find_browser(arguments.browser), output)

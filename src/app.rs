@@ -65,6 +65,7 @@ pub struct NavidromeApp {
     media_session: MediaSession,
     global_shortcuts: GlobalShortcutManager,
     default_cover: Arc<GpuiImage>,
+    default_cover_thumbnails: std::rc::Rc<RefCell<covers::default_image::DefaultCoverThumbnails>>,
     vinyl_cover: VinylCover,
     turntable: covers::turntable::Turntable,
     state: AppState,
