@@ -84,15 +84,14 @@ impl NavidromeApp {
             .shadow(shadows)
             .into_any_element();
         }
-        img(cover)
-            .size(px(size))
-            // Override GPUI's intrinsic image ratio so portrait artwork cannot grow the slot.
-            .aspect_square()
-            .object_fit(ObjectFit::Cover)
-            .flex_none()
-            .rounded(px(radius))
-            .shadow(shadows)
-            .into_any_element()
+        super::thumbnails::FilteredCover {
+            source: cover,
+            cache: self.cover_thumbnails.clone(),
+            size,
+            radius,
+            shadows,
+        }
+        .into_any_element()
     }
 
     pub(in crate::app) fn render_vinyl_record(

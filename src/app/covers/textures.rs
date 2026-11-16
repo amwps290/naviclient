@@ -23,6 +23,7 @@ impl NavidromeApp {
     ) {
         let releases = self.cover_textures.borrow_mut().take_releases();
         for image in releases {
+            self.cover_thumbnails.borrow_mut().retire(image.id());
             if let Some(render_image) = image.clone().get_render_image(window, cx) {
                 if let Err(error) = window.drop_image(render_image) {
                     log::warn!("failed to release cover texture: {error}");

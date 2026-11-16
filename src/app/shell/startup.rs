@@ -170,6 +170,7 @@ impl NavidromeApp {
             global_shortcuts,
             default_cover,
             default_cover_thumbnails: Default::default(),
+            cover_thumbnails: Default::default(),
             vinyl_cover: VinylCover::default(),
             turntable: Default::default(),
             state: AppState::default(),

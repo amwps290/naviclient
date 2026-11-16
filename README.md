@@ -462,6 +462,13 @@ default artwork is reduced on Home, in the library, or in player fallbacks.
 Run `python assets/gen_default_cover.py --mips-only` to regenerate the smaller
 levels from the existing master PNG without a browser.
 
+Downloaded static covers also receive Lanczos filtering at their display's
+device-pixel size. This keeps text and fine patterns smooth when large Bilibili
+artwork is reduced into library cards or player thumbnails. Filtering runs in
+the background, preserves the center crop, and retains original source bytes
+for larger views. Filtered textures are reused by image and size, with a 32 MiB
+cache budget; currently visible textures remain alive until a later scene.
+
 Audio implementation modules import dependencies explicitly from their owning
 modules rather than relying on parent wildcard imports. Decoder buffer sizes,
 startup/stall timing, HTTP retry counts and disk-cache capacity live with their

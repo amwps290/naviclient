@@ -10,6 +10,11 @@ impl Render for NavidromeApp {
                 log::warn!("failed to release default cover thumbnail: {error}");
             }
         }
+        for image in self.cover_thumbnails.borrow_mut().take_releases() {
+            if let Err(error) = window.drop_image(image) {
+                log::warn!("failed to release cover thumbnail: {error}");
+            }
+        }
         self.sync_lyrics_dialog(window, cx);
         let playback = self.playback_for_display();
         let cover = self
