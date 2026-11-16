@@ -1,6 +1,16 @@
-//! Remove the Windows non-client frame while the mini card draws its own edges.
+//! Suppress desktop window frames while the mini card draws its own edges.
 
 use crate::app::prelude::*;
+
+#[cfg(target_os = "linux")]
+mod linux;
+
+pub(crate) fn init_window_frame(cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    linux::init(cx);
+    #[cfg(not(target_os = "linux"))]
+    let _ = cx;
+}
 
 #[derive(Default)]
 pub(in crate::app) struct MiniWindowFrame {
@@ -9,7 +19,9 @@ pub(in crate::app) struct MiniWindowFrame {
 }
 
 impl MiniWindowFrame {
-    pub(in crate::app) fn set_mini(&mut self, window: &Window, mini: bool) {
+    pub(in crate::app) fn set_mini(&mut self, window: &mut Window, mini: bool, cx: &mut App) {
+        #[cfg(target_os = "linux")]
+        linux::set_mini(window, mini, cx);
         #[cfg(target_os = "windows")]
         if let Some(hwnd) = main_window_hwnd(window) {
             let hwnd = hwnd as windows_sys::Win32::Foundation::HWND;
@@ -17,8 +29,8 @@ impl MiniWindowFrame {
                 log::warn!("unable to update mini player window frame: {error}");
             }
         }
-        #[cfg(not(target_os = "windows"))]
-        let _ = (window, mini);
+        #[cfg(not(target_os = "linux"))]
+        let _ = (window, mini, cx);
     }
 }
 

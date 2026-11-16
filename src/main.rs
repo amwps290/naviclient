@@ -82,6 +82,7 @@ fn run_app() {
         .with_assets(assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
+            app::init_window_frame(cx);
             let config = config::load();
             let theme_preference = config.theme;
             let ui_locale = config.language.resolve();

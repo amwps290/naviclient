@@ -13,7 +13,7 @@ impl NavidromeApp {
         };
         self.state.settings.close();
         set_mini_window_surface(window, true, cx);
-        self.mini_window.frame.set_mini(window, true);
+        self.mini_window.frame.set_mini(window, true, cx);
         window.resize(target);
         set_always_on_top(window, true);
         cx.notify();
@@ -25,7 +25,7 @@ impl NavidromeApp {
         };
         self.mini_window.surface.borrow_mut().release(window);
         set_mini_window_surface(window, false, cx);
-        self.mini_window.frame.set_mini(window, false);
+        self.mini_window.frame.set_mini(window, false, cx);
         window.resize(restore.size);
         if restore.maximized && !window.is_maximized() {
             window.zoom_window();

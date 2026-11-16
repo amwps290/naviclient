@@ -30,7 +30,10 @@ fn square_backgrounds(window: &Window) -> Vec<Hsla> {
 fn mini_corners_have_no_square_background_and_exit_restores_the_current_theme(
     cx: &mut TestAppContext,
 ) {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::app::init_window_frame(cx);
+    });
     let (window, _) = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {
@@ -59,6 +62,7 @@ fn mini_corners_have_no_square_background_and_exit_restores_the_current_theme(
             assert_eq!(square_backgrounds(window), vec![cx.theme().background]);
 
             set_mini_window_surface(window, true, cx);
+            crate::app::desktop::mini_frame::MiniWindowFrame::default().set_mini(window, true, cx);
         });
         visual.update(|window, cx| {
             let _ = window.draw(cx);
@@ -73,6 +77,7 @@ fn mini_corners_have_no_square_background_and_exit_restores_the_current_theme(
             let _ = window.draw(cx);
             assert!(square_backgrounds(window).is_empty());
             set_mini_window_surface(window, false, cx);
+            crate::app::desktop::mini_frame::MiniWindowFrame::default().set_mini(window, false, cx);
         });
         visual.update(|window, cx| {
             let _ = window.draw(cx);
