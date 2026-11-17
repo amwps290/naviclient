@@ -1,7 +1,12 @@
 //! Playlist read orchestration and applying accepted results to the UI.
 
+use super::library::PlaylistDetailChange;
 use crate::app::prelude::*;
+use crate::playlist::loading::playlist_update_channel;
 use crate::playlist::PlaylistDetails;
+
+const DETAIL_UPDATES_PER_POLL: usize = 16;
+const DETAIL_UPDATE_BUDGET: Duration = Duration::from_millis(4);
 
 impl NavidromeApp {
     pub(in crate::app) fn load_playlists(&mut self) {
@@ -40,6 +45,9 @@ impl NavidromeApp {
 
     pub(in crate::app) fn open_playlist(&mut self, playlist: Playlist) {
         self.clear_song_multi();
+        self.song_list_scrolls
+            .borrow_mut()
+            .insert(SongScope::PlaylistDetail, UniformListScrollHandle::new());
         self.ensure_cover(playlist.cover_art.as_deref(), true);
         self.state.playlists.select(playlist);
         self.state.view = View::PlaylistDetail;
@@ -59,12 +67,73 @@ impl NavidromeApp {
         else {
             return;
         };
-        let tx = self.tx.clone();
-        let task = self.runtime.spawn(async move {
-            let result = api.playlist(&playlist_id).await.map_err(error_message);
-            let _ = tx.send(Msg::PlaylistSongs { request, result });
-        });
-        self.state.playlists.attach_detail(task.abort_handle());
+        if matches!(&api, MusicSource::Bilibili(_)) {
+            let source = api.id().clone();
+            let (updates, receiver) = playlist_update_channel();
+            let task = self.runtime.spawn(async move {
+                api.load_playlist(&playlist_id, updates).await;
+            });
+            self.state.playlists.attach_detail_stream(
+                request,
+                source,
+                receiver,
+                task.abort_handle(),
+            );
+        } else {
+            let tx = self.tx.clone();
+            let task = self.runtime.spawn(async move {
+                let result = api.playlist(&playlist_id).await.map_err(error_message);
+                let _ = tx.send(Msg::PlaylistSongs { request, result });
+            });
+            self.state.playlists.attach_detail(task.abort_handle());
+        }
+    }
+
+    pub(in crate::app) fn poll_playlist_detail(&mut self) -> bool {
+        let deadline = std::time::Instant::now() + DETAIL_UPDATE_BUDGET;
+        let mut changed = false;
+        for _ in 0..DETAIL_UPDATES_PER_POLL {
+            let Some((request, update)) = self.state.playlists.next_detail_update() else {
+                break;
+            };
+            let Some(change) = self.state.playlists.apply_detail_update(request, update) else {
+                continue;
+            };
+            changed = true;
+            let reset = match change {
+                PlaylistDetailChange::Updated { reset } => reset,
+                PlaylistDetailChange::Complete { reset, unavailable } => {
+                    if unavailable > 0 {
+                        self.notify_warning(t!(
+                            "Skipped %{count} unavailable favorites",
+                            count = unavailable
+                        ));
+                    }
+                    reset
+                }
+                PlaylistDetailChange::Failed { reset, message } => {
+                    self.notify_error(message);
+                    reset
+                }
+            };
+            if reset {
+                self.state
+                    .clear_song_selection_for_scope(SongScope::PlaylistDetail);
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
+        if changed && self.state.view == View::PlaylistDetail {
+            let cover = self
+                .state
+                .playlists
+                .playlist()
+                .and_then(|playlist| playlist.cover_art.clone());
+            self.ensure_cover(cover.as_deref(), true);
+            self.load_visible_song_covers(SongScope::PlaylistDetail);
+        }
+        changed
     }
 
     pub(in crate::app) fn finish_playlist_detail(

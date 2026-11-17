@@ -270,6 +270,10 @@ impl NavidromeApp {
         let Some(scope) = self.active_song_list_scope() else {
             return;
         };
+        self.load_visible_song_covers(scope);
+    }
+
+    pub(in crate::app) fn load_visible_song_covers(&mut self, scope: SongScope) {
         let Some(songs) = self.state.songs_for_scope(scope) else {
             return;
         };

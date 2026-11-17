@@ -1,5 +1,7 @@
 use super::*;
+use crate::app::library::requests::LibraryRequests;
 use crate::models::{ListeningHistory, PlaybackQueue, QueueEntry};
+use crate::playlist::loading::{PlaylistProgress, PlaylistUpdate};
 
 fn songs() -> Vec<Song> {
     ["First", "Second", "Third"]
@@ -51,6 +53,88 @@ fn assert_replacement(
         serde_json::to_value(songs).unwrap(),
         serde_json::to_value(expected).unwrap()
     );
+}
+
+#[test]
+fn playlist_row_and_multi_playback_wait_for_complete_data_without_affecting_the_current_queue() {
+    let songs = songs();
+    let mut state = AppState {
+        queue: queue(&songs),
+        ..Default::default()
+    };
+    let mut requests = LibraryRequests::default();
+    let playlist = crate::models::Playlist {
+        id: "p".into(),
+        ..Default::default()
+    };
+    state.playlists.select(playlist.clone());
+    let request = state.playlists.begin_detail(&mut requests).unwrap();
+    state
+        .playlists
+        .apply_detail_update(request, PlaylistUpdate::Metadata(playlist));
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Batch {
+            songs: songs[..2].to_vec(),
+            progress: PlaylistProgress {
+                songs: 2,
+                ..Default::default()
+            },
+        },
+    );
+    state
+        .song_selection
+        .select_all(SongScope::PlaylistDetail, 2);
+    assert!(!state.song_scope_ready(SongScope::PlaylistDetail));
+    assert!(state
+        .song_playback_at(SongScope::PlaylistDetail, 0)
+        .is_none());
+    assert!(state.selected_playback(SongScope::PlaylistDetail).is_none());
+    assert!(state.song_scope_ready(SongScope::Queue));
+    assert!(state.song_scope_ready(SongScope::History));
+    assert_eq!(
+        state.queue.song_ids(),
+        ["duplicate", "duplicate", "duplicate"]
+    );
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Batch {
+            songs: songs[2..].to_vec(),
+            progress: PlaylistProgress {
+                songs: 3,
+                ..Default::default()
+            },
+        },
+    );
+    assert!(state
+        .song_playback_at(SongScope::PlaylistDetail, 1)
+        .is_none());
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Complete(PlaylistProgress {
+            songs: 3,
+            ..Default::default()
+        }),
+    );
+    assert_replacement(
+        state
+            .song_playback_at(SongScope::PlaylistDetail, 1)
+            .unwrap(),
+        &songs,
+        1,
+        QueueOrigin::Playlist,
+    );
+    assert_replacement(
+        state.selected_playback(SongScope::PlaylistDetail).unwrap(),
+        &songs[..2],
+        0,
+        QueueOrigin::Playlist,
+    );
+    state.playlists.begin_detail(&mut requests);
+    assert!(!state.song_scope_ready(SongScope::PlaylistDetail));
+    assert!(state
+        .song_playback_at(SongScope::PlaylistDetail, 0)
+        .is_none());
 }
 
 #[test]

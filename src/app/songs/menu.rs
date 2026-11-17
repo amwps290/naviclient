@@ -20,22 +20,68 @@ enum SongMenuSource {
         songs: Arc<Vec<Song>>,
         index: usize,
         playlist: Option<Playlist>,
+        playlist_target: Option<PlaylistMenuTarget>,
     },
+}
+
+#[derive(Clone, Copy)]
+struct PlaylistMenuTarget {
+    snapshot: Option<LibraryRequest>,
+    complete: bool,
+}
+
+impl PlaylistMenuTarget {
+    fn is_current(self, state: &AppState) -> bool {
+        self.snapshot.is_some() && self.snapshot == state.playlists.snapshot()
+    }
+
+    fn can_play(self, state: &AppState) -> bool {
+        self.complete && self.is_current(state) && state.playlists.detail_ready()
+    }
+}
+
+impl SongMenuSource {
+    fn playlist_target(&self) -> Option<PlaylistMenuTarget> {
+        match self {
+            Self::Library {
+                playlist_target, ..
+            } => *playlist_target,
+            Self::Queue(_) => None,
+        }
+    }
+
+    fn can_play(&self, state: &AppState) -> bool {
+        match self {
+            Self::Queue(entry) => queue_menu_index(&state.queue, *entry).is_some(),
+            Self::Library {
+                playlist_target, ..
+            } => playlist_target.is_none_or(|target| target.can_play(state)),
+        }
+    }
 }
 
 impl SongMenuContext {
     fn for_scope(state: &AppState, scope: SongScope, index: usize) -> Option<Self> {
         let songs = state.songs_for_scope(scope)?;
         let song = songs.get(index)?.clone();
+        let complete = state.song_scope_ready(scope);
         let source = if scope == SongScope::Queue {
             SongMenuSource::Queue(state.queue.entry_id(index)?)
         } else {
             SongMenuSource::Library {
-                songs: Arc::new(songs.to_vec()),
+                // Preview menus can operate on the captured song, but never
+                // freeze a partial list into a future "play all" action.
+                songs: Arc::new(if complete { songs.to_vec() } else { Vec::new() }),
                 index,
                 playlist: (scope == SongScope::PlaylistDetail)
                     .then(|| state.playlists.playlist().cloned())
                     .flatten(),
+                playlist_target: (scope == SongScope::PlaylistDetail).then_some(
+                    PlaylistMenuTarget {
+                        snapshot: state.playlists.snapshot(),
+                        complete,
+                    },
+                ),
             }
         };
         Some(Self { song, source })
@@ -71,33 +117,44 @@ impl NavidromeApp {
             .map(MusicSource::capabilities)
             .unwrap_or_default();
         let play = context.source.clone();
-        menu = menu.item(PopupMenuItem::new(t!("Play now")).on_click(cx.listener(
-            move |this, _, _, cx| {
-                match &play {
-                    SongMenuSource::Queue(entry) => {
-                        if let Some(index) = queue_menu_index(&this.state.queue, *entry) {
-                            this.play_song_at_scope(SongScope::Queue, index);
+        let playback_allowed = play.can_play(&self.state);
+        let playlist_target = play.playlist_target();
+        menu = menu.item(
+            PopupMenuItem::new(t!("Play now"))
+                .disabled(!playback_allowed)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !play.can_play(&this.state) {
+                        return;
+                    }
+                    match &play {
+                        SongMenuSource::Queue(entry) => {
+                            if let Some(index) = queue_menu_index(&this.state.queue, *entry) {
+                                this.play_song_at_scope(SongScope::Queue, index);
+                            }
+                        }
+                        SongMenuSource::Library {
+                            songs,
+                            index,
+                            playlist,
+                            ..
+                        } => {
+                            let origin = if playlist.is_some() {
+                                QueueOrigin::Playlist
+                            } else {
+                                QueueOrigin::Manual
+                            };
+                            this.replace_queue_and_play(songs.as_ref().clone(), *index, origin);
                         }
                     }
-                    SongMenuSource::Library {
-                        songs,
-                        index,
-                        playlist,
-                    } => {
-                        let origin = if playlist.is_some() {
-                            QueueOrigin::Playlist
-                        } else {
-                            QueueOrigin::Manual
-                        };
-                        this.replace_queue_and_play(songs.as_ref().clone(), *index, origin);
-                    }
-                }
-                cx.notify();
-            },
-        )));
+                    cx.notify();
+                })),
+        );
         let next = song.clone();
         menu = menu.item(PopupMenuItem::new(t!("Play next")).on_click(cx.listener(
             move |this, _, _, cx| {
+                if !playlist_target.is_none_or(|target| target.is_current(&this.state)) {
+                    return;
+                }
                 this.insert_next(next.clone());
                 cx.notify();
             },
@@ -105,6 +162,9 @@ impl NavidromeApp {
         let append = song.clone();
         menu = menu.item(PopupMenuItem::new(t!("Add to queue")).on_click(cx.listener(
             move |this, _, _, cx| {
+                if !playlist_target.is_none_or(|target| target.is_current(&this.state)) {
+                    return;
+                }
                 this.add_to_queue(append.clone());
                 cx.notify();
             },
@@ -129,12 +189,15 @@ impl NavidromeApp {
                 .cloned()
                 .collect::<Vec<_>>();
             menu = menu.item(
-                PopupMenuItem::new(t!("Play all parts of this video")).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                PopupMenuItem::new(t!("Play all parts of this video"))
+                    .disabled(!playback_allowed)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !playlist_target.is_none_or(|target| target.can_play(&this.state)) {
+                            return;
+                        }
                         this.replace_queue_and_play(parts.clone(), 0, QueueOrigin::Playlist);
                         cx.notify();
-                    },
-                )),
+                    })),
             );
         }
         if !is_bilibili {
@@ -224,6 +287,9 @@ impl NavidromeApp {
             .separator()
             .item(PopupMenuItem::new(t!("Song info…")).on_click(cx.listener(
                 move |this, _, window, cx| {
+                    if !playlist_target.is_none_or(|target| target.is_current(&this.state)) {
+                        return;
+                    }
                     this.open_song_info(song_for_info.clone(), window, cx);
                 },
             )));
@@ -231,6 +297,7 @@ impl NavidromeApp {
             songs,
             index,
             playlist: Some(playlist),
+            ..
         } = context.source
         {
             if is_bilibili {
@@ -238,6 +305,7 @@ impl NavidromeApp {
             }
             let disabled = self.state.playlists.editing()
                 || self.state.playlists.detail_loading()
+                || !playback_allowed
                 || !can_edit(&playlist, &self.config.username);
             let expected = song_ids(&songs);
             menu = menu.separator();
@@ -258,6 +326,9 @@ impl NavidromeApp {
                     PopupMenuItem::new(label)
                         .disabled(disabled || to.is_none())
                         .on_click(cx.listener(move |this, _, _, cx| {
+                            if !playlist_target.is_none_or(|target| target.can_play(&this.state)) {
+                                return;
+                            }
                             this.start_playlist_edit(edit.clone(), PlaylistEditOrigin::Menu, cx)
                         })),
                 );
@@ -278,6 +349,9 @@ impl NavidromeApp {
                 PopupMenuItem::new(t!("Remove from playlist…"))
                     .disabled(disabled)
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        if !playlist_target.is_none_or(|target| target.can_play(&this.state)) {
+                            return;
+                        }
                         this.confirm_playlist_edit(
                             edit.clone(),
                             t!("Remove track?").to_string(),

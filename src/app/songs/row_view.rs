@@ -318,6 +318,7 @@ impl NavidromeApp {
                             .tooltip(t!("Play"))
                             .ghost()
                             .small()
+                            .disabled(!self.state.song_scope_ready(scope))
                             .text_color(p.brand)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, _, cx| {

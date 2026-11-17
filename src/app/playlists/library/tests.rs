@@ -276,6 +276,8 @@ fn deleting_selected_playlist_removes_list_item_and_detail_together() {
     assert_eq!(state.visible_items().len(), 1);
     assert!(state.playlist().is_none());
     assert!(state.songs().is_empty());
+    assert!(!state.detail_ready());
+    assert!(state.snapshot().is_none());
     assert!(state.begin_detail(&mut requests).is_none());
 }
 

@@ -57,15 +57,25 @@ impl SongPlayback {
 }
 
 impl AppState {
+    pub(in crate::app) fn song_scope_ready(&self, scope: SongScope) -> bool {
+        scope != SongScope::PlaylistDetail || self.playlists.detail_ready()
+    }
+
     pub(in crate::app) fn song_playback_at(
         &self,
         scope: SongScope,
         index: usize,
     ) -> Option<SongPlayback> {
+        if !self.song_scope_ready(scope) {
+            return None;
+        }
         SongPlayback::row(scope, self.songs_for_scope(scope)?, index)
     }
 
     pub(in crate::app) fn selected_playback(&self, scope: SongScope) -> Option<SongPlayback> {
+        if !self.song_scope_ready(scope) {
+            return None;
+        }
         SongPlayback::selected(scope, self.songs_for_scope(scope)?, &self.song_selection)
     }
 }
@@ -73,6 +83,9 @@ impl AppState {
 impl NavidromeApp {
     /// Append the current list with its scope's origin, without starting playback.
     pub(in crate::app) fn append_songs_at_scope(&mut self, scope: SongScope) {
+        if !self.state.song_scope_ready(scope) {
+            return;
+        }
         if let Some(songs) = self.state.songs_for_scope(scope) {
             let songs = songs.to_vec();
             self.append_all_with_origin(songs, scope.queue_origin());
@@ -82,12 +95,18 @@ impl NavidromeApp {
     /// Insert selected songs as one block, preserving row order and remapping
     /// shuffle history once.
     pub(in crate::app) fn selected_play_next(&mut self, scope: SongScope) {
+        if !self.state.song_scope_ready(scope) {
+            return;
+        }
         let songs = self.selected_songs(scope);
         self.insert_next_many(songs);
     }
 
     /// Selected additions use Manual origin, including playlist selections.
     pub(in crate::app) fn selected_to_queue(&mut self, scope: SongScope) {
+        if !self.state.song_scope_ready(scope) {
+            return;
+        }
         let songs = self.selected_songs(scope);
         self.append_all(songs);
     }

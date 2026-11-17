@@ -1,5 +1,6 @@
 //! Playlist reads, writes, dialogs and list pages.
 
+pub(in crate::app) mod detail_view;
 pub(in crate::app) mod dialog;
 pub(in crate::app) mod dialog_view;
 pub(in crate::app) mod edit_state;

@@ -4,9 +4,19 @@ use super::{
     client::{BilibiliClient, BilibiliError, Envelope},
     BilibiliProvider,
 };
+use crate::models::Playlist;
 use crate::models::{BilibiliPart, Song};
+use crate::playlist::loading::{playlist_update_channel, PlaylistProgress, PlaylistUpdate};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
+use std::time::Instant;
+use tokio::sync::mpsc::Sender;
+
+mod batches;
+use batches::TrackUpdates;
+
+#[cfg(test)]
+mod tests;
 
 const PAGE_SIZE: usize = 20;
 const MAX_PAGES: usize = 1000;
@@ -29,6 +39,11 @@ pub struct FolderTracks {
     pub videos: usize,
     /// Deleted/unsupported entries are skipped; transient failures abort.
     pub unavailable: usize,
+}
+
+pub(crate) struct FolderTrackSummary {
+    pub folder: FavoriteFolder,
+    pub progress: PlaylistProgress,
 }
 
 #[derive(Deserialize)]
@@ -189,6 +204,42 @@ impl BilibiliProvider {
     }
 
     pub async fn favorite_tracks(&self, folder_id: u64) -> Result<FolderTracks, BilibiliError> {
+        let (sender, mut receiver) = playlist_update_channel();
+        let load = async {
+            let result = self.load_favorite_tracks(folder_id, &sender).await;
+            drop(sender);
+            result
+        };
+        let collect = async {
+            let mut songs = Vec::new();
+            while let Some(update) = receiver.recv().await {
+                if let PlaylistUpdate::Batch { songs: batch, .. } = update {
+                    songs.extend(batch);
+                }
+            }
+            songs
+        };
+        // Dropping this future also drops the traversal and its JoinSet. A
+        // failed traversal discards the collected preview instead of returning
+        // a partial result through the complete-details API.
+        let (summary, songs) = tokio::join!(load, collect);
+        let summary = summary?;
+        Ok(FolderTracks {
+            folder: summary.folder,
+            songs,
+            pages: summary.progress.pages,
+            videos: summary.progress.videos,
+            unavailable: summary.progress.unavailable_count,
+        })
+    }
+
+    pub(crate) async fn load_favorite_tracks(
+        &self,
+        folder_id: u64,
+        sender: &Sender<PlaylistUpdate>,
+    ) -> Result<FolderTrackSummary, BilibiliError> {
+        let started = Instant::now();
+        let mut updates = TrackUpdates::new(sender, started);
         // Only the authenticated account's own folders may be opened, including
         // restored/stale playlist IDs. Never substitute a different owner.
         if !self
@@ -199,12 +250,9 @@ impl BilibiliProvider {
         {
             return Err(BilibiliError::PermissionDenied);
         }
-        let mut bvids = Vec::new();
         let mut seen = HashSet::new();
-        let mut unavailable = 0;
         let mut page_signatures = HashSet::new();
         let mut folder = None;
-        let mut page_count = 0;
         let id = folder_id.to_string();
         for page in 1..=MAX_PAGES {
             let pn = page.to_string();
@@ -234,8 +282,7 @@ impl BilibiliProvider {
             if response.info.folder.media_count as usize > MAX_PAGES * PAGE_SIZE {
                 return Err(BilibiliError::LimitExceeded);
             }
-            folder = Some(response.info.folder);
-            page_count = page;
+            let current_folder = response.info.folder;
             let medias = response.medias.unwrap_or_default();
             if medias.len() > PAGE_SIZE || (response.has_more && medias.is_empty()) {
                 return Err(BilibiliError::InvalidResponse);
@@ -250,13 +297,31 @@ impl BilibiliProvider {
             {
                 return Err(BilibiliError::InvalidResponse);
             }
+            let mut bvids = Vec::new();
             for video in medias {
                 if video.kind != 2 || !valid_bvid(&video.bvid) {
-                    unavailable += 1;
+                    updates.progress.unavailable_count += 1;
                 } else if seen.insert(video.bvid.clone()) {
                     bvids.push(video.bvid);
                 }
             }
+            updates.progress.pages = page;
+            updates.progress.videos = seen.len();
+            updates
+                .send(PlaylistUpdate::Metadata(Playlist {
+                    id: current_folder.id.to_string(),
+                    name: current_folder.title.clone(),
+                    ..Default::default()
+                }))
+                .await?;
+            folder = Some(current_folder);
+            if let Err(error) = self.load_page_videos(bvids, &mut updates).await {
+                // A quick later failure must not discard the valid prefix still
+                // waiting for the batching timer.
+                updates.flush().await?;
+                return Err(error);
+            }
+            updates.report_progress().await?;
             if !response.has_more {
                 break;
             }
@@ -264,54 +329,82 @@ impl BilibiliProvider {
                 return Err(BilibiliError::LimitExceeded);
             }
         }
-        let videos = bvids.len();
-        let mut songs = Vec::new();
-        // JoinSet aborts outstanding work on cancellation; retain API order
-        // independently of response completion order.
-        for chunk in bvids.chunks(DETAIL_CONCURRENCY) {
-            let mut jobs = tokio::task::JoinSet::new();
-            for (index, bvid) in chunk.iter().enumerate() {
+        log::debug!(
+            "bilibili favorites loaded; elapsed_ms={} pages={} videos={} songs={} unavailable={}",
+            started.elapsed().as_millis(),
+            updates.progress.pages,
+            updates.progress.videos,
+            updates.progress.songs,
+            updates.progress.unavailable_count,
+        );
+        Ok(FolderTrackSummary {
+            folder: folder.ok_or(BilibiliError::InvalidResponse)?,
+            progress: updates.progress,
+        })
+    }
+
+    async fn load_page_videos(
+        &self,
+        bvids: Vec<String>,
+        updates: &mut TrackUpdates<'_>,
+    ) -> Result<(), BilibiliError> {
+        let mut jobs = tokio::task::JoinSet::new();
+        let mut ready: BTreeMap<usize, Result<Video, BilibiliError>> = BTreeMap::new();
+        let mut next_start = 0;
+        let mut next_publish = 0;
+        while next_publish < bvids.len() {
+            // Completed results waiting behind a slow predecessor still occupy
+            // a slot. Both in-flight work and ordered lookahead stay bounded.
+            while next_start < bvids.len() && jobs.len() + ready.len() < DETAIL_CONCURRENCY {
                 let provider = self.clone();
-                let bvid = bvid.clone();
+                let index = next_start;
+                let bvid = bvids[index].clone();
                 jobs.spawn(async move { (index, provider.video(&bvid).await) });
+                next_start += 1;
             }
-            let mut results = HashMap::new();
-            while let Some(result) = jobs.join_next().await {
-                let (index, result) = result.map_err(|_| BilibiliError::Network)?;
-                results.insert(index, result);
-            }
-            for index in 0..chunk.len() {
-                match results
-                    .remove(&index)
-                    .ok_or(BilibiliError::InvalidResponse)?
-                {
+            if let Some(result) = ready.remove(&next_publish) {
+                match result {
                     Ok(video) => {
-                        if songs.len().saturating_add(video.pages.len()) > MAX_PARTS {
+                        if updates.progress.songs.saturating_add(video.pages.len()) > MAX_PARTS {
                             return Err(BilibiliError::LimitExceeded);
                         }
-                        songs.extend(video.into_songs(self));
+                        for song in video.into_songs(self) {
+                            updates.push(song).await?;
+                        }
+                        updates.flush_first().await?;
                     }
                     Err(
                         BilibiliError::Unavailable
                         | BilibiliError::PermissionDenied
                         | BilibiliError::RegionRestricted,
-                    ) => unavailable += 1,
+                    ) => updates.progress.unavailable_count += 1,
                     Err(error) => return Err(error),
                 }
+                next_publish += 1;
+                continue;
             }
+            let result = if let Some(deadline) = updates.deadline() {
+                tokio::select! {
+                    result = jobs.join_next() => result,
+                    _ = tokio::time::sleep_until(deadline) => {
+                        updates.flush().await?;
+                        continue;
+                    }
+                }
+            } else {
+                jobs.join_next().await
+            };
+            let (index, result) = result
+                .ok_or(BilibiliError::InvalidResponse)?
+                .map_err(|_| BilibiliError::Network)?;
+            ready.insert(index, result);
         }
-        Ok(FolderTracks {
-            folder: folder.ok_or(BilibiliError::InvalidResponse)?,
-            songs,
-            pages: page_count,
-            videos,
-            unavailable,
-        })
+        Ok(())
     }
 }
 
 impl Video {
-    fn into_songs(self, provider: &BilibiliProvider) -> Vec<Song> {
+    fn into_songs(self, provider: &BilibiliProvider) -> impl Iterator<Item = Song> {
         let count = self.pages.len() as u32;
         let collection_title = self
             .ugc_season
@@ -331,31 +424,29 @@ impl Video {
             })
             .map(|episode| episode.title.clone())
             .unwrap_or_else(|| self.title.clone());
-        self.pages
-            .into_iter()
-            .map(|part| {
-                let mut song = Song {
-                    source: Some(provider.id.clone()),
-                    id: format!("{}:{}", self.bvid, part.cid),
-                    title: title.clone(),
-                    duration: Some(part.duration as i32),
-                    bilibili_part: Some(BilibiliPart {
-                        bvid: self.bvid.clone(),
-                        cid: part.cid,
-                        index: part.page,
-                        count,
-                        title: part.part,
-                        uploader: self.owner.name.clone(),
-                        video_title: self.title.clone(),
-                        collection_title: collection_title.clone(),
-                    }),
-                    cover_art: safe_artwork(&self.pic).map(|url| url.to_string()),
-                    ..Default::default()
-                };
-                song.normalize_bilibili_title();
-                song
-            })
-            .collect()
+        let source = provider.id.clone();
+        self.pages.into_iter().map(move |part| {
+            let mut song = Song {
+                source: Some(source.clone()),
+                id: format!("{}:{}", self.bvid, part.cid),
+                title: title.clone(),
+                duration: Some(part.duration as i32),
+                bilibili_part: Some(BilibiliPart {
+                    bvid: self.bvid.clone(),
+                    cid: part.cid,
+                    index: part.page,
+                    count,
+                    title: part.part,
+                    uploader: self.owner.name.clone(),
+                    video_title: self.title.clone(),
+                    collection_title: collection_title.clone(),
+                }),
+                cover_art: safe_artwork(&self.pic).map(|url| url.to_string()),
+                ..Default::default()
+            };
+            song.normalize_bilibili_title();
+            song
+        })
     }
 }
 

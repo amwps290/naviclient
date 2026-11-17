@@ -78,42 +78,7 @@ impl NavidromeApp {
         rows: usize,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let sunken = palette(cx).sunken;
-        v_flex()
-            .gap_2()
-            .children((0..rows).map(|i| {
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(skeleton_bar(
-                        format!("skel-list-cover-{i}"),
-                        px(40.0),
-                        px(40.0),
-                        px(tokens::radius::CONTROL),
-                        sunken,
-                    ))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .gap_1()
-                            .child(skeleton_bar(
-                                format!("skel-list-title-{i}"),
-                                px(240.0),
-                                px(12.0),
-                                px(6.0),
-                                sunken,
-                            ))
-                            .child(skeleton_bar(
-                                format!("skel-list-meta-{i}"),
-                                px(120.0),
-                                px(10.0),
-                                px(5.0),
-                                sunken,
-                            )),
-                    )
-                    .into_any_element()
-            }))
-            .into_any_element()
+        render_list_skeleton(rows, cx)
     }
 
     /// 艺术家网格骨架屏：与艺术家页的圆形图片一致。
@@ -148,4 +113,43 @@ impl NavidromeApp {
         )
         .into_any_element()
     }
+}
+
+pub(in crate::app) fn render_list_skeleton(rows: usize, cx: &App) -> gpui_kit::AnyElement {
+    let sunken = palette(cx).sunken;
+    v_flex()
+        .gap_2()
+        .children((0..rows).map(|i| {
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(skeleton_bar(
+                    format!("skel-list-cover-{i}"),
+                    px(40.0),
+                    px(40.0),
+                    px(tokens::radius::CONTROL),
+                    sunken,
+                ))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .gap_1()
+                        .child(skeleton_bar(
+                            format!("skel-list-title-{i}"),
+                            px(240.0),
+                            px(12.0),
+                            px(6.0),
+                            sunken,
+                        ))
+                        .child(skeleton_bar(
+                            format!("skel-list-meta-{i}"),
+                            px(120.0),
+                            px(10.0),
+                            px(5.0),
+                            sunken,
+                        )),
+                )
+                .into_any_element()
+        }))
+        .into_any_element()
 }

@@ -1,6 +1,7 @@
 //! Resolve visible row events before applying selection or queue operations.
 
 use super::scope::SongScope;
+use crate::app::library::requests::LibraryRequest;
 use crate::app::shell::state::AppState;
 use crate::app::shell::view_helpers::SongRowClickAction;
 use crate::app::NavidromeApp;
@@ -19,6 +20,7 @@ pub(in crate::app) struct SongRowTarget {
     scope: SongScope,
     position: RowPosition,
     source: Option<[u8; 16]>,
+    playlist_snapshot: Option<LibraryRequest>,
 }
 
 impl SongRowTarget {
@@ -29,6 +31,11 @@ impl SongRowTarget {
     ) -> Option<Self> {
         let song = state.songs_for_scope(scope)?.get(index)?;
         let source = song.source.as_ref().map(|source| source.fingerprint());
+        let playlist_snapshot = if scope == SongScope::PlaylistDetail {
+            Some(state.playlists.snapshot()?)
+        } else {
+            None
+        };
         let position = if scope == SongScope::Queue {
             RowPosition::Queue(state.queue.entry_id(index)?)
         } else {
@@ -38,10 +45,16 @@ impl SongRowTarget {
             scope,
             position,
             source,
+            playlist_snapshot,
         })
     }
 
     pub(in crate::app) fn resolve(self, state: &AppState) -> Option<(SongScope, usize)> {
+        if self.scope == SongScope::PlaylistDetail
+            && self.playlist_snapshot != state.playlists.snapshot()
+        {
+            return None;
+        }
         let index = match self.position {
             RowPosition::Queue(entry) => state.queue.index_of(entry)?,
             RowPosition::List(index) => index,

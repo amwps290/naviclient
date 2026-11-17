@@ -287,7 +287,7 @@ impl NavidromeApp {
         let edit_disabled =
             read_only || self.state.playlists.editing() || self.state.playlists.detail_loading();
         let playback_disabled =
-            self.state.playlists.songs().is_empty() || self.state.playlists.detail_loading();
+            self.state.playlists.songs().is_empty() || !self.state.playlists.detail_ready();
         let padding = self.shell_layout(window).page_padding;
         let hero = self.render_detail_hero(
             DetailHero {
@@ -301,9 +301,9 @@ impl NavidromeApp {
                 cover_id: playlist.cover_art.clone(),
                 round_cover: false,
                 meta: div()
-                    .child(t!(
-                        "%{count} tracks",
-                        count = self.state.playlists.songs().len()
+                    .child(crate::app::playlists::detail_view::playlist_track_label(
+                        &self.state.playlists,
+                        bilibili,
                     ))
                     .into_any_element(),
                 actions: h_flex()
@@ -384,26 +384,7 @@ impl NavidromeApp {
                     .px(px(padding))
                     .pb(px(padding))
                     .gap_3()
-                    .child(
-                        div()
-                            .text_size(px(tokens::META))
-                            .text_color(palette(cx).text_muted)
-                            .child(if self.state.playlists.editing() {
-                                t!("Saving playlist…")
-                            } else if self.state.playlists.detail_loading() {
-                                if bilibili { t!("Loading all favorite pages and parts…") } else { t!("Loading playlist…") }
-                            } else if let Some(error) = self.state.playlists.detail_error() {
-                                std::borrow::Cow::Owned(error.to_string())
-                            } else if bilibili {
-                                t!("All pages loaded · Video order and part order preserved")
-                            } else if read_only {
-                                t!("Shared playlist · Only the owner can edit it.")
-                            } else if self.state.playlists.songs().is_empty() {
-                                t!("This playlist is empty. Use a song’s actions menu to add tracks.")
-                            } else {
-                                t!("Use a song’s actions menu to move or remove it.")
-                            }),
-                    )
+                    .child(self.render_playlist_status(bilibili, read_only, cx))
                     .child(self.render_song_list(SongScope::PlaylistDetail, cx)),
             )
             .into_any_element()

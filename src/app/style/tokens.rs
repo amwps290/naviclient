@@ -147,6 +147,7 @@ pub(in crate::app) const DETAIL_COVER_COMPACT: f32 = 140.0;
 pub(in crate::app) const DETAIL_ARTIST_COVER: f32 = 150.0;
 pub(in crate::app) const DETAIL_ARTIST_COVER_COMPACT: f32 = 110.0;
 pub(in crate::app) const DETAIL_PLAY_BUTTON: f32 = 48.0;
+pub(in crate::app) const PLAYLIST_STATUS_HEIGHT: f32 = 32.0;
 pub(in crate::app) const DETAIL_COMPACT_WIDTH: f32 = 1040.0;
 pub(in crate::app) const DETAIL_COMPACT_HEIGHT: f32 = 760.0;
 

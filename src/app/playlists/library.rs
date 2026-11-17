@@ -5,6 +5,10 @@ use crate::app::library::requests::{LibraryLoad, LibraryRequest, LibraryRequests
 use crate::models::{Playlist, Song};
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
 
+mod loading;
+pub(in crate::app) use loading::PlaylistDetailChange;
+use loading::PlaylistDetailLoad;
+
 const INITIAL_VISIBLE: usize = 50;
 const VISIBLE_BATCH: usize = 100;
 
@@ -15,6 +19,7 @@ pub(in crate::app) struct PlaylistLibrary {
     selected: Option<PlaylistDetails>,
     list_load: LibraryLoad,
     detail_load: LibraryLoad,
+    detail: PlaylistDetailLoad,
     edits: PlaylistEdits,
     list_task: Option<tokio::task::AbortHandle>,
     detail_task: Option<tokio::task::AbortHandle>,
@@ -81,6 +86,7 @@ impl PlaylistLibrary {
             unavailable_count: 0,
         });
         self.detail_load = LibraryLoad::default();
+        self.detail = PlaylistDetailLoad::default();
     }
 
     pub(in crate::app) fn begin_list(&mut self, requests: &mut LibraryRequests) -> LibraryRequest {
@@ -124,6 +130,7 @@ impl PlaylistLibrary {
         if let Some(task) = self.detail_task.take() {
             task.abort();
         }
+        self.detail.begin();
         Some(self.detail_load.begin(requests))
     }
 
@@ -147,6 +154,7 @@ impl PlaylistLibrary {
                 {
                     item.cover_art = details.playlist.cover_art.clone();
                 }
+                self.detail.accept_complete(request, &details);
                 self.selected = Some(details);
                 Ok(self
                     .selected
@@ -177,6 +185,10 @@ impl PlaylistLibrary {
         // data. Invalidate them on success and failure before refreshing.
         self.list_load = LibraryLoad::default();
         self.detail_load = LibraryLoad::default();
+        self.detail.cancel();
+        if let Some(task) = self.detail_task.take() {
+            task.abort();
+        }
         if let Ok(edited) = &completion.result {
             if edited.deleted {
                 self.items.retain(|item| item.id != edited.id);
@@ -187,6 +199,7 @@ impl PlaylistLibrary {
                     .is_some_and(|details| details.playlist.id == edited.id)
                 {
                     self.selected = None;
+                    self.detail = PlaylistDetailLoad::default();
                 }
             }
         }
@@ -202,6 +215,7 @@ impl PlaylistLibrary {
         }
         self.list_load = LibraryLoad::default();
         self.detail_load = LibraryLoad::default();
+        self.detail.cancel();
     }
 }
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::models::{PlaybackQueue, QueueOrigin, Song};
+use crate::playlist::loading::{PlaylistProgress, PlaylistUpdate};
 
 fn song(title: &str) -> Song {
     Song {
@@ -21,6 +22,62 @@ fn state() -> AppState {
         ),
         queue_index: Some(1),
         ..Default::default()
+    }
+}
+
+#[test]
+fn same_source_playlist_rows_reject_other_folders_and_refreshes_but_survive_appending() {
+    let mut state = state();
+    let mut requests = crate::app::library::requests::LibraryRequests::default();
+    let source = crate::source::SourceId::new(crate::source::ProviderKind::Bilibili, "same-source");
+    let make_song = || Song {
+        source: Some(source.clone()),
+        ..song("Same song")
+    };
+    let mut old_target: Option<SongRowTarget> = None;
+    for id in ["a", "b", "b"] {
+        let playlist = crate::models::Playlist {
+            id: id.into(),
+            ..Default::default()
+        };
+        if id != "b"
+            || state
+                .playlists
+                .playlist()
+                .is_none_or(|selected| selected.id != id)
+        {
+            state.playlists.select(playlist.clone());
+        }
+        let request = state.playlists.begin_detail(&mut requests).unwrap();
+        state
+            .playlists
+            .apply_detail_update(request, PlaylistUpdate::Metadata(playlist));
+        state.playlists.apply_detail_update(
+            request,
+            PlaylistUpdate::Batch {
+                songs: vec![make_song()],
+                progress: PlaylistProgress {
+                    songs: 1,
+                    ..Default::default()
+                },
+            },
+        );
+        if let Some(target) = old_target {
+            assert_eq!(target.resolve(&state), None);
+        }
+        let target = SongRowTarget::capture(&state, SongScope::PlaylistDetail, 0).unwrap();
+        state.playlists.apply_detail_update(
+            request,
+            PlaylistUpdate::Batch {
+                songs: vec![make_song()],
+                progress: PlaylistProgress {
+                    songs: 2,
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(target.resolve(&state), Some((SongScope::PlaylistDetail, 0)));
+        old_target = Some(target);
     }
 }
 

@@ -6,6 +6,8 @@ use serde::Deserialize;
 
 use crate::models::{Playlist, Song};
 
+pub(crate) mod loading;
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct PlaylistDetails {
     #[serde(flatten)]

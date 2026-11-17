@@ -11,6 +11,8 @@ use std::{
     thread,
 };
 
+mod streaming;
+
 pub(super) fn session() -> AuthSession {
     AuthSession::decode_secret(
         zeroize::Zeroizing::new(b"SESSDATA=fake; bili_jct=csrf; DedeUserID=123".to_vec()),
@@ -315,6 +317,8 @@ async fn repeated_page_cannot_loop_or_publish_a_partial_folder() {
     let fixture = Fixture::new(|path| {
         if path.contains("list-all") {
             folders()
+        } else if path.contains("web-interface/view") {
+            video("BV1GJ411x7h7", &[10])
         } else {
             assert!(path.contains("resource/list"));
             page(123, true, json!([{"type":2,"bvid":"BV1GJ411x7h7"}]))
@@ -325,6 +329,6 @@ async fn repeated_page_cannot_loop_or_publish_a_partial_folder() {
         BilibiliError::InvalidResponse
     );
     let paths = fixture.paths.lock().unwrap();
-    assert_eq!(paths.len(), 3);
+    assert_eq!(paths.len(), 4);
     assert!(paths.last().unwrap().contains("pn=2"));
 }

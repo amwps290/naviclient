@@ -16,34 +16,18 @@ impl NavidromeApp {
             return div().into_any_element();
         };
         if songs.is_empty() {
-            return v_flex()
-                .w_full()
-                .flex_1()
-                .min_h(px(180.0))
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .px_6()
-                .text_center()
-                .child(
-                    Icon::new(AppIcon::Playlists)
-                        .with_size(px(28.0))
-                        .text_color(cx.theme().muted_foreground.opacity(0.72)),
+            return if scope == SongScope::PlaylistDetail {
+                crate::app::playlists::detail_view::render_playlist_placeholder(
+                    &self.state.playlists,
+                    cx,
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(t!("No tracks here yet")),
+            } else {
+                render_empty_song_list(
+                    t!("No tracks here yet").to_string(),
+                    t!("Tracks will appear here when they are available.").to_string(),
+                    cx,
                 )
-                .child(
-                    div()
-                        .max_w(px(360.0))
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("Tracks will appear here when they are available.")),
-                )
-                .into_any_element();
+            };
         }
         let handle = self.song_list_scroll(scope);
         let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
@@ -183,6 +167,7 @@ impl NavidromeApp {
                 .tooltip(t!("Play selected (Enter)"))
                 .ghost()
                 .small()
+                .disabled(!self.state.song_scope_ready(scope))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.play_selected_songs(scope);
                     cx.notify();
@@ -194,6 +179,7 @@ impl NavidromeApp {
                 .tooltip(t!("Play selected next"))
                 .ghost()
                 .small()
+                .disabled(!self.state.song_scope_ready(scope))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.selected_play_next(scope);
                     cx.notify();
@@ -205,6 +191,7 @@ impl NavidromeApp {
                 .tooltip(t!("Add selected to queue"))
                 .ghost()
                 .small()
+                .disabled(!self.state.song_scope_ready(scope))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.selected_to_queue(scope);
                     cx.notify();
@@ -256,4 +243,43 @@ impl NavidromeApp {
         )
         .into_any_element()
     }
+}
+
+pub(in crate::app) fn render_empty_song_list(
+    title: String,
+    description: String,
+    cx: &App,
+) -> gpui_kit::AnyElement {
+    v_flex()
+        .id("song-empty-state")
+        .debug_selector(|| "song-empty-state".into())
+        .w_full()
+        .flex_1()
+        .min_h(px(180.0))
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .px_6()
+        .text_center()
+        .child(
+            Icon::new(AppIcon::Playlists)
+                .with_size(px(28.0))
+                .text_color(cx.theme().muted_foreground.opacity(0.72)),
+        )
+        .child(
+            div()
+                .id("song-empty-title")
+                .debug_selector(|| "song-empty-title".into())
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title),
+        )
+        .child(
+            div()
+                .max_w(px(360.0))
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(description),
+        )
+        .into_any_element()
 }

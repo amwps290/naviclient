@@ -11,6 +11,8 @@ use crate::models::{
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdit, PlaylistEdited};
 
+mod playlist_loading;
+
 impl MusicSource {
     fn bind_songs(&self, mut songs: Vec<Song>) -> Vec<Song> {
         for song in &mut songs {

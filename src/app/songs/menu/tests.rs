@@ -1,4 +1,5 @@
 use super::*;
+use crate::playlist::loading::{PlaylistProgress, PlaylistUpdate};
 use crate::playlist::PlaylistDetails;
 
 fn song(title: &str) -> Song {
@@ -21,6 +22,78 @@ fn queue_state() -> AppState {
         ),
         ..Default::default()
     }
+}
+
+#[test]
+fn preview_menus_never_become_partial_full_queue_actions_after_completion() {
+    let mut state = AppState::default();
+    let mut requests = LibraryRequests::default();
+    let playlist = Playlist {
+        id: "p".into(),
+        ..Default::default()
+    };
+    state.playlists.select(playlist.clone());
+    let request = state.playlists.begin_detail(&mut requests).unwrap();
+    state
+        .playlists
+        .apply_detail_update(request, PlaylistUpdate::Metadata(playlist.clone()));
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Batch {
+            songs: vec![song("First")],
+            progress: PlaylistProgress {
+                songs: 1,
+                ..Default::default()
+            },
+        },
+    );
+    let preview = SongMenuContext::for_scope(&state, SongScope::PlaylistDetail, 0).unwrap();
+    assert!(!preview.source.can_play(&state));
+    assert!(preview.source.playlist_target().unwrap().is_current(&state));
+    let SongMenuSource::Library { songs, .. } = &preview.source else {
+        unreachable!()
+    };
+    assert!(
+        songs.is_empty(),
+        "a preview menu must not keep an owned partial queue"
+    );
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Batch {
+            songs: vec![song("Second")],
+            progress: PlaylistProgress {
+                songs: 2,
+                ..Default::default()
+            },
+        },
+    );
+    state.playlists.apply_detail_update(
+        request,
+        PlaylistUpdate::Complete(PlaylistProgress {
+            songs: 2,
+            ..Default::default()
+        }),
+    );
+    assert!(!preview.source.can_play(&state));
+    let full = SongMenuContext::for_scope(&state, SongScope::PlaylistDetail, 0).unwrap();
+    assert!(full.source.can_play(&state));
+    let current = state.playlists.begin_detail(&mut requests).unwrap();
+    assert!(!full.source.can_play(&state));
+    state
+        .playlists
+        .apply_detail_update(current, PlaylistUpdate::Metadata(playlist));
+    state.playlists.apply_detail_update(
+        current,
+        PlaylistUpdate::Batch {
+            songs: vec![song("Replacement")],
+            progress: PlaylistProgress {
+                songs: 1,
+                ..Default::default()
+            },
+        },
+    );
+    assert!(!full.source.playlist_target().unwrap().is_current(&state));
+    assert!(!preview.source.playlist_target().unwrap().is_current(&state));
 }
 
 #[test]
@@ -114,11 +187,14 @@ fn playlist_menu_retains_its_original_order_and_owner_after_browsing_elsewhere()
         id: "other".into(),
         ..Default::default()
     });
+    assert!(!context.source.can_play(&state));
+    assert!(!context.source.playlist_target().unwrap().is_current(&state));
     assert_eq!(context.song.title, "Second");
     let SongMenuSource::Library {
         songs,
         index,
         playlist,
+        ..
     } = context.source
     else {
         panic!("library menus must hold their original list snapshot");
@@ -155,6 +231,7 @@ fn library_menu_snapshots_have_no_queue_edit_identity() {
         songs,
         index,
         playlist,
+        ..
     } = context.source
     else {
         panic!("search rows must retain their library list");

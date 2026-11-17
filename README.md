@@ -34,9 +34,11 @@ JavaScript runtime.
   data (saved session, loudness and genre caches, stored credential)
 - Home, artists, albums, playlists, and search views
 - Bilibili account sign-in by QR code and browsing your own favorite folders,
-  usable without a Navidrome server. Folder playback loads every page and
-  expands videos in video/part order; play a selected part, all parts of a
-  video, or the whole folder, and append tracks to the source's queue.
+  usable without a Navidrome server. Folder pages and video parts appear in
+  ordered batches, with loading feedback and Retry after a failure. Full-list
+  playback waits for every page to finish; individual preview tracks can be
+  queued from their actions menu. Play a selected part, all parts of a video,
+  or the whole folder, and append tracks to the source's queue.
   Independent AAC-LC audio is selected by accessible declared bandwidth,
   with backup addresses and bounded playback URL refresh. Multi-part tracks
   show their part names, with video/collection context shown separately;
@@ -313,8 +315,12 @@ Each row shows a status dot and one action (**Use**, **Set up**, **Sign in** or
 chooses the network connection, or removes the source after confirmation.
 For Bilibili, scan the QR code with the Bilibili App and confirm; a new account
 can choose its network connection in the same dialog. Open a favorites folder
-and use **Play all**, double-click a part, or use the row menu to play all
-parts of that video. A Navidrome server is optional. Bilibili sessions use
+to browse tracks as they load. Once loading completes, use **Play all**,
+double-click a part, or use the row menu to play all parts of that video.
+During loading, **Play next** and **Add to queue** in the row menu work on
+individual tracks. A failed load keeps its preview and offers **Retry**;
+the retry replaces that preview as new results arrive. A Navidrome server is
+optional. Bilibili sessions use
 Linux Secret Service with DH encryption or Windows Credential Manager, with no
 plaintext fallback. A locked or unavailable credential store must be made
 available before signing in.
@@ -536,6 +542,9 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/app/songs/playback.rs` - shared row, detail-page and multi-selection queue actions, validated playback plans and existing queue targeting; full-list appends retain scope origins while selected appends remain manual
 - `src/app/songs/view.rs` and `src/app/songs/row_view.rs` - virtualized list layout with its multi-selection toolbar, and individual song rows with their playing/hover indicators
 - `src/app/songs/row_actions.rs` - shared row event dispatch with queue occurrence resolution for delayed clicks, moves, removals and menu opening
+- `src/playlist/loading.rs`, `src/source/bilibili/library.rs` and `src/source/bilibili/library/batches.rs` - bounded playlist updates, page-by-page favorites traversal and an ordered four-video window; the first batch is immediate, later batches contain at most 128 tracks and use a 100 ms flush timer while waiting for video details
+- `src/app/playlists/library/loading.rs` and `src/app/playlists/loading.rs` - cancellable preview ownership, request/source checks, explicit completion and bounded UI polling; retry replaces the old prefix and authorization failure clears it
+- `src/app/playlists/detail_view.rs` - loading placeholders, preview counts, stable status-row height and Retry feedback; full-list queue actions require successful completion and delayed playlist rows/menus validate their snapshot
 - `src/app/songs/info_view.rs` - read-only track metadata dialog
 - `src/app/playback/occurrence.rs` - playback identity, terminal handling and reporting once per occurrence
 - `src/app/playback/start.rs` - prepared stream requests and accepted queue, selection, shuffle-history and resume-position updates
