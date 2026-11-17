@@ -21,16 +21,26 @@ pub(crate) struct WordTimingEdit {
 
 impl Document {
     pub fn timing_fingerprint(&self) -> String {
-        let rows: Vec<_> = self.lyrics.lines.iter().map(|line| {
-            let words = line.word_timing.as_ref().map(|words| {
-                let segments: Vec<_> = words.segments.iter().map(|s|
-                    (s.text_range.start, s.text_range.end, s.start_ms, s.end_ms)
-                ).collect();
-                (&words.text, words.start_ms, words.end_ms, segments)
-            });
-            (&line.text, line.start_ms, line.end_ms, words)
-        }).collect();
-        format!("{:x}", Md5::digest(serde_json::to_vec(&rows).expect("lyrics timing fingerprint")))
+        let rows: Vec<_> = self
+            .lyrics
+            .lines
+            .iter()
+            .map(|line| {
+                let words = line.word_timing.as_ref().map(|words| {
+                    let segments: Vec<_> = words
+                        .segments
+                        .iter()
+                        .map(|s| (s.text_range.start, s.text_range.end, s.start_ms, s.end_ms))
+                        .collect();
+                    (&words.text, words.start_ms, words.end_ms, segments)
+                });
+                (&line.text, line.start_ms, line.end_ms, words)
+            })
+            .collect();
+        format!(
+            "{:x}",
+            Md5::digest(serde_json::to_vec(&rows).expect("lyrics timing fingerprint"))
+        )
     }
 
     pub fn restore_timing_edits(&mut self, edits: Option<TimingEdits>) {
@@ -38,7 +48,9 @@ impl Document {
     }
 
     pub fn edited_lyrics(&self) -> Lyrics {
-        self.timing_edits.as_ref().and_then(|edits| self.apply_timing_edits(edits))
+        self.timing_edits
+            .as_ref()
+            .and_then(|edits| self.apply_timing_edits(edits))
             .unwrap_or_else(|| self.lyrics.clone())
     }
 
@@ -52,8 +64,13 @@ impl Document {
             if !seen.insert((edit.line, edit.segment)) {
                 return None;
             }
-            let segment = lyrics.lines.get_mut(edit.line)?.word_timing.as_mut()?
-                .segments.get_mut(edit.segment)?;
+            let segment = lyrics
+                .lines
+                .get_mut(edit.line)?
+                .word_timing
+                .as_mut()?
+                .segments
+                .get_mut(edit.segment)?;
             segment.start_ms = edit.start_ms;
             segment.end_ms = edit.end_ms;
         }
@@ -76,34 +93,62 @@ impl Document {
     /// remains editable without introducing overlaps.
     pub fn set_word_start(&mut self, line: usize, segment: usize, requested_ms: u64) -> bool {
         let mut lyrics = self.edited_lyrics();
-        let Some(words) = lyrics.lines.get_mut(line).and_then(|line| line.word_timing.as_mut()) else {
+        let Some(words) = lyrics
+            .lines
+            .get_mut(line)
+            .and_then(|line| line.word_timing.as_mut())
+        else {
             return false;
         };
-        let Some(current) = words.segments.get(segment) else { return false; };
+        let Some(current) = words.segments.get(segment) else {
+            return false;
+        };
         let old_start = current.start_ms;
-        let lower = segment.checked_sub(1).map_or(0, |i| words.segments[i].start_ms);
-        let upper = current.end_ms.or_else(|| words.segments.get(segment + 1).map(|s| s.start_ms))
-            .or(words.end_ms).unwrap_or(u64::MAX);
+        let lower = segment
+            .checked_sub(1)
+            .map_or(0, |i| words.segments[i].start_ms);
+        let upper = current
+            .end_ms
+            .or_else(|| words.segments.get(segment + 1).map(|s| s.start_ms))
+            .or(words.end_ms)
+            .unwrap_or(u64::MAX);
         let start = requested_ms.clamp(lower, upper.max(lower));
-        if start == old_start { return false; }
+        if start == old_start {
+            return false;
+        }
         words.segments[segment].start_ms = start;
         if let Some(previous) = segment.checked_sub(1).map(|i| &mut words.segments[i]) {
             if let Some(end) = previous.end_ms {
-                previous.end_ms = Some(if end == old_start { start } else { end.min(start) });
+                previous.end_ms = Some(if end == old_start {
+                    start
+                } else {
+                    end.min(start)
+                });
             }
         }
         let mut edits = Vec::new();
         for (line, (edited, original)) in lyrics.lines.iter().zip(&self.lyrics.lines).enumerate() {
             if let (Some(edited), Some(original)) = (&edited.word_timing, &original.word_timing) {
-                for (segment, (a, b)) in edited.segments.iter().zip(&original.segments).enumerate() {
+                for (segment, (a, b)) in edited.segments.iter().zip(&original.segments).enumerate()
+                {
                     if (a.start_ms, a.end_ms) != (b.start_ms, b.end_ms) {
-                        edits.push(WordTimingEdit { line, segment, start_ms: a.start_ms, end_ms: a.end_ms });
+                        edits.push(WordTimingEdit {
+                            line,
+                            segment,
+                            start_ms: a.start_ms,
+                            end_ms: a.end_ms,
+                        });
                     }
                 }
             }
         }
-        let edits = TimingEdits { fingerprint: self.timing_fingerprint(), words: edits };
-        if self.apply_timing_edits(&edits).is_none() { return false; }
+        let edits = TimingEdits {
+            fingerprint: self.timing_fingerprint(),
+            words: edits,
+        };
+        if self.apply_timing_edits(&edits).is_none() {
+            return false;
+        }
         self.timing_edits = (!edits.words.is_empty()).then_some(edits);
         true
     }
@@ -113,7 +158,9 @@ impl Document {
 mod tests {
     use super::*;
     fn document() -> Document {
-        Document::native(crate::lyrics::yrc::parse("[1000,3000](1000,1000,0)你(2000,1000,0)好(3000,1000,0)呀"))
+        Document::native(crate::lyrics::yrc::parse(
+            "[1000,3000](1000,1000,0)你(2000,1000,0)好(3000,1000,0)呀",
+        ))
     }
 
     #[test]
@@ -151,7 +198,15 @@ mod tests {
     fn boundary_clamps_and_returning_to_source_removes_corrections() {
         let mut doc = document();
         assert!(doc.set_word_start(0, 1, 0));
-        assert_eq!(doc.edited_lyrics().lines[0].word_timing.as_ref().unwrap().segments[1].start_ms, 1000);
+        assert_eq!(
+            doc.edited_lyrics().lines[0]
+                .word_timing
+                .as_ref()
+                .unwrap()
+                .segments[1]
+                .start_ms,
+            1000
+        );
         assert!(doc.set_word_start(0, 1, 2000));
         assert!(doc.timing_edits.is_none());
     }

@@ -9,8 +9,8 @@ pub(crate) mod netease;
 pub(crate) mod online;
 pub(crate) mod provider;
 pub(crate) mod service;
-mod transport;
 pub(crate) mod timing;
+mod transport;
 pub(crate) mod yrc;
 
 use crate::models::{network::SourceConnection, Lyrics};

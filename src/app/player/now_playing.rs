@@ -48,6 +48,7 @@ impl NavidromeApp {
             .lyrics
             .lyrics()
             .and_then(|lyrics| lyrics.display_line_index(playback.position));
+        let display_line = self.lyrics_ui.timing.display_line(display_line);
         let lyrics = self.state.lyrics.lyrics();
         let lyrics_body = if self.state.lyrics.loading() && lyrics.is_none() {
             div()
@@ -71,6 +72,7 @@ impl NavidromeApp {
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
             let synced = lyrics.is_synced();
             let show_translation = self.config.show_lyrics_translation;
+            let aligning = self.lyrics_ui.timing.is_aligning();
             v_flex()
                 .id("lyrics-scroll")
                 .flex_1()
@@ -130,9 +132,13 @@ impl NavidromeApp {
                         .line_height(relative(1.45))
                         .when_some(start_ms, |this, start_ms| {
                             this.cursor_pointer()
+                                // Mark the line that a click is about to align.
+                                .when(aligning, |this| {
+                                    this.rounded(px(tokens::radius::ROW))
+                                        .hover(|style| style.bg(p.brand_soft))
+                                })
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.seek_playback(Duration::from_millis(start_ms));
-                                    cx.notify();
+                                    this.click_lyric_line(index, start_ms, cx)
                                 }))
                         })
                         // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。

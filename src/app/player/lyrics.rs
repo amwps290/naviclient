@@ -92,49 +92,69 @@ impl NavidromeApp {
             self.state.lyrics.scroll_target = None;
             return;
         }
-
-        // A new document can have no started cue during its intro. Reset the
-        // actual viewport even when both the old and new active indices are None.
-        if std::mem::take(&mut self.state.lyrics.follow_reset) {
-            self.lyrics_scroll_handle.set_offset(point(px(0.0), px(0.0)));
-        }
-
         let active = self
             .state
             .lyrics
             .lyrics()
             .filter(|lyrics| lyrics.is_synced())
             .and_then(|lyrics| lyrics.display_line_index(self.playback_for_display().position));
+        follow_lyrics(
+            &mut self.state.lyrics,
+            &self.lyrics_scroll_handle,
+            active,
+            self.lyrics_ui.timing.is_aligning(),
+        );
+    }
+}
 
-        if active != self.state.lyrics.active_index {
-            self.state.lyrics.active_index = active;
-            self.state.lyrics.scroll_target = None;
-            if let Some(index) = active {
-                let item_index = index + 1;
-                if let Some(item_bounds) = self.lyrics_scroll_handle.bounds_for_item(item_index) {
-                    let viewport_bounds = self.lyrics_scroll_handle.bounds();
-                    self.state.lyrics.scroll_target =
-                        Some(viewport_bounds.center().y - item_bounds.center().y);
-                } else {
-                    self.lyrics_scroll_handle.scroll_to_item(item_index);
-                }
+/// Follow live cues from the current viewport, with a pause while a line is
+/// picked for alignment. Resuming rebuilds the target even within the same cue.
+fn follow_lyrics(
+    lyrics: &mut super::lyrics_state::LyricsState,
+    scroll: &ScrollHandle,
+    active: Option<usize>,
+    aligning: bool,
+) {
+    if aligning {
+        lyrics.scroll_target = None;
+        lyrics.follow_resume = true;
+        return;
+    }
+
+    // A new document can have no started cue during its intro. Reset the
+    // actual viewport even when both the old and new active indices are None.
+    if std::mem::take(&mut lyrics.follow_reset) {
+        scroll.set_offset(point(px(0.0), px(0.0)));
+    }
+    let resumed = std::mem::take(&mut lyrics.follow_resume);
+    if active != lyrics.active_index || resumed {
+        lyrics.active_index = active;
+        lyrics.scroll_target = None;
+        if let Some(index) = active {
+            let item_index = index + 1;
+            if let Some(item_bounds) = scroll.bounds_for_item(item_index) {
+                let viewport_bounds = scroll.bounds();
+                lyrics.scroll_target = Some(viewport_bounds.center().y - item_bounds.center().y);
             } else {
-                // Seeking backwards into the intro must also leave the outro.
-                self.lyrics_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                scroll.scroll_to_item(item_index);
             }
+        } else {
+            // Seeking backwards into the intro must also leave the outro.
+            scroll.set_offset(point(px(0.0), px(0.0)));
         }
+    }
 
-        if let Some(target) = self.state.lyrics.scroll_target {
-            let current = self.lyrics_scroll_handle.offset();
-            let distance = f32::from(target - current.y);
-            if distance.abs() <= 0.75 {
-                self.lyrics_scroll_handle
-                    .set_offset(point(current.x, target));
-                self.state.lyrics.scroll_target = None;
-            } else {
-                self.lyrics_scroll_handle
-                    .set_offset(point(current.x, current.y + px(distance * 0.24)));
-            }
+    if let Some(target) = lyrics.scroll_target {
+        let current = scroll.offset();
+        let distance = f32::from(target - current.y);
+        if distance.abs() <= 0.75 {
+            scroll.set_offset(point(current.x, target));
+            lyrics.scroll_target = None;
+        } else {
+            scroll.set_offset(point(current.x, current.y + px(distance * 0.24)));
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

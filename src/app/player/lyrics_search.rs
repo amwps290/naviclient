@@ -15,23 +15,21 @@ fn lyrics_dialog_behavior(dialog: Dialog) -> Dialog {
     dialog
         .keyboard(true)
         .overlay_closable(false)
-        // InputEvent::PressEnter owns search/offset application. The dialog's
-        // bubbled Confirm must neither repeat that action nor cancel the task.
+        // InputEvent::PressEnter owns the search. The dialog's bubbled Confirm
+        // must neither repeat that action nor cancel the task.
         .on_ok(|_, _, _| false)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum LyricsDialog {
     Search,
-    Timing,
 }
 
 pub(in crate::app) struct LyricsUi {
     pub title: Entity<InputState>,
     pub artist: Entity<InputState>,
     pub album: Entity<InputState>,
-    pub offset: Entity<InputState>,
-    pub(super) timing: Option<super::lyrics_timing::TimingEditor>,
+    pub timing: super::lyrics_timing::TimingBar,
     pub dialog: Option<LyricsDialog>,
     pub media: Option<MediaKey>,
     pub song_title: String,
@@ -57,8 +55,7 @@ impl LyricsUi {
             title: cx.new(|cx| InputState::new(window, cx)),
             artist: cx.new(|cx| InputState::new(window, cx)),
             album: cx.new(|cx| InputState::new(window, cx)),
-            offset: cx.new(|cx| InputState::new(window, cx)),
-            timing: None,
+            timing: Default::default(),
             dialog: None,
             media: None,
             song_title: String::new(),
@@ -84,7 +81,8 @@ impl LyricsUi {
         }
         self.request = None;
         self.media = None;
-        self.timing = None;
+        // The timing bar outlives dialogs; only its armed click does not.
+        self.timing.set_aligning(false);
         if self.dialog.take().is_some() {
             self.close_requested = true;
         }
@@ -150,15 +148,6 @@ impl NavidromeApp {
                     }
                 }));
         }
-        let offset = self.lyrics_ui.offset.clone();
-        self._subscriptions
-            .push(cx.subscribe(&offset, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::PressEnter { .. })
-                    && this.lyrics_ui.dialog == Some(LyricsDialog::Timing)
-                {
-                    this.apply_lyrics_offset_input(cx);
-                }
-            }));
     }
 
     pub(in crate::app) fn open_lyrics_dialog(
@@ -176,25 +165,10 @@ impl NavidromeApp {
         let Some(media) = self.lyrics_media(&song) else {
             return;
         };
-        if kind == LyricsDialog::Timing
-            && self
-                .state
-                .lyrics
-                .document
-                .as_ref()
-                .is_none_or(|d| !d.display_lyrics().is_synced())
-        {
-            return;
-        }
         self.lyrics_ui.cancel();
         self.lyrics_ui.close_requested = false;
         self.lyrics_ui.media = Some(media.clone());
         self.lyrics_ui.dialog = Some(kind);
-        if kind == LyricsDialog::Timing {
-            self.lyrics_ui.timing = self.state.lyrics.document.clone().map(|d| {
-                super::lyrics_timing::TimingEditor::new(d, self.playback_for_display().position)
-            });
-        }
         self.lyrics_ui.song_title = song.title.clone();
         let query = self
             .state
@@ -224,15 +198,6 @@ impl NavidromeApp {
         self.lyrics_ui
             .album
             .update(cx, |input, cx| input.set_value(query.album, window, cx));
-        let offset = self
-            .state
-            .lyrics
-            .document
-            .as_ref()
-            .map_or(0, |d| d.offset_ms);
-        self.lyrics_ui.offset.update(cx, |input, cx| {
-            input.set_value(offset.to_string(), window, cx)
-        });
         let app = cx.entity().downgrade();
         let closing = app.clone();
         window.defer(cx, move |window, cx| {
@@ -261,24 +226,7 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let position = self.playback_for_display().position;
-        if let Some(editor) = &mut self.lyrics_ui.timing {
-            if self
-                .state
-                .lyrics
-                .document
-                .as_ref()
-                .is_none_or(|d| d.timing_fingerprint() != editor.fingerprint)
-            {
-                self.lyrics_ui.cancel();
-            } else {
-                if !window.is_window_active() {
-                    editor.cancel_drag();
-                }
-                editor.sync_playback(position);
-                editor.center_anchor();
-            }
-        }
+        self.sync_lyrics_timing();
         if self.lyrics_ui.dialog.is_some()
             && self.lyrics_ui.media.as_ref()
                 != self
@@ -451,37 +399,10 @@ impl NavidromeApp {
         change: impl FnOnce(&mut Document),
         cx: &mut Context<Self>,
     ) {
-        let Some(media) = self.state.lyrics.media().cloned() else {
-            return;
-        };
-        let Some(mut document) = self.state.lyrics.document.clone() else {
-            return;
-        };
-        change(&mut document);
-        if !document.temporary {
-            // A display preference for automatic content does not pin that content.
-            let mut preference = document.clone();
-            if !document.manual {
-                preference.record = None;
-            }
-            if let Err(error) = self.lyrics_cache.remember(&media, &preference) {
-                self.notify_error(t!("Could not save lyrics: %{error}", error = error));
-                return;
-            }
+        if let Err(error) = self.state.lyrics.change_display(&self.lyrics_cache, change) {
+            self.notify_error(t!("Could not save lyrics: %{error}", error = error));
         }
-        self.state.lyrics.apply(document);
         cx.notify();
-    }
-
-    pub(in crate::app) fn apply_lyrics_offset_input(&mut self, cx: &mut Context<Self>) {
-        if let Ok(offset) = self.lyrics_ui.offset.read(cx).value().trim().parse::<i64>() {
-            if let Some(editor) = &mut self.lyrics_ui.timing {
-                editor.change(|d| d.offset_ms = offset);
-                cx.notify();
-            }
-        } else {
-            self.notify_error(t!("Enter a whole number of milliseconds."));
-        }
     }
 }
 

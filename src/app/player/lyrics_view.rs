@@ -61,6 +61,11 @@ impl NavidromeApp {
         let plain = document.is_some_and(|d| d.plain);
         let personal = document.is_some_and(|d| d.manual || d.offset_ms != 0 || d.plain);
         let word_timing = self.config.lyrics.word_timing;
+        let timing_open = self.lyrics_ui.timing.is_open();
+        // A closed bar still tells the listener that this song is shifted.
+        let shift = document
+            .filter(|d| synced && !timing_open && d.offset_ms != 0)
+            .map(|d| super::lyrics_timing::shift_label(d.offset_ms));
         let app = cx.entity().downgrade();
         let source = document.map(|d| {
             let origin = match d.origin {
@@ -150,16 +155,11 @@ impl NavidromeApp {
                                                 )
                                                 .item(
                                                     PopupMenuItem::new(t!("Lyrics timing"))
+                                                        .checked(timing_open)
                                                         .disabled(!synced)
-                                                        .on_click(cx.listener(
-                                                            |this, _, window, cx| {
-                                                                this.open_lyrics_dialog(
-                                                                    LyricsDialog::Timing,
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                            },
-                                                        )),
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.toggle_lyrics_timing(cx)
+                                                        })),
                                                 )
                                                 .item(
                                                     PopupMenuItem::new(t!("Display as plain text"))
@@ -200,10 +200,24 @@ impl NavidromeApp {
             )
             .when_some(source, |this, source| {
                 this.child(
-                    div()
+                    h_flex()
+                        .flex_wrap()
+                        .gap_x_1()
                         .text_xs()
                         .text_color(palette(cx).text_secondary)
-                        .child(source),
+                        .child(div().min_w_0().child(source))
+                        .when_some(shift, |this, shift| {
+                            this.child(
+                                div()
+                                    .id("lyrics-shift")
+                                    .cursor_pointer()
+                                    .text_color(palette(cx).brand)
+                                    .child(format!("· {shift}"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.toggle_lyrics_timing(cx)),
+                                    ),
+                            )
+                        }),
                 )
             })
             .when_some(self.state.lyrics.warning, |this, status| {
@@ -214,6 +228,7 @@ impl NavidromeApp {
                         .child(status.message()),
                 )
             })
+            .children(self.render_lyrics_timing_bar(cx))
             .into_any_element()
     }
 
@@ -223,9 +238,6 @@ impl NavidromeApp {
         window: &Window,
         cx: &Context<Self>,
     ) -> Dialog {
-        if self.lyrics_ui.dialog == Some(LyricsDialog::Timing) {
-            return self.render_lyrics_timing_dialog(dialog, window, cx);
-        }
         let compact = f32::from(window.viewport_size().width) < 820.0;
         let viewport_height = f32::from(window.viewport_size().height);
         let ui = &self.lyrics_ui;
@@ -652,5 +664,4 @@ impl NavidromeApp {
                     ),
             )
     }
-
 }

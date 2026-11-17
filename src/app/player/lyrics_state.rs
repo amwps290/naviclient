@@ -4,6 +4,7 @@ use gpui_kit::Pixels;
 
 use crate::app::library::requests::{LibraryLoad, LibraryRequest, LibraryRequests};
 use crate::lyrics::{
+    cache::LyricsCache,
     service::{LoadOutcome, LyricsStatus},
     Document,
 };
@@ -22,6 +23,7 @@ pub(in crate::app) struct LyricsState {
     pub(in crate::app) active_index: Option<usize>,
     pub(in crate::app) scroll_target: Option<Pixels>,
     pub(in crate::app) follow_reset: bool,
+    pub(in crate::app) follow_resume: bool,
 }
 
 impl LyricsState {
@@ -49,6 +51,7 @@ impl LyricsState {
         self.active_index = None;
         self.scroll_target = None;
         self.follow_reset = true;
+        self.follow_resume = false;
     }
 
     /// Keep cached lyrics and coalesce in-flight loads for the same song. A
@@ -123,6 +126,13 @@ impl LyricsState {
     }
 
     pub(in crate::app) fn apply(&mut self, document: Document) {
+        self.retime(document);
+        self.reset_follow();
+    }
+
+    /// Like `apply` for a change that only moves timestamps. The viewport stays
+    /// put, so the next frame follows the active line from where the list is.
+    fn retime(&mut self, document: Document) {
         self.cancel_task();
         self.load = Default::default();
         self.status = if document.instrumental {
@@ -133,7 +143,54 @@ impl LyricsState {
         self.warning = None;
         self.lyrics = Some(document.display_lyrics());
         self.document = Some(document);
-        self.reset_follow();
+    }
+
+    /// Change how the current document is displayed and remember it for this
+    /// song. Following restarts, as the change may alter the layout.
+    pub(in crate::app) fn change_display(
+        &mut self,
+        cache: &LyricsCache,
+        change: impl FnOnce(&mut Document),
+    ) -> anyhow::Result<()> {
+        if let Some(document) = self.remembered(cache, change)? {
+            self.apply(document);
+        }
+        Ok(())
+    }
+
+    /// Shift the current document in time and remember it for this song,
+    /// without moving the lines the listener is reading.
+    pub(in crate::app) fn change_timing(
+        &mut self,
+        cache: &LyricsCache,
+        change: impl FnOnce(&mut Document),
+    ) -> anyhow::Result<()> {
+        if let Some(document) = self.remembered(cache, change)? {
+            self.retime(document);
+        }
+        Ok(())
+    }
+
+    /// The changed document, once its preference is saved. A session-only
+    /// selection is never saved, and a preference for automatic content does
+    /// not pin that content.
+    fn remembered(
+        &self,
+        cache: &LyricsCache,
+        change: impl FnOnce(&mut Document),
+    ) -> anyhow::Result<Option<Document>> {
+        let (Some(media), Some(mut document)) = (&self.media, self.document.clone()) else {
+            return Ok(None);
+        };
+        change(&mut document);
+        if !document.temporary {
+            let mut preference = document.clone();
+            if !document.manual {
+                preference.record = None;
+            }
+            cache.remember(media, &preference)?;
+        }
+        Ok(Some(document))
     }
 
     pub(in crate::app) fn cancel_task(&mut self) {

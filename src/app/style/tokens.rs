@@ -154,6 +154,8 @@ pub(in crate::app) const DETAIL_COMPACT_HEIGHT: f32 = 760.0;
 pub(in crate::app) const NOW_PLAYING_TITLE: f32 = 30.0;
 pub(in crate::app) const LYRIC_ACTIVE: f32 = 28.0;
 pub(in crate::app) const LYRIC: f32 = 20.0;
+pub(in crate::app) const LYRIC_TIMING_STATUS_WIDTH: f32 = 112.0;
+pub(in crate::app) const LYRIC_TIMING_HINT_HEIGHT: f32 = 20.0;
 
 /// Fixed black dim: darkens the page behind overlays in both modes.
 pub(in crate::app) fn scrim() -> Hsla {

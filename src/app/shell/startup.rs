@@ -234,6 +234,7 @@ impl NavidromeApp {
         app.tray_rx = tray_rx;
         app.main_hwnd = main_window_hwnd(window);
 
+        app.subscribe_lyrics_timing_keys(cx);
         // 注册应用级快捷键监听（不依赖焦点；输入框聚焦时由输入框包装层阻止传播）。
         app._subscriptions
             .push(cx.observe_keystrokes(|this, event, window, cx| {

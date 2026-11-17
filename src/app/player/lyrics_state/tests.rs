@@ -360,3 +360,137 @@ async fn native_http_failure_reaches_player_error_and_refresh_keeps_existing_con
     }
     assert!(online.requests().is_empty());
 }
+
+fn online_document(id: u64) -> Document {
+    Document::online(crate::lyrics::provider::Record {
+        id,
+        track_name: "歌曲".into(),
+        artist_name: "歌手".into(),
+        duration: 223.0,
+        synced_lyrics: Some("[00:01.00]first\n[00:05.00]second".into()),
+        ..Default::default()
+    })
+}
+
+fn cache(directory: &tempfile::TempDir) -> crate::lyrics::cache::LyricsCache {
+    crate::lyrics::cache::LyricsCache::at(directory.path().join("cache.json"))
+}
+
+fn showing(document: Document) -> LyricsState {
+    let mut requests = LibraryRequests::default();
+    let mut state = LyricsState::default();
+    let request = state.begin(&media("a"), &mut requests).unwrap();
+    assert!(state.finish(request, LoadOutcome::ready(document)));
+    // The first frame after a load consumes the viewport reset.
+    state.follow_reset = false;
+    state
+}
+
+#[test]
+fn timing_change_shows_at_once_and_is_remembered_without_pinning_automatic_lyrics() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut state = showing(online_document(1));
+    state
+        .change_timing(&cache, |document| document.offset_ms = 300)
+        .unwrap();
+    assert_eq!(state.lyrics().unwrap().lines[0].start_ms, Some(1300));
+    assert_eq!(state.document.as_ref().unwrap().offset_ms, 300);
+    assert_eq!(cache.preference(&media("a")).offset_ms, 300);
+    // The automatic match may still be replaced by a better one later.
+    assert!(cache.selected(&media("a")).is_none());
+    assert_eq!(cache.preference(&media("b")).offset_ms, 0);
+}
+
+#[test]
+fn timing_change_keeps_a_remembered_selection_pinned() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut document = online_document(7);
+    document.manual = true;
+    let mut state = showing(document);
+    state
+        .change_timing(&cache, |document| document.offset_ms = -400)
+        .unwrap();
+    let pin = cache.selected(&media("a")).unwrap();
+    assert_eq!(pin.record.unwrap().id, 7);
+    assert_eq!(pin.offset_ms, -400);
+}
+
+#[test]
+fn session_only_selection_is_retimed_without_touching_the_remembered_offset() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut remembered = online_document(1);
+    remembered.manual = true;
+    remembered.offset_ms = -600;
+    cache.remember(&media("a"), &remembered).unwrap();
+    let mut session = online_document(2);
+    session.manual = true;
+    session.temporary = true;
+    let mut state = showing(session);
+    state
+        .change_timing(&cache, |document| document.offset_ms = 300)
+        .unwrap();
+    assert_eq!(state.lyrics().unwrap().lines[0].start_ms, Some(1300));
+    let pin = cache.selected(&media("a")).unwrap();
+    assert_eq!(pin.record.unwrap().id, 1);
+    assert_eq!(pin.offset_ms, -600);
+}
+
+#[test]
+fn timing_change_leaves_the_viewport_where_the_listener_is_reading() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut state = showing(online_document(1));
+    set_follow(&mut state);
+    state
+        .change_timing(&cache, |document| document.offset_ms = 300)
+        .unwrap();
+    assert_eq!(state.active_index, Some(2));
+    assert_eq!(state.scroll_target, Some(px(-120.0)));
+    assert!(!state.follow_reset);
+}
+
+#[test]
+fn display_change_restarts_following_from_the_top() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut state = showing(online_document(1));
+    set_follow(&mut state);
+    state
+        .change_display(&cache, |document| document.plain = true)
+        .unwrap();
+    assert!(!state.lyrics().unwrap().is_synced());
+    assert!(cache.preference(&media("a")).plain);
+    assert_follow_cleared(&state);
+}
+
+#[test]
+fn timing_change_rejects_a_refresh_that_started_with_the_old_offset() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut requests = LibraryRequests::default();
+    let mut state = showing(online_document(1));
+    let refresh = state.refresh(&media("a"), &mut requests);
+    state
+        .change_timing(&cache, |document| document.offset_ms = 300)
+        .unwrap();
+    assert!(!state.loading());
+    assert!(!state.finish(refresh, LoadOutcome::ready(online_document(1))));
+    assert_eq!(state.document.as_ref().unwrap().offset_ms, 300);
+}
+
+#[test]
+fn changes_without_a_document_save_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let cache = cache(&directory);
+    let mut requests = LibraryRequests::default();
+    let mut state = LyricsState::default();
+    state.begin(&media("a"), &mut requests).unwrap();
+    state
+        .change_timing(&cache, |document| document.offset_ms = 300)
+        .unwrap();
+    assert!(state.document.is_none());
+    assert!(cache.preference(&media("a")).media.is_none());
+}

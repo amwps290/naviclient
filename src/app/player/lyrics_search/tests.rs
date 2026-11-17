@@ -19,7 +19,6 @@ impl Render for Probe {
 
 fn harness(
     cx: &mut TestAppContext,
-    kind: LyricsDialog,
     runtime: &Runtime,
 ) -> (Entity<Probe>, tokio::task::AbortHandle, VisualTestContext) {
     cx.update(|cx| {
@@ -34,12 +33,9 @@ fn harness(
         cx.open_window(Default::default(), |window, cx| {
             let entity = cx.new(|cx| {
                 let mut ui = LyricsUi::new(window, cx);
-                ui.dialog = Some(kind);
+                ui.dialog = Some(LyricsDialog::Search);
                 ui.task = task.take();
-                let input = match kind {
-                    LyricsDialog::Search => ui.title.clone(),
-                    LyricsDialog::Timing => ui.offset.clone(),
-                };
+                let input = ui.title.clone();
                 let subscription = cx.subscribe(&input, |this: &mut Probe, input, event, cx| {
                     if matches!(event, InputEvent::PressEnter { .. }) {
                         this.entered.push(input.read(cx).value().to_string());
@@ -61,10 +57,7 @@ fn harness(
     let mut cx = VisualTestContext::from_window(window.into(), cx);
     cx.update(|window, cx| {
         let _ = window.draw(cx);
-        let input = match kind {
-            LyricsDialog::Search => probe.read(cx).ui.title.clone(),
-            LyricsDialog::Timing => probe.read(cx).ui.offset.clone(),
-        };
+        let input = probe.read(cx).ui.title.clone();
         let closing = probe.downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let closing = closing.clone();
@@ -86,11 +79,7 @@ fn harness(
         let _ = window.draw(cx);
     });
     cx.update(|window, cx| {
-        let ui = &probe.read(cx).ui;
-        let input = match kind {
-            LyricsDialog::Search => &ui.title,
-            LyricsDialog::Timing => &ui.offset,
-        };
+        let input = &probe.read(cx).ui.title;
         input.read(cx).focus_handle(cx).focus(window, cx);
     });
     cx.run_until_parked();
@@ -103,7 +92,7 @@ fn harness(
 #[gpui_pre::test]
 fn search_enter_keeps_dialog_and_task_alive_but_escape_cancels(cx: &mut TestAppContext) {
     let runtime = Runtime::new().unwrap();
-    let (probe, abort, mut cx) = harness(cx, LyricsDialog::Search, &runtime);
+    let (probe, abort, mut cx) = harness(cx, &runtime);
     cx.simulate_keystrokes("t e s t enter");
     cx.run_until_parked();
     cx.update(|window, cx| {
@@ -119,27 +108,5 @@ fn search_enter_keeps_dialog_and_task_alive_but_escape_cancels(cx: &mut TestAppC
         assert!(!window.has_active_dialog(cx));
         assert_eq!(probe.read(cx).closed, 1);
         assert!(probe.read(cx).ui.task.is_none());
-    });
-}
-
-#[gpui_pre::test]
-fn timing_enter_reaches_input_once_and_keeps_valid_and_invalid_values_open(
-    cx: &mut TestAppContext,
-) {
-    let runtime = Runtime::new().unwrap();
-    let (probe, _, mut cx) = harness(cx, LyricsDialog::Timing, &runtime);
-    for value in ["750", "invalid"] {
-        cx.update(|window, cx| {
-            let input = probe.read(cx).ui.offset.clone();
-            input.update(cx, |input, cx| input.set_value(value, window, cx));
-            let _ = window.draw(cx);
-        });
-        cx.simulate_keystrokes("enter");
-        cx.run_until_parked();
-        cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
-    }
-    cx.update(|_, cx| {
-        assert_eq!(probe.read(cx).entered, ["750", "invalid"]);
-        assert_eq!(probe.read(cx).closed, 0);
     });
 }
