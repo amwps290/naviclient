@@ -21,6 +21,7 @@ impl Fixture {
                 state: Arc::new(Mutex::new(playback)),
                 transition: Arc::new(Mutex::new(None)),
                 transport: Arc::new(Mutex::new(Transport::default())),
+                visualizer: Arc::default(),
             },
             receiver: Some(rx),
         }

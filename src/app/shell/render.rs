@@ -16,6 +16,7 @@ impl Render for NavidromeApp {
             }
         }
         self.sync_lyrics_dialog(window, cx);
+        self.sync_fullscreen_viewport(window);
         let playback = self.playback_for_display();
         let cover = self
             .state
@@ -46,6 +47,10 @@ impl Render for NavidromeApp {
                 slider.set_value(progress, window, cx);
             }
         });
+
+        if self.fullscreen.is_active() {
+            return self.render_fullscreen_player(window, cx);
+        }
 
         if self.mini_window.is_mini() {
             self.sync_mini_window_size(window);

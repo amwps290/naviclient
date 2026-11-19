@@ -69,6 +69,7 @@ fn assert_pending_http_cancelled(shutdown: bool) {
         state: state.clone(),
         transition: Arc::new(Mutex::new(None)),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     let (player, _output) = Player::new();
     let output = AudioOutput::new(DevicePlayback::headless(

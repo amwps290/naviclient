@@ -32,6 +32,7 @@ pub(crate) mod test_transport;
 mod track_state;
 mod track_transition;
 mod transport;
+pub(crate) mod visualizer;
 mod worker;
 
 pub use error::StreamFailure;
@@ -87,6 +88,7 @@ pub struct AudioHandle {
     state: Arc<Mutex<PlaybackState>>,
     transition: Arc<Mutex<Option<Arc<Transition>>>>,
     transport: Arc<Mutex<Transport>>,
+    visualizer: Arc<visualizer::AudioVisualizer>,
 }
 
 /// Initial transport intent travels with the selected resource in one command.
@@ -103,9 +105,19 @@ impl AudioHandle {
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let worker_state = Arc::clone(&state);
         let transition = Arc::new(Mutex::new(None));
+        let visualizer = Arc::new(visualizer::AudioVisualizer::default());
+        let worker_visualizer = visualizer.clone();
         thread::Builder::new()
             .name("audio-worker".to_string())
-            .spawn(move || run_worker(rx, worker_state, cache_dir, output_device))
+            .spawn(move || {
+                run_worker(
+                    rx,
+                    worker_state,
+                    cache_dir,
+                    output_device,
+                    worker_visualizer,
+                )
+            })
             .context("failed to start audio worker")?;
         log::debug!("audio worker thread started");
         Ok(Self {
@@ -113,6 +125,7 @@ impl AudioHandle {
             state,
             transition,
             transport: Arc::new(Mutex::new(Transport::default())),
+            visualizer,
         })
     }
 
@@ -236,6 +249,14 @@ impl AudioHandle {
     pub fn seek(&self, position: Duration) {
         self.cancel_transition();
         let _ = self.send(Command::Seek(position));
+    }
+
+    pub(crate) fn set_visualizer_enabled(&self, enabled: bool) {
+        self.visualizer.set_enabled(enabled);
+    }
+
+    pub(crate) fn waveform(&self) -> [f32; visualizer::WAVEFORM_BINS] {
+        self.visualizer.snapshot()
     }
 
     /// Responsive control state, including commands accepted but not yet processed.

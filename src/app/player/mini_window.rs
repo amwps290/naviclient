@@ -35,6 +35,10 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn toggle_mini_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.fullscreen.is_active() {
+            self.exit_fullscreen_player(window, cx);
+            return;
+        }
         if self.mini_window.is_mini() {
             self.exit_mini_mode(window, cx);
         } else {

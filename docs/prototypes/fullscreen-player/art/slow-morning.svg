@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <linearGradient id="sky" x2=".3" y2="1"><stop stop-color="#e6bd9d"/><stop offset=".55" stop-color="#eddfc3"/><stop offset="1" stop-color="#c5c6b1"/></linearGradient>
+    <linearGradient id="hill" x2=".3" y2="1"><stop stop-color="#788781"/><stop offset="1" stop-color="#374e4b"/></linearGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".73" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".085"/></feComponentTransfer><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+  </defs>
+  <g filter="url(#grain)">
+    <path fill="url(#sky)" d="M0 0h800v800H0z"/>
+    <circle cx="327" cy="324" r="88" fill="#fcf0d2"/>
+    <path d="M0 516q105-191 236-66t296-15q154-87 268 18v347H0z" fill="#9ca39b"/>
+    <path d="M0 543q210-150 385-42t415-26v325H0z" fill="#8a9788"/>
+    <path d="M0 650q108-169 292-113t508-57v320H0z" fill="url(#hill)"/>
+    <path d="M534 551q-132 58-135 249h79q-40-153 56-249" fill="#d9c7a6" opacity=".65"/>
+    <g fill="#29423d"><path d="m62 532-16 57h32zm51 19-19 68h38zm58-22-23 83h46zm-38 42-23 79h46z"/><path d="M61 589v52m51-22v36m58-43v36" fill="none" stroke="#29423d" stroke-width="4"/></g>
+  </g>
+  <g fill="#393b32" font-family="Arial, sans-serif"><text x="55" y="73" font-size="15" letter-spacing="5">FOREST ECHO</text><text x="54" y="139" font-size="45" font-weight="300" letter-spacing="5">SLOW MORNING</text></g>
+  <g fill="#ece6d4" font-family="Arial, sans-serif"><text x="57" y="729" font-size="11" letter-spacing="4">EVERY DAY BEGINS AGAIN</text><text x="57" y="753" font-size="10" letter-spacing="2" opacity=".64">ORIGINAL CONCEPT ART / 2026</text></g>
+</svg>

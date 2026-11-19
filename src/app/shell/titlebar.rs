@@ -1,6 +1,7 @@
 //! Main-window and now-playing titlebars and window actions.
 
 use crate::app::prelude::*;
+use crate::app::shortcuts::bindings::shortcut_display;
 
 impl NavidromeApp {
     fn render_titlebar_actions(
@@ -14,6 +15,26 @@ impl NavidromeApp {
             .items_center()
             .gap_1()
             .occlude()
+            .child(
+                Button::new(SharedString::from(format!("{mini_id}-fullscreen")))
+                    .icon(AppIcon::Fullscreen)
+                    .tooltip(t!(
+                        "Fullscreen player (%{shortcut})",
+                        shortcut = shortcut_display(
+                            self.config
+                                .shortcuts
+                                .binding(ShortcutAction::ToggleFullscreen)
+                        )
+                    ))
+                    .accessibility_label(t!("Fullscreen player"))
+                    .ghost()
+                    .small()
+                    .on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.toggle_fullscreen_player(window, cx)
+                        }),
+                    ),
+            )
             .child(
                 Button::new(mini_id)
                     .icon(AppIcon::MiniPlayer)

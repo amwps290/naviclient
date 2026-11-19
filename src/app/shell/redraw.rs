@@ -12,6 +12,7 @@ const STANDARD_INTERVAL: Duration = Duration::from_millis(250);
 pub(in crate::app) enum PlaybackPresentation {
     NowPlaying,
     MiniPlayer,
+    Fullscreen,
     Standard,
 }
 
@@ -28,13 +29,13 @@ impl PlaybackPresentation {
 
     fn interval(self) -> Duration {
         match self {
-            Self::NowPlaying | Self::MiniPlayer => POLL_INTERVAL,
+            Self::NowPlaying | Self::MiniPlayer | Self::Fullscreen => POLL_INTERVAL,
             Self::Standard => STANDARD_INTERVAL,
         }
     }
 
     pub(in crate::app) fn animate_cover(self, playback: &PlaybackState, visible: bool) -> bool {
-        matches!(self, Self::NowPlaying | Self::MiniPlayer)
+        matches!(self, Self::NowPlaying | Self::MiniPlayer | Self::Fullscreen)
             && visible
             && playback.active
             && !playback.paused

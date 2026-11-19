@@ -237,16 +237,15 @@ JavaScript runtime.
 - Rotating vinyl cover art on the lyrics page and mini player;
   pauses at the current angle when playback pauses or the window is hidden,
   and renders at up to 20 fps.
-  Only the current cover is cached (120 frames at 192×192, about 17 MiB of
-  CPU pixels); preparation runs once in a throttled background
-  worker, delivering the next visible frames first so rotation starts without
-  waiting for the full cache. Its resolution is capped on high-DPI displays to
-  keep memory bounded. Two display-sized sources are reused for frame blending,
-  then drawn as one texture with one circular edge. Only the current and outgoing
-  composites enter the GPU atlas; replaced textures are explicitly released.
+  The current cover is decoded once in a background worker and kept as one
+  192×192 source (144 KiB of CPU pixels). Each visible angle samples this source
+  directly, keeping text and contours sharp without crossfading displaced frames.
+  Display-sized filtering is reused, and resolution is capped on high-DPI displays
+  to keep memory bounded. Only current and outgoing textures enter the GPU atlas;
+  replaced textures are explicitly released, with one circular edge per cover.
   Switching tracks on this page parks the tonearm, slides the old record out,
   inserts the new one and lowers the arm (about 2 seconds). The outgoing cover
-  retains only two frozen frames; quick skips update the destination record.
+  retains its source and exact frozen angle; quick skips update the destination record.
   The stylus follows playback progress from the outer to the inner groove,
   with smooth seeking and pause/resume motion. Exchanges finish immediately
   when the page is hidden, settings open or the mini player is active.
@@ -262,6 +261,14 @@ JavaScript runtime.
   the cover returns to the lyrics page; dragging the background moves the window.
   Scrolling the wheel adjusts volume and briefly shows it in the time label
   and progress line. Long metadata and buffering/error feedback remain readable.
+- Fullscreen “Vinyl Salon” presentation for large displays: charcoal and
+  champagne colors, a rotating record and tonearm on the left, large synced
+  lyrics on the right, and shared playback, seek, shuffle/repeat and volume
+  controls below. Use the titlebar button or `F11` to enter and `Esc` to return
+  to the previous page; entering from mini first restores the normal window.
+  Controls fade after 3.2 seconds of idle playback. `H` hides/shows controls,
+  `T` toggles translations and `V` toggles the real output waveform envelope.
+  Lyric timing adjustments and word highlighting carry across player modes.
 - Server settings persisted locally as JSON
 - Language preference persisted locally (`System` by default); the Windows tray
   menu keeps the language it was built with until the next launch, while the
@@ -495,6 +502,7 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/audio/output_track.rs` - prepared-stream diagnostics and per-track loudness/gain/EQ/output-format assembly, with private source ownership and explicit sample consumption
 - `src/audio/eq.rs` and `src/audio/eq/shared.rs` - native-rate per-channel filtering and opaque shared settings/revision publication; readers copy changed settings before updating coefficients, and cloned handles survive output replacement
 - `src/audio/loudness_meter.rs` - cumulative raw-sample RMS/peak accounting and transparent source wrapping, separate from device discovery and output effects
+- `src/audio/visualizer.rs` - optional atomic waveform envelopes from consumed player output samples, with transparent sample/metadata/seek forwarding and no audio-callback allocations or locks
 - `src/audio/decoder.rs` - decoder construction, bounded PCM production and terminal-result classification
 - `src/audio/buffered_stream.rs` - startup-buffer ownership, nonblocking playback consumption and stall timing
 - `src/audio/stream_control.rs` - shared cancellation, decoder sleeping/promotion and lifecycle guards, preparation reuse waits, monotonic arrival timing, synthetic silence and first I/O failure retention
@@ -517,6 +525,7 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/app/player/controls.rs` and `src/app/widgets/favorite_button.rs` - shared player styles, shuffle/repeat controls and favorite buttons
 - `src/app/player/bar.rs` - responsive player bar layout, current-track artwork, metadata, navigation and accessory controls
 - `src/app/player/progress.rs` - playback progress, buffering feedback and playback retry
+- `src/app/player/fullscreen/` - Vinyl Salon layout, lyrics and controls, native fullscreen intent/restore state, idle fading and real waveform painting, sharing the existing playback engine
 - `src/app/sound/volume_view.rs` and `src/app/sound/volume.rs` - volume panel rendering and shared wheel-volume dispatch for the player bar and mini player
 - `src/app/widgets/page_controls.rs` and `src/app/widgets/skeleton.rs` - shared page controls and loading placeholders
 - `src/app/library/browse_view.rs` - library browse pages, local sort menus and genre grids
@@ -554,9 +563,9 @@ acquire/release ordering for completion and relaxed ordering for byte progress.
 - `src/config/server_writer/mailbox.rs` - private synchronization, retry deadlines and fresh-attempt receipts; immutable write tasks carry their own revision through completion, preserving newer pending snapshots
 - `src/app/shell/polling.rs` and `src/app/shell/redraw.rs` - background polling, playback redraw cadence, visibility recovery and shared cover animation eligibility
 - `src/typography.rs` - installed-font discovery and platform/locale-aware UI font selection
-- `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, progressive frame delivery and cancellation, and bounded background raster generation
-- `src/vinyl/rotation.rs` - texture-independent rotation timing and adjacent-frame selection, advancing only when both frames are drawable
-- `src/vinyl/composite.rs` - display-sized source filtering, single-texture frame blending, and bounded GPU composite ownership
+- `src/vinyl.rs` and `src/vinyl/frames.rs` - current-cover texture ownership, cancellable background decoding and bounded single-angle rasterization
+- `src/vinyl/rotation.rs` - texture-independent continuous rotation timing, advancing only when artwork is ready
+- `src/vinyl/composite.rs` - display-sized source filtering, exact-angle sampling and bounded GPU texture ownership
 - `src/vinyl/motion.rs` and `src/app/covers/turntable.rs` - record-exchange timing, progress-driven tonearm motion and outgoing cover retention
 - `src/media_session.rs` and `src/media_session/` - shared media commands and snapshots, Linux MPRIS and Windows SMTC integration
 - `src/media_session/linux/interfaces.rs` and `src/media_session/linux/artwork.rs` - MPRIS interface contracts and connection-owned local artwork, with separate file preparation, publication, replacement and directory cleanup

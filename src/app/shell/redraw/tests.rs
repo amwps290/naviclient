@@ -329,6 +329,7 @@ fn mini_presentation_takes_priority_over_the_underlying_view() {
 fn cover_animation_requires_visible_active_unpaused_playback_in_a_cover_view() {
     assert!(PlaybackPresentation::NowPlaying.animate_cover(&playing(), true));
     assert!(PlaybackPresentation::MiniPlayer.animate_cover(&playing(), true));
+    assert!(PlaybackPresentation::Fullscreen.animate_cover(&playing(), true));
     for (visible, active, paused) in [
         (false, true, false),
         (true, false, false),
@@ -345,6 +346,7 @@ fn cover_animation_requires_visible_active_unpaused_playback_in_a_cover_view() {
         };
         assert!(!PlaybackPresentation::NowPlaying.animate_cover(&playback, visible));
         assert!(!PlaybackPresentation::MiniPlayer.animate_cover(&playback, visible));
+        assert!(!PlaybackPresentation::Fullscreen.animate_cover(&playback, visible));
     }
     for visible in [false, true] {
         for active in [false, true] {
@@ -361,17 +363,30 @@ fn cover_animation_requires_visible_active_unpaused_playback_in_a_cover_view() {
 }
 
 #[test]
-fn mini_player_clock_uses_the_animation_cadence_without_forcing_idle_redraws() {
-    let mut playback = playing();
-    let mini = |playback: &PlaybackState| RedrawRequest {
-        presentation: PlaybackPresentation::MiniPlayer,
-        ..request(playback)
-    };
-    let mut polls = Polls::new();
-    assert!(polls.at(0, mini(&playback)));
-    playback.position = Duration::from_millis(49);
-    assert!(!polls.at(49, mini(&playback)));
-    assert!(polls.at(50, mini(&playback)));
-    assert!(!polls.at(100, mini(&playback)));
-    assert!(!polls.at(60_000, mini(&playback)));
+fn mini_and_fullscreen_use_the_animation_cadence_without_forcing_idle_redraws() {
+    for presentation in [
+        PlaybackPresentation::MiniPlayer,
+        PlaybackPresentation::Fullscreen,
+    ] {
+        let mut playback = playing();
+        let animated = |playback: &PlaybackState| RedrawRequest {
+            presentation,
+            ..request(playback)
+        };
+        let mut polls = Polls::new();
+        assert!(polls.at(0, animated(&playback)));
+        playback.position = Duration::from_millis(49);
+        assert!(!polls.at(49, animated(&playback)));
+        assert!(polls.at(50, animated(&playback)));
+        assert!(!polls.at(100, animated(&playback)));
+        assert!(!polls.at(60_000, animated(&playback)));
+        assert!(!polls.at(
+            60_001,
+            RedrawRequest {
+                visible: false,
+                ..animated(&playback)
+            }
+        ));
+        assert!(polls.at(60_002, animated(&playback)));
+    }
 }

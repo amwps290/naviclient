@@ -111,6 +111,7 @@ pub struct NavidromeApp {
     reconnect: PlaybackReconnect,
     _subscriptions: Vec<Subscription>,
     mini_window: MiniWindowState,
+    fullscreen: player::fullscreen::window::FullscreenUi,
     /// 均衡器 10 段滑杆状态（设置页）。
     eq_sliders: Vec<Entity<SliderState>>,
     /// Equalizer edits and persistence survive library/server state resets.

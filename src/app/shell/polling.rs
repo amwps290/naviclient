@@ -63,6 +63,7 @@ impl NavidromeApp {
         self.poll_listening_history();
         self.maybe_notify_track_started();
         self.sync_tray_paused();
+        changed |= self.poll_fullscreen(window, cx);
         let scrolling = self.state.lyrics.scroll_target.is_some();
         self.update_active_lyric();
         changed |= self.vinyl_cover.poll_ready();
@@ -102,6 +103,9 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn playback_presentation(&self) -> PlaybackPresentation {
+        if self.fullscreen.is_active() {
+            return PlaybackPresentation::Fullscreen;
+        }
         PlaybackPresentation::for_view(
             self.state.view,
             self.state.settings.open,

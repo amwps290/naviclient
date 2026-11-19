@@ -88,7 +88,9 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn update_active_lyric(&mut self) {
-        if self.state.view != View::NowPlaying {
+        if !self.fullscreen.is_active()
+            && (self.state.view != View::NowPlaying || self.mini_window.is_mini())
+        {
             self.state.lyrics.scroll_target = None;
             return;
         }
@@ -98,9 +100,14 @@ impl NavidromeApp {
             .lyrics()
             .filter(|lyrics| lyrics.is_synced())
             .and_then(|lyrics| lyrics.display_line_index(self.playback_for_display().position));
+        let scroll = if self.fullscreen.is_active() {
+            self.fullscreen.scroll_handle()
+        } else {
+            &self.lyrics_scroll_handle
+        };
         follow_lyrics(
             &mut self.state.lyrics,
-            &self.lyrics_scroll_handle,
+            scroll,
             active,
             self.lyrics_ui.timing.is_aligning(),
         );

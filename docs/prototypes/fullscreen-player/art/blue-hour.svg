@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <linearGradient id="sky" x2=".2" y2="1"><stop stop-color="#35475b"/><stop offset=".46" stop-color="#697887"/><stop offset="1" stop-color="#c6a6a2"/></linearGradient>
+    <linearGradient id="sea" x2=".8" y2="1"><stop stop-color="#737581"/><stop offset=".5" stop-color="#354a58"/><stop offset="1" stop-color="#172f3c"/></linearGradient>
+    <radialGradient id="sun"><stop stop-color="#f9e2c8"/><stop offset=".75" stop-color="#efc4ad"/><stop offset="1" stop-color="#dba296"/></radialGradient>
+    <linearGradient id="shore" x2="1" y2="1"><stop stop-color="#283e4b"/><stop offset="1" stop-color="#1c313b"/></linearGradient>
+    <linearGradient id="reflection" x2="0" y2="1"><stop stop-color="#eac6b0" stop-opacity=".44"/><stop offset="1" stop-color="#eac6b0" stop-opacity="0"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="45"/></filter>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".74" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".085"/></feComponentTransfer><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+  </defs>
+  <g filter="url(#grain)">
+    <path fill="url(#sky)" d="M0 0h800v800H0z"/>
+    <circle cx="538" cy="306" r="148" fill="#f0b59e" opacity=".32" filter="url(#glow)"/>
+    <circle cx="538" cy="306" r="106" fill="url(#sun)"/>
+    <path d="M0 433Q170 418 320 437T800 438V800H0z" fill="url(#sea)"/>
+    <path d="m461 438 146 0 74 282H412z" fill="url(#reflection)" opacity=".6"/>
+    <g fill="none" stroke="#d2bab0" stroke-width="1.2" opacity=".32"><path d="M367 462q146-12 280 0m-225 17q93-7 176 0m-209 19q122-7 213 2m-246 23q146-8 239 3m-261 26q157-9 278 3m-302 31q157-6 312 6m-359 25q185-10 360 8"/></g>
+    <path d="M0 581Q118 501 223 589T425 659q119-20 202 27t173 29v85H0z" fill="url(#shore)"/>
+    <path d="M0 583q110-75 209-4t202 80" fill="none" stroke="#a9b9b5" stroke-opacity=".24" stroke-width="2"/>
+  </g>
+  <g fill="#f3e8d9" font-family="Arial, sans-serif">
+    <text x="55" y="73" font-size="15" letter-spacing="5">FOREST ECHO</text>
+    <text x="54" y="139" font-size="53" font-weight="300" letter-spacing="8">BLUE HOUR</text>
+    <text x="57" y="729" font-size="11" letter-spacing="4">A PLACE BETWEEN DAY AND NIGHT</text>
+    <text x="57" y="753" font-size="10" letter-spacing="2" opacity=".64">ORIGINAL CONCEPT ART / 2026</text>
+    <circle cx="729" cy="735" r="15" fill="none" stroke="#f3e8d9" stroke-width=".8"/><path d="M721 735h16m-8-8v16" stroke="#f3e8d9" stroke-width=".8"/>
+  </g>
+</svg>

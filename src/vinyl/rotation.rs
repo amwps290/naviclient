@@ -1,8 +1,6 @@
-//! Rotation timing and adjacent-frame selection, independent of GPUI textures.
+//! Continuous rotation timing, independent of GPUI textures.
 
 use std::time::{Duration, Instant};
-
-pub(super) const FRAMES: usize = 120;
 
 #[derive(Default)]
 pub(super) struct Rotation {
@@ -23,7 +21,7 @@ impl Rotation {
         &mut self,
         now: Instant,
         spinning: bool,
-        can_draw: impl FnOnce(usize, usize) -> bool,
+        can_draw: impl FnOnce() -> bool,
     ) -> bool {
         if !spinning {
             self.last_tick = None;
@@ -32,24 +30,17 @@ impl Rotation {
         let Some(previous) = self.last_tick.replace(now) else {
             return false;
         };
-        // Advance only through drawable frames. Startup, a slow worker, seeking,
+        // Advance only when artwork is ready. Startup, a slow worker, seeking,
         // and returning from a hidden window must never jump to a future angle.
         let elapsed = now.duration_since(previous).min(Duration::from_millis(100));
         let phase = (self.phase + elapsed.as_secs_f32() / 18.0).fract();
-        let (first, next, _) = frame_pair(phase);
-        if can_draw(first, next) {
+        if can_draw() {
             self.phase = phase;
             true
         } else {
             false
         }
     }
-}
-
-pub(super) fn frame_pair(phase: f32) -> (usize, usize, f32) {
-    let frame = phase.rem_euclid(1.0) * FRAMES as f32;
-    let first = frame.floor() as usize % FRAMES;
-    (first, (first + 1) % FRAMES, frame.fract())
 }
 
 #[cfg(test)]

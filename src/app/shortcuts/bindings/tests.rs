@@ -167,3 +167,46 @@ fn global_shortcut_conflicts_are_scoped_to_global_playback_bindings() {
         None
     );
 }
+
+#[test]
+fn fullscreen_shortcut_loads_in_old_configs_and_can_be_rebound() {
+    let mut settings: ShortcutSettings =
+        serde_json::from_str(r#"{"bindings":{"toggle_playback":"ctrl-p"}}"#).unwrap();
+    assert_eq!(settings.binding(ShortcutAction::TogglePlayback), "ctrl-p");
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("f11").unwrap()),
+        Some(ShortcutAction::ToggleFullscreen)
+    );
+    settings.set(ShortcutAction::ToggleFullscreen, "f".to_string());
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("f11").unwrap()),
+        None
+    );
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("f").unwrap()),
+        Some(ShortcutAction::ToggleFullscreen)
+    );
+    assert_eq!(
+        shortcut_conflict(&settings, ShortcutAction::Next, "f"),
+        Some(ShortcutAction::ToggleFullscreen)
+    );
+    assert!(!ShortcutAction::GLOBAL_PLAYBACK.contains(&ShortcutAction::ToggleFullscreen));
+    assert_eq!(
+        ShortcutAction::ToggleFullscreen.default_global_binding(),
+        None
+    );
+}
+
+#[test]
+fn an_existing_f11_binding_retains_priority_over_the_new_default() {
+    let settings: ShortcutSettings =
+        serde_json::from_str(r#"{"bindings":{"next":"f11"}}"#).unwrap();
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("f11").unwrap()),
+        Some(ShortcutAction::Next)
+    );
+    assert_eq!(
+        shortcut_conflict(&settings, ShortcutAction::ToggleFullscreen, "f11"),
+        Some(ShortcutAction::Next)
+    );
+}

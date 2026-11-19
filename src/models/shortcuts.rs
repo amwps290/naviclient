@@ -15,6 +15,7 @@ pub enum ShortcutAction {
     VolumeDown,
     ToggleMute,
     ToggleNowPlaying,
+    ToggleFullscreen,
     ToggleQueue,
     FocusSearch,
     CloseOverlays,
@@ -25,7 +26,7 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::TogglePlayback,
         Self::Previous,
         Self::Next,
@@ -35,6 +36,7 @@ impl ShortcutAction {
         Self::VolumeDown,
         Self::ToggleMute,
         Self::ToggleNowPlaying,
+        Self::ToggleFullscreen,
         Self::ToggleQueue,
         Self::FocusSearch,
         Self::CloseOverlays,
@@ -66,6 +68,7 @@ impl ShortcutAction {
             Self::VolumeDown => "down",
             Self::ToggleMute => "m",
             Self::ToggleNowPlaying => "l",
+            Self::ToggleFullscreen => "f11",
             Self::ToggleQueue => "q",
             Self::FocusSearch => "ctrl-f",
             Self::CloseOverlays => "escape",
@@ -87,6 +90,7 @@ impl ShortcutAction {
             Self::VolumeDown => Some("ctrl-alt-down"),
             Self::ToggleMute => Some("ctrl-alt-m"),
             Self::ToggleNowPlaying
+            | Self::ToggleFullscreen
             | Self::ToggleQueue
             | Self::FocusSearch
             | Self::CloseOverlays

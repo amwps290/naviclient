@@ -87,9 +87,23 @@ impl NavidromeApp {
         {
             return;
         }
+        if self.handle_fullscreen_key(keystroke, window, cx) {
+            return;
+        }
         let Some(shortcut) = match_shortcut(&self.config.shortcuts, keystroke) else {
             return;
         };
+        if self.fullscreen.is_active()
+            && matches!(
+                shortcut,
+                ShortcutAction::SelectPrevious
+                    | ShortcutAction::SelectNext
+                    | ShortcutAction::SelectAll
+                    | ShortcutAction::PlaySelected
+            )
+        {
+            return;
+        }
         if !self
             .shortcut_repeat
             .allows(keystroke, shortcut, std::time::Instant::now())
@@ -120,22 +134,32 @@ impl NavidromeApp {
                 self.execute_playback_shortcut(shortcut, window, cx);
             }
             ShortcutAction::ToggleNowPlaying => {
-                if self.state.view == View::NowPlaying {
+                if self.fullscreen.is_active() {
+                    self.exit_fullscreen_player(window, cx);
+                    self.open_now_playing();
+                } else if self.state.view == View::NowPlaying {
                     self.leave_now_playing();
                 } else {
                     self.open_now_playing();
                 }
                 cx.notify();
             }
+            ShortcutAction::ToggleFullscreen => self.toggle_fullscreen_player(window, cx),
             ShortcutAction::ToggleQueue => {
+                self.exit_fullscreen_player(window, cx);
                 self.state.queue_drawer_open = !self.state.queue_drawer_open;
                 cx.notify();
             }
             ShortcutAction::CloseOverlays => {
-                self.state.close_top_overlay();
+                if self.fullscreen.is_active() {
+                    self.exit_fullscreen_player(window, cx);
+                } else {
+                    self.state.close_top_overlay();
+                }
                 cx.notify();
             }
             ShortcutAction::FocusSearch => {
+                self.exit_fullscreen_player(window, cx);
                 self.focus_search(window, cx);
             }
         }

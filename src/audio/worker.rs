@@ -68,6 +68,7 @@ pub(super) fn run_worker(
     state: Arc<Mutex<PlaybackState>>,
     initial_cache_dir: PathBuf,
     output_device: Option<String>,
+    visualizer: Arc<super::visualizer::AudioVisualizer>,
 ) {
     let _guard = transport::WorkerGuard(state.clone());
     let (device_sink, output_name) = match open_audio_device(output_device.as_deref()) {
@@ -121,7 +122,7 @@ pub(super) fn run_worker(
         }
     };
 
-    let output = AudioOutput::new(DevicePlayback::new(device_sink, output_name));
+    let output = AudioOutput::new(DevicePlayback::new(device_sink, output_name, visualizer));
     run_playback(rx, state, initial_cache_dir, client, output);
 }
 

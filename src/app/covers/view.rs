@@ -99,6 +99,16 @@ impl NavidromeApp {
         size: f32,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        self.render_vinyl_record_styled(size, 0.5, None, cx)
+    }
+
+    pub(in crate::app) fn render_vinyl_record_styled(
+        &self,
+        size: f32,
+        label_ratio: f32,
+        tint: Option<Hsla>,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let motion = self.turntable.motion.frame();
         let cover = if motion.outgoing {
             self.turntable.outgoing_cover.as_ref()
@@ -114,7 +124,7 @@ impl NavidromeApp {
         };
         let tonearm_engaged = motion.arm_degrees > 0.5;
         self.mark_cover_image_used(&cover);
-        let label_size = size * 0.5;
+        let label_size = size * label_ratio;
         let label_offset = (size - label_size) * 0.5;
         let inner_cover_size = label_size - size * 0.018;
         let hole_size = size * 0.032;
@@ -125,9 +135,10 @@ impl NavidromeApp {
         let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
         let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
         let tonearm_base_size = size * 0.105;
-        let metal_tint = self
-            .now_playing_cover_palette()
-            .map_or(palette(cx).text_muted, |(_, accent)| accent);
+        let metal_tint = tint.unwrap_or_else(|| {
+            self.now_playing_cover_palette()
+                .map_or(palette(cx).text_muted, |(_, accent)| accent)
+        });
         let metal_body = hsla(0.1, 0.025, 0.78, 1.0).blend(metal_tint.opacity(0.06));
         let tonearm_layer = |icon: AppIcon, offset_x: f32, offset_y: f32, color: Hsla| {
             Icon::new(icon)

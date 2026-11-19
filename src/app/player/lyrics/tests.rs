@@ -7,6 +7,8 @@ use gpui_kit::{TestAppContext, VisualTestContext};
 struct FollowProbe {
     lyrics: LyricsState,
     scroll: ScrollHandle,
+    viewport_height: f32,
+    row_height: f32,
 }
 
 impl Render for FollowProbe {
@@ -14,12 +16,12 @@ impl Render for FollowProbe {
         v_flex()
             .id("lyrics-follow-probe")
             .w(px(320.0))
-            .h(px(240.0))
+            .h(px(self.viewport_height))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .child(div().h(px(240.0)).flex_none())
-            .child(div().h(px(64.0)).flex_none().child("first"))
-            .child(div().h(px(64.0)).flex_none().child("second"))
+            .child(div().h(px(self.row_height)).flex_none().child("first"))
+            .child(div().h(px(self.row_height)).flex_none().child("second"))
             .child(div().h(px(280.0)).flex_none())
     }
 }
@@ -39,6 +41,8 @@ fn on_screen(cx: &mut TestAppContext) -> (Entity<FollowProbe>, VisualTestContext
                 FollowProbe {
                     lyrics,
                     scroll: ScrollHandle::new(),
+                    viewport_height: 240.0,
+                    row_height: 64.0,
                 }
             });
             probe = Some(entity.clone());
@@ -96,6 +100,43 @@ fn leaving_alignment_follows_the_latest_cue(cx: &mut TestAppContext) {
             follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), false);
             assert_eq!(probe.lyrics.active_index, Some(1));
             assert_eq!(probe.lyrics.scroll_target, Some(target));
+        });
+    });
+}
+
+#[gpui_pre::test]
+fn switching_lyric_viewports_recenters_the_same_cue_with_its_new_height(cx: &mut TestAppContext) {
+    let (probe, mut visual) = on_screen(cx);
+    let old_scroll = visual.update(|_, cx| {
+        probe.update(cx, |probe, cx| {
+            probe.lyrics.follow_resume = true;
+            for _ in 0..40 {
+                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+            }
+            let old = probe.scroll.clone();
+            probe.scroll = ScrollHandle::new();
+            probe.viewport_height = 360.0;
+            probe.row_height = 160.0;
+            probe.lyrics.follow_resume = true;
+            cx.notify();
+            old
+        })
+    });
+    let old_offset = old_scroll.offset();
+    visual.run_until_parked();
+    visual.update(|window, cx| {
+        let _ = window.draw(cx);
+        probe.update(cx, |probe, _| {
+            let target = probe.scroll.bounds().center().y
+                - probe.scroll.bounds_for_item(1).unwrap().center().y;
+            assert_ne!(target, old_offset.y);
+            for _ in 0..40 {
+                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+            }
+            assert_eq!(probe.lyrics.active_index, Some(0));
+            assert_eq!(probe.lyrics.scroll_target, None);
+            assert_eq!(probe.scroll.offset().y, target);
+            assert_eq!(old_scroll.offset(), old_offset);
         });
     });
 }

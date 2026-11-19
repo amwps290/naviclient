@@ -36,6 +36,7 @@ fn preload_acceptance_preserves_current_playback_and_delivers_the_reservation() 
         state: Arc::new(Mutex::new(playback.clone())),
         transition: Arc::new(Mutex::new(None)),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     assert!(audio.preload(
         42,
@@ -155,6 +156,7 @@ fn restoring_playback_sends_one_command_with_the_saved_position() {
         state: Arc::new(Mutex::new(PlaybackState::default())),
         transition: Arc::new(Mutex::new(None)),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     audio.play(
         "test".into(),
@@ -185,6 +187,7 @@ fn relative_seeks_accumulate_before_the_worker_processes_the_commands() {
         })),
         transition: Arc::new(Mutex::new(None)),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     let song = crate::models::Song {
         duration: Some(120),
@@ -211,6 +214,7 @@ fn newly_selected_track_supplies_its_own_position_and_duration_before_worker_pol
         })),
         transition: Arc::new(Mutex::new(None)),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     audio.play(
         "test".into(),

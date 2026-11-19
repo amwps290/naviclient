@@ -1,0 +1,389 @@
+//! Vinyl Salon: a quiet record deck, large lyrics and restrained gold controls.
+
+use super::layout::FullscreenLayout;
+use crate::app::prelude::*;
+
+#[derive(Clone, Copy)]
+pub(super) struct SalonPalette {
+    pub(super) page: Hsla,
+    pub(super) text: Hsla,
+    pub(super) secondary: Hsla,
+    pub(super) muted: Hsla,
+    pub(super) accent: Hsla,
+    pub(super) border: Hsla,
+}
+
+pub(super) fn salon_palette() -> SalonPalette {
+    SalonPalette {
+        page: gpui_kit::rgb(0x1c1a18).into(),
+        text: gpui_kit::rgb(0xeee6d7).into(),
+        secondary: gpui_kit::rgb(0xbdb2a0).into(),
+        muted: gpui_kit::rgb(0x938776).into(),
+        accent: gpui_kit::rgb(0xd3b987).into(),
+        border: hsla(0.11, 0.30, 0.78, 0.12),
+    }
+}
+
+pub(super) fn salon_button(
+    id: impl Into<gpui_kit::ElementId>,
+    icon: AppIcon,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    let label = label.into();
+    Button::new(id)
+        .icon(icon)
+        .custom(salon_toggle_style(false, cx))
+        .accessibility_label(label.clone())
+        .tooltip(label)
+        .with_size(px(36.0))
+        .rounded_full()
+}
+
+pub(super) fn salon_toggle_style(active: bool, cx: &App) -> ButtonCustomVariant {
+    let p = salon_palette();
+    ButtonCustomVariant::new(cx)
+        .color(if active {
+            p.accent.opacity(0.12)
+        } else {
+            p.page.opacity(0.0)
+        })
+        .foreground(if active { p.accent } else { p.secondary })
+        .hover(p.accent.opacity(0.10))
+        .active(p.accent.opacity(0.16))
+}
+
+impl NavidromeApp {
+    pub(in crate::app) fn render_fullscreen_player(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let width = f32::from(window.viewport_size().width);
+        let height = f32::from(window.viewport_size().height);
+        let layout = FullscreenLayout::new(width, height);
+        let p = salon_palette();
+        let opacity = self.fullscreen.state.opacity();
+
+        v_flex()
+            .id("fullscreen-player")
+            .relative()
+            .size_full()
+            .min_h_0()
+            .overflow_hidden()
+            .track_focus(&self.fullscreen.focus)
+            .bg(p.page)
+            .text_color(p.text)
+            .px(px(layout.padding_x))
+            .pt(px(layout.padding_top))
+            .pb(px(layout.padding_bottom))
+            .gap(px(layout.gap))
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui_kit::MouseMoveEvent, _, cx| {
+                    this.move_fullscreen_pointer(event.position, cx)
+                }),
+            )
+            .capture_any_mouse_down(cx.listener(|this, _, window, cx| {
+                window.focus(&this.fullscreen.focus, cx);
+                this.fullscreen.pointer_down = true;
+                this.wake_fullscreen_controls(cx);
+            }))
+            .capture_any_mouse_up(cx.listener(|this, _, _, cx| {
+                this.fullscreen.pointer_down = false;
+                this.wake_fullscreen_controls(cx);
+            }))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.fullscreen.pointer_down = false;
+                    this.wake_fullscreen_controls(cx);
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .w(relative(0.52))
+                    .bg(linear_gradient(
+                        90.0,
+                        linear_color_stop(gpui_kit::rgb(0x2c251c), 0.0),
+                        linear_color_stop(p.page.opacity(0.0), 1.0),
+                    )),
+            )
+            .child(div().h(px(layout.header_height)).w_full().flex_none().when(
+                opacity > 0.0,
+                |this| {
+                    this.child(self.render_fullscreen_header(&layout, cx))
+                        .opacity(opacity)
+                },
+            ))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(layout.stage_width))
+                    .mx_auto()
+                    .gap(px(layout.column_gap))
+                    .items_center()
+                    .when(layout.stacked, |this| this.flex_col())
+                    .child(self.render_fullscreen_art(&layout, cx))
+                    .child(self.render_fullscreen_lyrics(&layout, cx)),
+            )
+            .child(div().h(px(layout.footer_height)).w_full().flex_none().when(
+                opacity > 0.0,
+                |this| {
+                    this.child(self.render_fullscreen_footer(&layout, cx))
+                        .opacity(opacity)
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn render_fullscreen_header(
+        &self,
+        layout: &FullscreenLayout,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let p = salon_palette();
+        h_flex()
+            .h_full()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .track_focus(&self.fullscreen.header_focus)
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(
+                        Icon::new(AppIcon::Waveform)
+                            .with_size(px(25.0))
+                            .text_color(p.accent),
+                    )
+                    .child(
+                        v_flex()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(px(22.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("NAVI"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(9.0))
+                                    .text_color(p.muted)
+                                    .child(t!("Vinyl Salon")),
+                            ),
+                    ),
+            )
+            .when(!layout.compact, |this| {
+                this.child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .rounded_full()
+                        .border_1()
+                        .border_color(p.border)
+                        .text_size(px(10.0))
+                        .text_color(p.secondary)
+                        .child(t!("Fullscreen player")),
+                )
+            })
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        salon_button(
+                            "fullscreen-hide-controls",
+                            AppIcon::Eye,
+                            t!("Hide controls (H)"),
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.toggle_fullscreen_controls(window, cx)
+                        })),
+                    )
+                    .child(
+                        salon_button(
+                            "fullscreen-exit",
+                            AppIcon::FullscreenExit,
+                            t!("Exit fullscreen (Esc)"),
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.exit_fullscreen_player(window, cx)
+                        })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_fullscreen_art(
+        &self,
+        layout: &FullscreenLayout,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let p = salon_palette();
+        let song = self.state.now_playing.as_ref();
+        let album = song.map(|song| song.album.clone()).unwrap_or_default();
+        let title = song
+            .map(|song| song.title.clone())
+            .unwrap_or_else(|| t!("No track playing").to_string());
+        let artist = song
+            .map(|song| song.artist.clone())
+            .unwrap_or_else(|| t!("Choose a song from your library.").to_string());
+        let serif = crate::typography::serif_font_family(cx);
+        let can_favorite = song.is_some_and(|song| {
+            self.api.as_ref().is_some_and(|api| {
+                api.capabilities().favorite_write
+                    && self
+                        .source_for_song(song)
+                        .is_some_and(|source| source.id() == api.id())
+            })
+        });
+        v_flex()
+            .w(px(layout.art_width))
+            .flex_none()
+            .items_center()
+            .child(
+                v_flex()
+                    .w(px(layout.metadata_width))
+                    .min_w_0()
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .mb(px(20.0))
+                            .child(div().w(px(20.0)).h(px(1.0)).bg(p.accent.opacity(0.65)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(9.0))
+                                    .text_color(p.muted)
+                                    .truncate()
+                                    .child(album.clone()),
+                            ),
+                    )
+                    .child(self.render_vinyl_record_styled(
+                        layout.cover_size,
+                        0.36,
+                        Some(p.accent),
+                        cx,
+                    ))
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .mt(px(if layout.compact { 18.0 } else { 25.0 }))
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .id("fullscreen-song-title")
+                                            .flex_1()
+                                            .min_w_0()
+                                            .font_family(serif)
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_size(px(if layout.compact { 29.0 } else { 38.0 }))
+                                            .truncate()
+                                            .tooltip({
+                                                let title = title.clone();
+                                                move |window, cx| {
+                                                    Tooltip::new(title.clone()).build(window, cx)
+                                                }
+                                            })
+                                            .child(title),
+                                    )
+                                    .when(can_favorite, |this| {
+                                        let song = song.unwrap();
+                                        let starred = self.state.favorites.is_starred(
+                                            &FavoriteKey::new(FavoriteKind::Song, &song.id),
+                                        );
+                                        this.child(div().size(px(36.0)).flex_none().when(
+                                            self.fullscreen.state.opacity() > 0.0,
+                                            |this| {
+                                                this.child(
+                                                    self.favorite_button(
+                                                        FavoriteKind::Song,
+                                                        &song.id,
+                                                        cx,
+                                                    )
+                                                    .text_color(if starred {
+                                                        p.accent
+                                                    } else {
+                                                        p.muted
+                                                    })
+                                                    .custom(salon_toggle_style(starred, cx))
+                                                    .opacity(self.fullscreen.state.opacity()),
+                                                )
+                                            },
+                                        ))
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(p.secondary)
+                                    .truncate()
+                                    .child(artist),
+                            )
+                            .when_some(song.and_then(Song::bilibili_subtitle), |this, subtitle| {
+                                this.child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(p.muted)
+                                        .truncate()
+                                        .child(subtitle),
+                                )
+                            }),
+                    )
+                    .when(!layout.stacked, |this| {
+                        this.child(
+                            v_flex()
+                                .w_full()
+                                .h(px(58.0))
+                                .flex_none()
+                                .mt(px(if layout.compact { 15.0 } else { 23.0 }))
+                                .gap_2()
+                                .when(self.fullscreen.state.visualizer_enabled, |this| {
+                                    this.child(
+                                        h_flex()
+                                            .h(px(14.0))
+                                            .w_full()
+                                            .justify_between()
+                                            .items_center()
+                                            .child(
+                                                div()
+                                                    .text_size(px(9.0))
+                                                    .text_color(p.muted)
+                                                    .child(t!("Audio waveform")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(8.0))
+                                                    .text_color(p.muted.opacity(0.55))
+                                                    .child(t!("Sound in motion")),
+                                            ),
+                                    )
+                                    .child(
+                                        super::visualizer::waveform_view(
+                                            self.fullscreen.waveform,
+                                            p.accent,
+                                        ),
+                                    )
+                                }),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+}

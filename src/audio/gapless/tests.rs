@@ -216,6 +216,7 @@ fn boundary_notification_masks_old_worker_snapshot_and_is_consumed_once() {
         state: state.clone(),
         transition: Arc::new(Mutex::new(Some(next.clone()))),
         transport: Arc::new(Mutex::new(Transport::default())),
+        visualizer: Arc::default(),
     };
     assert!(next.start(
         Duration::from_secs(180),
@@ -272,6 +273,7 @@ impl Engine {
             state: state.clone(),
             transition: Arc::new(Mutex::new(None)),
             transport: Arc::new(Mutex::new(Transport::default())),
+            visualizer: Arc::default(),
         };
         let (player, output) = Player::new();
         let device = AudioOutput::new(DevicePlayback::headless(

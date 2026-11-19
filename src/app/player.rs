@@ -2,6 +2,7 @@
 
 pub(in crate::app) mod bar;
 pub(in crate::app) mod controls;
+pub(in crate::app) mod fullscreen;
 pub(in crate::app) mod lyrics;
 pub(in crate::app) mod lyrics_search;
 pub(in crate::app) mod lyrics_state;

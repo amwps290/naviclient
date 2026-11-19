@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <linearGradient id="sky" x2=".4" y2="1"><stop stop-color="#e6dacf"/><stop offset="1" stop-color="#b6c8c4"/></linearGradient>
+    <linearGradient id="water" x2=".5" y2="1"><stop stop-color="#7f9fa0"/><stop offset="1" stop-color="#263f4e"/></linearGradient>
+    <linearGradient id="sand" x2="1" y2="1"><stop stop-color="#ecd7b8"/><stop offset="1" stop-color="#c7ac8f"/></linearGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".76" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".085"/></feComponentTransfer><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+  </defs>
+  <g filter="url(#grain)">
+    <path fill="url(#sky)" d="M0 0h800v800H0z"/>
+    <circle cx="588" cy="267" r="87" fill="#fff0d9" opacity=".8"/>
+    <path d="M0 400q180-28 390-7t410 9v398H0z" fill="url(#water)"/>
+    <path d="M0 690q92-150 292-177t508-65v352H0z" fill="url(#sand)"/>
+    <path d="M0 673q92-150 292-177t508-65" fill="none" stroke="#f1ede3" stroke-width="13" opacity=".64"/>
+    <path d="M0 642q92-148 292-170t508-68M0 615q92-145 292-167t508-62" fill="none" stroke="#d1e1dc" stroke-width="2" opacity=".32"/>
+    <path d="M498 702q11-18 22-6t31 5" fill="none" stroke="#756655" stroke-width="2" opacity=".4"/>
+  </g>
+  <g fill="#293d43" font-family="Arial, sans-serif"><text x="55" y="73" font-size="15" letter-spacing="5">FOREST ECHO</text><text x="54" y="143" font-size="51" font-weight="300" letter-spacing="6">QUIET TIDES</text><text x="57" y="729" font-size="11" letter-spacing="4">LET THE SEA WRITE BACK</text><text x="57" y="753" font-size="10" letter-spacing="2" opacity=".64">ORIGINAL CONCEPT ART / 2026</text></g>
+</svg>

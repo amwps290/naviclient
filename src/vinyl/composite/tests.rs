@@ -1,26 +1,28 @@
 use gpui_kit::RenderImage;
 use image::{Frame, Rgba, RgbaImage};
 
-use super::{mix, rasterize};
+use super::{rasterize, rotate};
 
 #[test]
-fn frame_blending_preserves_color_weights_and_opaque_edges() {
-    let frame =
-        |color| RenderImage::new(vec![Frame::new(RgbaImage::from_pixel(8, 8, Rgba(color)))]);
-    let first = frame([0, 40, 200, 255]);
-    let next = frame([200, 80, 0, 255]);
-    let first = rasterize(&first, 8).unwrap();
-    let next = rasterize(&next, 8).unwrap();
-    for (blend, expected) in [
-        (0.0, [0, 40, 200, 255]),
-        (0.25, [50, 50, 150, 255]),
-        (0.5, [100, 60, 100, 255]),
-        (0.75, [150, 70, 50, 255]),
-        (1.0, [200, 80, 0, 255]),
-    ] {
-        let pixels = mix(&first, &next, blend);
-        assert!(pixels.pixels().all(|pixel| pixel.0 == expected));
+fn a_midpoint_angle_keeps_one_sharp_contour_instead_of_two_ghosts() {
+    let source = RgbaImage::from_fn(192, 192, |x, _| {
+        let value = if x < 96 { 0 } else { 255 };
+        Rgba([value, value, value, 255])
+    });
+    // The old 0°/3° crossfade spread this edge over four or five pixels.
+    // At 1.5°, geometric sampling must keep a single subpixel transition.
+    let pixels = rotate(&source, 1.5 / 360.0);
+    for y in [20, 40, 150, 170] {
+        let row: Vec<_> = (80..112).map(|x| pixels[(x, y)][0]).collect();
+        assert!(row.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(
+            row.iter()
+                .filter(|&&value| value > 0 && value < 255)
+                .count(),
+            1
+        );
     }
+    assert!(pixels.pixels().all(|pixel| pixel[3] == 255));
 }
 
 #[test]
@@ -31,7 +33,7 @@ fn mini_prefilter_removes_subpixel_checkerboard_without_transparent_rim() {
     });
     let frame = RenderImage::new(vec![Frame::new(source)]);
     let source = rasterize(&frame, 60).unwrap();
-    let pixels = mix(&source, &source, 0.5);
+    let pixels = rotate(&source, 1.5 / 360.0);
     assert_eq!(pixels.dimensions(), (60, 60));
     for y in 5..55 {
         for x in 5..55 {
@@ -42,4 +44,20 @@ fn mini_prefilter_removes_subpixel_checkerboard_without_transparent_rim() {
         }
     }
     assert!(pixels.pixels().all(|pixel| pixel[3] == 255));
+}
+
+#[test]
+fn rotation_remains_continuous_across_old_frame_boundaries_and_a_full_turn() {
+    let source = RgbaImage::from_fn(192, 192, |x, y| Rgba([x as u8, y as u8, 100, 255]));
+    for degrees in [3.0, 90.0, 180.0, 360.0] {
+        let before = rotate(&source, (degrees - 0.001) / 360.0);
+        let after = rotate(&source, (degrees + 0.001) / 360.0);
+        for y in 35..157 {
+            for x in 35..157 {
+                for channel in 0..3 {
+                    assert!(before[(x, y)][channel].abs_diff(after[(x, y)][channel]) <= 1);
+                }
+            }
+        }
+    }
 }

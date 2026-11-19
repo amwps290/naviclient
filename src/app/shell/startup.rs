@@ -204,6 +204,7 @@ impl NavidromeApp {
             reconnect: PlaybackReconnect::default(),
             _subscriptions: Vec::new(),
             mini_window: MiniWindowState::default(),
+            fullscreen: crate::app::player::fullscreen::window::FullscreenUi::new(cx),
             eq_sliders,
             equalizer: EqualizerState::default(),
             album_page_requests: PageRequests::default(),

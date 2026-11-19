@@ -19,6 +19,7 @@ impl NavidromeApp {
         ];
         const NAVIGATION: &[ShortcutAction] = &[
             ShortcutAction::ToggleNowPlaying,
+            ShortcutAction::ToggleFullscreen,
             ShortcutAction::ToggleQueue,
             ShortcutAction::FocusSearch,
             ShortcutAction::CloseOverlays,

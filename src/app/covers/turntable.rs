@@ -47,8 +47,11 @@ impl NavidromeApp {
 
     pub(in crate::app) fn turntable_visible(&self, window: &Window) -> bool {
         window.is_visible()
-            && self.playback_presentation()
-                == crate::app::shell::redraw::PlaybackPresentation::NowPlaying
+            && matches!(
+                self.playback_presentation(),
+                crate::app::shell::redraw::PlaybackPresentation::NowPlaying
+                    | crate::app::shell::redraw::PlaybackPresentation::Fullscreen
+            )
             && self.state.now_playing.is_some()
     }
 

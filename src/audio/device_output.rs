@@ -8,6 +8,7 @@ use rodio::{ChannelCount, Player, SampleRate};
 use super::eq::{new_eq_handle, EqHandle};
 use super::gapless;
 use super::output::open_audio_device;
+use super::visualizer::{AudioVisualizer, WaveformSource};
 use super::{set_state, PlaybackState};
 use crate::models::EqSettings;
 
@@ -19,27 +20,34 @@ pub(super) struct DevicePlayback {
     pub(super) player: Player,
     pub(super) channels: ChannelCount,
     pub(super) sample_rate: SampleRate,
+    visualizer: Arc<AudioVisualizer>,
 }
 
 impl DevicePlayback {
-    pub(super) fn new(sink: rodio::MixerDeviceSink, name: Option<String>) -> Self {
+    pub(super) fn new(
+        sink: rodio::MixerDeviceSink,
+        name: Option<String>,
+        visualizer: Arc<AudioVisualizer>,
+    ) -> Self {
         let channels = sink.config().channel_count();
         let sample_rate = sink.config().sample_rate();
         let (player, source) = Player::new();
-        sink.mixer().add(source);
+        sink.mixer()
+            .add(WaveformSource::new(source, visualizer.clone()));
         Self {
             _sink: Some(sink),
             name,
             player,
             channels,
             sample_rate,
+            visualizer,
         }
     }
 
-    fn open_for_switch(target: Option<&str>) -> Result<Self> {
+    fn open_for_switch(target: Option<&str>, visualizer: Arc<AudioVisualizer>) -> Result<Self> {
         let (mut sink, name) = open_audio_device(target)?;
         sink.log_on_drop(false);
-        Ok(Self::new(sink, name))
+        Ok(Self::new(sink, name, visualizer))
     }
 
     fn report(&self, state: &Arc<Mutex<PlaybackState>>) {
@@ -63,6 +71,7 @@ impl DevicePlayback {
             player,
             channels,
             sample_rate,
+            visualizer: Arc::default(),
         }
     }
 }
@@ -89,7 +98,10 @@ impl AudioOutput {
         target: Option<&str>,
         state: &Arc<Mutex<PlaybackState>>,
     ) -> Result<()> {
-        self.switch_with(state, || DevicePlayback::open_for_switch(target))
+        let visualizer = self.device.visualizer.clone();
+        self.switch_with(state, || {
+            DevicePlayback::open_for_switch(target, visualizer)
+        })
     }
 
     fn switch_with(

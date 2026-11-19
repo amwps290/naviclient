@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1c1a18">
+  <title>NAVI · 全屏播放器设计</title>
+  <link rel="icon" href="art/blue-hour.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body data-design="vinyl">
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 10v4m4-8v12m5-15v18m5-15v12m4-8v4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path class="solid-icon" d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path class="solid-icon" d="M7 5h4v14H7zm6 0h4v14h-4z"/></symbol>
+    <symbol id="i-previous" viewBox="0 0 24 24"><path class="solid-icon" d="M5 5h2v14H5zm14 0L8 12l11 7z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path class="solid-icon" d="M17 5h2v14h-2zM5 5v14l11-7z"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="m18 3 3 3-3 3M3 6h3c4 0 8 12 12 12h3M3 18h3c4 0 8-12 12-12h3m-3 9 3 3-3 3"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5V4zm4 4a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14"/></symbol>
+    <symbol id="i-muted" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5V4zm5 5 5 6m0-6-5 6"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M3 8h5V3m8 0v5h5M8 21v-5H3m18 0h-5v5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 6V4h16v2m-8-2v16m-4 0h8"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  </svg>
+
+  <main class="player" id="player">
+    <div class="ambience" aria-hidden="true">
+      <div class="cover-atmosphere" id="cover-atmosphere"></div>
+      <div class="ambient-light light-a"></div>
+      <div class="ambient-light light-b"></div>
+      <div class="stage-grid"></div>
+      <div class="paper-grain"></div>
+    </div>
+
+    <header class="header chrome">
+      <a class="wordmark" href="?design=vinyl" aria-label="NAVI 全屏播放器预览">
+        <span class="brand-symbol"><i></i><i></i><i></i><i></i></span>
+        <span>NAVI<span class="wordmark-caption">全屏设计预览</span></span>
+      </a>
+      <nav class="design-picker" aria-label="切换设计方案">
+        <button class="design-option" data-design="cinema" aria-pressed="false"><span class="design-index">01</span><span>暮色剧场</span></button>
+        <button class="design-option" data-design="gallery" aria-pressed="false"><span class="design-index">02</span><span>白昼画廊</span></button>
+        <button class="design-option" data-design="stage" aria-pressed="false"><span class="design-index">03</span><span>夜航现场</span></button>
+        <button class="design-option" data-design="vinyl" aria-pressed="true"><span class="design-index">04</span><span>黑胶沙龙</span></button>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="info-button" aria-label="查看方案说明" title="方案说明"><svg><use href="#i-info"/></svg></button>
+        <button class="icon-button" id="hide-controls" aria-label="隐藏控件" title="隐藏控件 · H"><svg><use href="#i-eye"/></svg></button>
+        <button class="fullscreen-button" id="fullscreen-button" aria-label="进入全屏" title="进入全屏 · F"><svg><use href="#i-expand"/></svg><span>全屏</span></button>
+      </div>
+    </header>
+
+    <section class="listening-stage" aria-label="正在播放">
+      <section class="art-column" aria-labelledby="song-title">
+        <div class="album-kicker"><span class="small-line"></span><span id="album-kicker">THE BLUE HOUR</span><span class="edition">VOL. 01</span></div>
+        <div class="artwork-wrap" id="artwork-wrap">
+          <div class="artwork-mat">
+            <img id="cover" class="album-cover" src="art/blue-hour.svg" width="800" height="800" alt="蓝色时刻：暮色海面与一轮柔和的落日">
+          </div>
+          <div class="vinyl-record" aria-hidden="true">
+            <div class="vinyl-spin" id="vinyl-spin">
+              <div class="vinyl-grooves"></div>
+              <div class="record-label" id="record-label"></div>
+              <div class="record-spindle"></div>
+            </div>
+            <div class="record-sheen"></div>
+          </div>
+          <svg class="tonearm" viewBox="0 0 130 330" aria-hidden="true">
+            <defs><linearGradient id="arm-metal"><stop stop-color="#82776b"/><stop offset=".35" stop-color="#ebe1d0"/><stop offset=".7" stop-color="#b1a18b"/><stop offset="1" stop-color="#655e56"/></linearGradient></defs>
+            <circle cx="84" cy="31" r="23" fill="#252422" stroke="#807465" stroke-width="3"/>
+            <circle cx="84" cy="31" r="12" fill="url(#arm-metal)"/>
+            <path d="M84 31v161c0 33-25 46-47 58l-17 9" fill="none" stroke="#060605" stroke-width="14"/>
+            <path d="M84 31v161c0 33-25 46-47 58l-17 9" fill="none" stroke="url(#arm-metal)" stroke-width="9"/>
+            <path d="m20 250 21 10-16 33-20-10z" fill="#c4b393" stroke="#6d6457"/>
+            <path d="m20 260 11 5-8 16-10-5z" fill="#292622"/>
+          </svg>
+          <span class="artwork-corner top-left"></span><span class="artwork-corner bottom-right"></span>
+          <span class="artwork-number" aria-hidden="true">01 / SIDE A</span>
+        </div>
+        <div class="track-details">
+          <div class="track-heading"><h1 id="song-title">蓝色时刻</h1><button id="favorite" class="icon-button favorite" aria-label="收藏这首歌曲" aria-pressed="false" title="收藏"><svg><use href="#i-heart"/></svg></button></div>
+          <p class="artist-line"><span id="artist">林间回声</span><span class="metadata-dot">·</span><span id="album-name">The Blue Hour</span></p>
+        </div>
+        <div class="visualizer-panel" id="visualizer-panel">
+          <div class="visualizer-caption"><span class="visualizer-status"><i></i><span id="visualizer-label">声音的形状</span></span><span class="visualizer-scale" id="visualizer-caption">SOUND IN MOTION</span></div>
+          <canvas id="visualizer" aria-label="随播放变化的音频可视化"></canvas>
+        </div>
+        <p class="art-footnote">音乐留在此刻，世界慢一点。</p>
+      </section>
+
+      <section class="lyrics-column" aria-labelledby="lyrics-heading">
+        <div class="lyrics-heading chrome-detail">
+          <span id="lyrics-heading">歌词<span class="follow-indicator"><i></i>自动跟随</span></span>
+          <button class="icon-button translation-button" id="translation-button" aria-label="隐藏歌词译文" aria-pressed="true" title="显示或隐藏译文"><svg><use href="#i-type"/></svg></button>
+        </div>
+        <div class="lyrics-viewport" id="lyrics-viewport">
+          <div class="lyrics-track" id="lyrics-track"></div>
+        </div>
+        <div class="lyric-footer chrome-detail"><span class="lyric-position"><i></i><span id="lyric-position">07 / 20</span></span><span>点击歌词，回到那一句</span></div>
+      </section>
+    </section>
+
+    <footer class="footer chrome">
+      <div class="timeline">
+        <time id="elapsed">01:24</time>
+        <input id="seek" class="range seek" type="range" min="0" max="258" step="0.1" value="84" aria-label="播放进度">
+        <time id="duration">04:18</time>
+      </div>
+      <div class="control-row">
+        <div class="playback-status"><span class="status-equalizer" id="status-equalizer"><i></i><i></i><i></i><i></i></span><span id="playback-label">正在播放</span><span class="status-divider">/</span><span class="design-mood" id="design-mood">一张唱片，一整个夜晚</span></div>
+        <div class="transport" aria-label="播放控制">
+          <button class="icon-button mode-button" id="shuffle" aria-label="开启随机播放" aria-pressed="false" title="随机播放"><svg><use href="#i-shuffle"/></svg></button>
+          <button class="icon-button skip-button" id="previous" aria-label="上一首" title="上一首"><svg><use href="#i-previous"/></svg></button>
+          <button class="play-button" id="play" aria-label="暂停" title="播放或暂停 · 空格"><svg><use href="#i-pause"/></svg></button>
+          <button class="icon-button skip-button" id="next" aria-label="下一首" title="下一首"><svg><use href="#i-next"/></svg></button>
+          <button class="icon-button mode-button" id="repeat" aria-label="开启单曲循环" aria-pressed="false" title="单曲循环"><svg><use href="#i-repeat"/></svg></button>
+        </div>
+        <div class="secondary-controls">
+          <button class="icon-button" id="visualizer-button" aria-label="切换音频可视化" title="切换波形、频谱或关闭"><svg><use href="#i-wave"/></svg></button>
+          <div class="volume-control"><button class="icon-button" id="mute" aria-label="开启示例音轨试听" title="开启示例音轨试听"><svg><use href="#i-muted"/></svg></button><input id="volume" class="range volume" type="range" min="0" max="100" value="45" aria-label="音量"></div>
+        </div>
+      </div>
+      <div class="footer-caption"><span id="design-description">04 / 黑胶沙龙<span class="caption-dot">·</span>唱片旋转，慢慢聆听</span><span class="keyboard-hint"><kbd>1</kbd>—<kbd>4</kbd>切换方案<span>·</span><kbd>Space</kbd>暂停<span>·</span><kbd>F</kbd>全屏</span></div>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="design-info" aria-labelledby="info-title">
+    <div class="info-heading"><div><span class="eyebrow">NAVI / DESIGN EXPLORATIONS</span><h2 id="info-title">四种观看音乐的方式</h2></div><button class="icon-button" id="close-info" aria-label="关闭方案说明"><svg><use href="#i-close"/></svg></button></div>
+    <div class="design-notes">
+      <button class="design-note" data-design="cinema"><span class="note-swatch swatch-cinema">01</span><span><strong>暮色剧场</strong><span>封面色延展为暮色背景，大歌词与轻波形。适合电视、投影和沉浸聆听。</span></span></button>
+      <button class="design-note" data-design="gallery"><span class="note-swatch swatch-gallery">02</span><span><strong>白昼画廊</strong><span>暖白留白、衬线字体与装裱封面。延续现有应用风格，适合明亮环境。</span></span></button>
+      <button class="design-note" data-design="stage"><span class="note-swatch swatch-stage">03</span><span><strong>夜航现场</strong><span>炭黑底色、青绿节拍和可见频谱。适合现场演示，动态表现更鲜明。</span></span></button>
+      <button class="design-note" data-design="vinyl"><span class="note-swatch swatch-vinyl">04</span><span><strong>黑胶沙龙 <em>已选定</em></strong><span>旋转唱片、唱臂与香槟金细节。保留 NAVI 的黑胶辨识度，适合安静聆听。</span></span></button>
+    </div>
+    <div class="preview-note"><strong>交互原型</strong><p>歌曲、封面和歌词为原创示例。点击喇叭可以试听无歌词的合成音轨；可切歌、拖动进度、点击歌词、调整音量。全屏后控件会在鼠标静止时淡出，移动鼠标即可唤回。</p><p><kbd>H</kbd> 隐藏或显示控件 <span>·</span> <kbd>T</kbd> 显示或隐藏译文 <span>·</span> <kbd>V</kbd> 切换动态视效</p></div>
+  </dialog>
+</body>
+</html>

@@ -9,6 +9,23 @@ impl NavidromeApp {
         accent: Hsla,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        self.render_player_progress_styled(
+            playback,
+            accent,
+            cx.theme().muted_foreground,
+            Some(760.0),
+            cx,
+        )
+    }
+
+    pub(in crate::app) fn render_player_progress_styled(
+        &self,
+        playback: &PlaybackState,
+        accent: Hsla,
+        muted: Hsla,
+        max_width: Option<f32>,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
         let duration = playback.duration.unwrap_or_default();
         let buffered_percent = if duration.is_zero() {
             0.0
@@ -19,11 +36,11 @@ impl NavidromeApp {
             .w_full()
             .min_w_0()
             .h(px(24.0))
-            .max_w(px(760.0))
+            .when_some(max_width, |this, width| this.max_w(px(width)))
             .items_center()
             .gap_2()
             .text_xs()
-            .text_color(cx.theme().muted_foreground)
+            .text_color(muted)
             .when_some(playback.stall, |this, stall| {
                 this.child(render_stall_chip(stall, accent))
             })

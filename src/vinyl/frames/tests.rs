@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use image::{ImageFormat, Rgba, RgbaImage};
 
-use super::{build_frames, cover_pixels, rotate, SIDE};
+use super::{build_frame, cover_pixels, rotate, SIDE};
 
 #[test]
 fn rotation_is_clockwise_and_keeps_center() {
@@ -45,14 +45,11 @@ fn portrait_and_landscape_are_center_cropped_and_bgra() {
 
 #[test]
 fn cancelled_work_skips_even_decoding() {
-    build_frames(&[], &AtomicBool::new(true), vec![0], |_, _| {
-        panic!("cancelled work must not publish a frame")
-    })
-    .unwrap();
+    assert!(build_frame(&[], &AtomicBool::new(true)).unwrap().is_none());
 }
 
 #[test]
-fn transparent_cover_is_flattened_to_opaque_black_before_blending() {
+fn transparent_cover_is_flattened_to_opaque_black_before_rotation() {
     let source = RgbaImage::from_pixel(4, 4, Rgba([10, 20, 100, 128]));
     let mut bytes = Cursor::new(Vec::new());
     source.write_to(&mut bytes, ImageFormat::Png).unwrap();
@@ -61,21 +58,18 @@ fn transparent_cover_is_flattened_to_opaque_black_before_blending() {
 }
 
 #[test]
-fn publishes_frames_progressively_and_stops_when_receiver_closes() {
+fn prepares_only_one_unrotated_source() {
     let source = RgbaImage::from_pixel(4, 4, Rgba([10, 20, 30, 255]));
     let mut bytes = Cursor::new(Vec::new());
     source.write_to(&mut bytes, ImageFormat::Png).unwrap();
-    let mut received = Vec::new();
-    build_frames(
-        bytes.get_ref(),
-        &AtomicBool::new(false),
-        vec![0, 1, 2],
-        |index, frame| {
-            assert_eq!(frame.frame_count(), 1);
-            received.push(index);
-            received.len() < 2
-        },
-    )
-    .unwrap();
-    assert_eq!(received, [0, 1]);
+    let frame = build_frame(bytes.get_ref(), &AtomicBool::new(false))
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.frame_count(), 1);
+    assert_eq!(frame.as_bytes(0).unwrap().len(), (SIDE * SIDE * 4) as usize);
+    assert!(frame
+        .as_bytes(0)
+        .unwrap()
+        .chunks_exact(4)
+        .all(|pixel| pixel == [30, 20, 10, 255]));
 }

@@ -28,6 +28,7 @@ pub(in crate::app) fn shortcut_label(action: ShortcutAction) -> std::borrow::Cow
         ShortcutAction::VolumeDown => t!("Volume down"),
         ShortcutAction::ToggleMute => t!("Mute / unmute"),
         ShortcutAction::ToggleNowPlaying => t!("Open / close now playing"),
+        ShortcutAction::ToggleFullscreen => t!("Open / close fullscreen player"),
         ShortcutAction::ToggleQueue => t!("Open / close queue"),
         ShortcutAction::FocusSearch => t!("Focus search"),
         ShortcutAction::CloseOverlays => t!("Close overlay / go back"),
