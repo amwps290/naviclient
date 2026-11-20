@@ -190,6 +190,71 @@ fn immediately_ready_play_obeys_its_initial_pause_without_a_second_command() {
 }
 
 #[test]
+fn unavailable_output_is_replaced_and_the_paused_track_is_rebuilt_from_its_position() {
+    let cache = TestCache::new();
+    let (mut worker, _tx, _source) = worker(&cache);
+    let token = begin(&mut worker, PreparationKind::Play);
+    worker.preparation.deliver(token, Ok(stream()));
+    let mut ready = None;
+    worker.poll_preparation(&mut ready);
+    worker.attach_output(ready.unwrap());
+    worker.handle_command(command(Command::Pause, 1));
+    worker.poll_next_and_publish();
+    assert!(worker.state.lock().unwrap().output_connected);
+    assert!(worker.output.device.player.is_paused());
+
+    worker.output.device.fail_for_test();
+    assert!(!worker.output.device.available());
+    let (replacement_player, _replacement_source) = Player::new();
+    let replacement = DevicePlayback::headless(
+        replacement_player,
+        Some("Recovered".into()),
+        ChannelCount::new(2).unwrap(),
+        SampleRate::new(48_000).unwrap(),
+    );
+    let rebuilding = worker.recover_output_with(Instant::now(), move |output, state| {
+        output.switch_with(state, || Ok(replacement))
+    });
+
+    assert!(rebuilding);
+    assert!(worker.output.device.available());
+    assert_eq!(worker.output.device.name.as_deref(), Some("Recovered"));
+    assert_eq!(worker.pending_commands.len(), 1);
+    let recovery = worker.pending_commands.pop_front().unwrap();
+    assert!(matches!(recovery.command, Command::Seek(position) if position == token.position));
+    worker.handle_command(recovery);
+    assert!(worker.preparation.preparing());
+    assert!(worker.preparation.paused());
+    assert!(worker.output.device.player.empty());
+}
+
+#[test]
+fn failed_output_recovery_does_not_publish_a_false_track_end() {
+    let cache = TestCache::new();
+    let (mut worker, _tx, _source) = worker(&cache);
+    let token = begin(&mut worker, PreparationKind::Play);
+    worker.preparation.deliver(token, Ok(stream()));
+    let mut ready = None;
+    worker.poll_preparation(&mut ready);
+    let (_, track) = ready.unwrap();
+    worker.current.accept_ready(track.info.clone());
+    drop(track);
+    worker.output.device.fail_for_test();
+
+    let rebuilding = worker.recover_output_with(Instant::now(), |_, _| {
+        Err(anyhow!("output still unavailable"))
+    });
+    assert!(!rebuilding);
+    assert!(worker.next_output_recovery.is_some());
+    worker.poll_next_and_publish();
+
+    let state = worker.state.lock().unwrap().clone();
+    assert!(state.active);
+    assert!(!state.ended);
+    assert!(!state.output_connected);
+}
+
+#[test]
 fn preference_commands_keep_transport_acknowledgements_and_share_the_existing_equalizer_handle() {
     let cache = TestCache::new();
     let (mut worker, _tx, _source) = worker(&cache);

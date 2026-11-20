@@ -133,6 +133,10 @@ impl TrackState {
         self.duration
     }
 
+    pub(super) fn selected(&self) -> bool {
+        self.source.is_some()
+    }
+
     pub(super) fn position(&self, output_position: Duration) -> Duration {
         if self.source.is_none() {
             return Duration::ZERO;

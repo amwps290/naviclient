@@ -7,7 +7,7 @@ use rodio::{ChannelCount, Player, SampleRate};
 
 use super::eq::{new_eq_handle, EqHandle};
 use super::gapless;
-use super::output::open_audio_device;
+use super::output::{open_audio_device, OutputHealth};
 use super::visualizer::{AudioVisualizer, WaveformSource};
 use super::{set_state, PlaybackState};
 use crate::models::EqSettings;
@@ -20,6 +20,7 @@ pub(super) struct DevicePlayback {
     pub(super) player: Player,
     pub(super) channels: ChannelCount,
     pub(super) sample_rate: SampleRate,
+    health: OutputHealth,
     visualizer: Arc<AudioVisualizer>,
 }
 
@@ -27,6 +28,7 @@ impl DevicePlayback {
     pub(super) fn new(
         sink: rodio::MixerDeviceSink,
         name: Option<String>,
+        health: OutputHealth,
         visualizer: Arc<AudioVisualizer>,
     ) -> Self {
         let channels = sink.config().channel_count();
@@ -40,14 +42,19 @@ impl DevicePlayback {
             player,
             channels,
             sample_rate,
+            health,
             visualizer,
         }
     }
 
     fn open_for_switch(target: Option<&str>, visualizer: Arc<AudioVisualizer>) -> Result<Self> {
-        let (mut sink, name) = open_audio_device(target)?;
+        let (mut sink, name, health) = open_audio_device(target)?;
         sink.log_on_drop(false);
-        Ok(Self::new(sink, name, visualizer))
+        Ok(Self::new(sink, name, health, visualizer))
+    }
+
+    pub(super) fn available(&self) -> bool {
+        self.health.available()
     }
 
     fn report(&self, state: &Arc<Mutex<PlaybackState>>) {
@@ -71,13 +78,22 @@ impl DevicePlayback {
             player,
             channels,
             sample_rate,
+            health: OutputHealth::default(),
             visualizer: Arc::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_for_test(&self) {
+        self.health.fail_for_test();
     }
 }
 
 pub(super) struct AudioOutput {
     pub(super) device: DevicePlayback,
+    /// Requested route, retained even when a missing named endpoint falls back
+    /// to the system default so a later recovery can try the preference again.
+    target: Option<String>,
     /// These handles survive output changes: preparation and gapless decoding
     /// still refer to them until the worker's existing Seek path cancels a handoff.
     pub(super) handoff: gapless::Slot,
@@ -85,9 +101,16 @@ pub(super) struct AudioOutput {
 }
 
 impl AudioOutput {
+    #[cfg(test)]
     pub(super) fn new(device: DevicePlayback) -> Self {
+        let target = device.name.clone();
+        Self::with_target(device, target)
+    }
+
+    pub(super) fn with_target(device: DevicePlayback, target: Option<String>) -> Self {
         Self {
             device,
+            target,
             handoff: Arc::new(Mutex::new(None)),
             eq: new_eq_handle(EqSettings::default()),
         }
@@ -101,10 +124,20 @@ impl AudioOutput {
         let visualizer = self.device.visualizer.clone();
         self.switch_with(state, || {
             DevicePlayback::open_for_switch(target, visualizer)
+        })?;
+        self.target = target.map(str::to_string);
+        Ok(())
+    }
+
+    pub(super) fn reopen_device(&mut self, state: &Arc<Mutex<PlaybackState>>) -> Result<()> {
+        let target = self.target.clone();
+        let visualizer = self.device.visualizer.clone();
+        self.switch_with(state, || {
+            DevicePlayback::open_for_switch(target.as_deref(), visualizer)
         })
     }
 
-    fn switch_with(
+    pub(super) fn switch_with(
         &mut self,
         state: &Arc<Mutex<PlaybackState>>,
         open: impl FnOnce() -> Result<DevicePlayback>,

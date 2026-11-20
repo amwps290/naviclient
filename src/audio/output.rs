@@ -1,5 +1,6 @@
 //! Audio output device discovery, stream opening, and format normalization.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
@@ -12,10 +13,41 @@ use super::{set_state, PlaybackState};
 
 const OUTPUT_BUFFER_FRAMES: u32 = 4096;
 
-fn log_output_error(error: cpal::StreamError) {
-    // Rodio's default callback writes to stderr, which is invisible in Windows
-    // release builds and bypasses the application's persistent log file.
-    log::error!("audio output stream error: {error}; the output stream may need reopening after sleep or a device change");
+#[derive(Clone)]
+pub(super) struct OutputHealth(Arc<AtomicBool>);
+
+impl Default for OutputHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OutputHealth {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    pub(super) fn available(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    fn error_callback(&self) -> impl FnMut(cpal::StreamError) + Clone + Send + 'static {
+        let health = self.clone();
+        move |error| {
+            health.0.store(false, Ordering::Release);
+            // Rodio's default callback writes to stderr, which is invisible in
+            // Windows release builds. Mark the stream unusable as well: CPAL
+            // does not revive a WASAPI stream after sleep or endpoint changes.
+            log::error!(
+                "audio output stream error: {error}; scheduling output recovery after sleep or a device change"
+            );
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_for_test(&self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 /// 可选择的输出设备，保留平台原始名称以供配置和设备打开时匹配。
@@ -91,10 +123,11 @@ fn output_device_list(
 /// 返回实际打开的 sink 与设备名（回退后名称与请求可能不同）。
 pub(super) fn open_audio_device(
     name: Option<&str>,
-) -> Result<(rodio::MixerDeviceSink, Option<String>), anyhow::Error> {
+) -> Result<(rodio::MixerDeviceSink, Option<String>, OutputHealth), anyhow::Error> {
+    let health = OutputHealth::new();
     let Some(name) = name else {
-        let sink = open_audio_sink().map_err(|error| anyhow!("{error}"))?;
-        return Ok((sink, None));
+        let sink = open_audio_sink(&health).map_err(|error| anyhow!("{error}"))?;
+        return Ok((sink, None, health));
     };
     use cpal::traits::{DeviceTrait, HostTrait};
     let devices = cpal::default_host()
@@ -111,32 +144,33 @@ pub(super) fn open_audio_device(
     let mut fallback = None;
     for device in devices {
         if is_plughw_device(&device) {
-            return open_named_sink(device, name);
+            return open_named_sink(device, name, health);
         }
         fallback.get_or_insert(device);
     }
     if let Some(device) = fallback {
-        return open_named_sink(device, name);
+        return open_named_sink(device, name, health);
     }
     // 目标设备不存在（如已拔出）：回退默认设备，保证播放不中新。
     log::warn!("audio output device {name:?} not found; falling back to the default device");
-    let sink = open_audio_sink().map_err(|error| anyhow!("{error}"))?;
-    Ok((sink, None))
+    let sink = open_audio_sink(&health).map_err(|error| anyhow!("{error}"))?;
+    Ok((sink, None, health))
 }
 
 /// 按设备打开输出流；返回 sink 与设备名。
 fn open_named_sink(
     device: cpal::Device,
     name: &str,
-) -> Result<(rodio::MixerDeviceSink, Option<String>), anyhow::Error> {
+    health: OutputHealth,
+) -> Result<(rodio::MixerDeviceSink, Option<String>, OutputHealth), anyhow::Error> {
     let builder = DeviceSinkBuilder::from_device(device)
         .map_err(|error| anyhow!("{error}"))?
         .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
-        .with_error_callback(log_output_error);
+        .with_error_callback(health.error_callback());
     let sink = builder
         .open_sink_or_fallback()
         .map_err(|error| anyhow!("{error}"))?;
-    Ok((sink, Some(name.to_string())))
+    Ok((sink, Some(name.to_string()), health))
 }
 
 pub(super) fn normalize_for_output<S>(
@@ -150,11 +184,13 @@ where
     UniformSourceIterator::new(source, channels, sample_rate)
 }
 
-fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+fn open_audio_sink(
+    health: &OutputHealth,
+) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     match DeviceSinkBuilder::from_default_device().and_then(|builder| {
         builder
             .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
-            .with_error_callback(log_output_error)
+            .with_error_callback(health.error_callback())
             .open_sink_or_fallback()
     }) {
         Ok(sink) => {
@@ -163,17 +199,23 @@ fn open_audio_sink() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
         }
         Err(error) => {
             log::warn!("fixed-buffer audio output failed, trying system default buffer: {error}");
-            open_default_sink_with_logging()
+            open_default_sink_with_logging(health)
         }
     }
 }
 
-fn open_default_sink_with_logging() -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+fn open_default_sink_with_logging(
+    health: &OutputHealth,
+) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     use cpal::traits::{DeviceTrait, HostTrait};
     // Preserve Rodio's default-buffer/device fallback while installing our
     // callback on every stream, including alternate devices.
     DeviceSinkBuilder::from_default_device()
-        .and_then(|builder| builder.with_error_callback(log_output_error).open_stream())
+        .and_then(|builder| {
+            builder
+                .with_error_callback(health.error_callback())
+                .open_stream()
+        })
         .or_else(|original_error| {
             let devices = match cpal::default_host().output_devices() {
                 Ok(devices) => devices,
@@ -195,7 +237,7 @@ fn open_default_sink_with_logging() -> Result<rodio::MixerDeviceSink, rodio::Dev
                     DeviceSinkBuilder::from_device(device)
                         .and_then(|builder| {
                             builder
-                                .with_error_callback(log_output_error)
+                                .with_error_callback(health.error_callback())
                                 .open_sink_or_fallback()
                         })
                         .ok()

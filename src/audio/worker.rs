@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reqwest::blocking::Client;
 use rust_i18n::t;
@@ -71,24 +71,25 @@ pub(super) fn run_worker(
     visualizer: Arc<super::visualizer::AudioVisualizer>,
 ) {
     let _guard = transport::WorkerGuard(state.clone());
-    let (device_sink, output_name) = match open_audio_device(output_device.as_deref()) {
-        Ok(opened) => opened,
-        Err(error) => {
-            log::error!("failed to open the audio output device: {error:#}");
-            set_state(&state, |s| {
-                s.active = false;
-                s.ended = false;
-                s.error = Some(
-                    t!(
-                        "Failed to open the audio output device: %{error}",
-                        error = format!("{error:#}")
-                    )
-                    .to_string(),
-                );
-            });
-            return;
-        }
-    };
+    let (device_sink, output_name, output_health) =
+        match open_audio_device(output_device.as_deref()) {
+            Ok(opened) => opened,
+            Err(error) => {
+                log::error!("failed to open the audio output device: {error:#}");
+                set_state(&state, |s| {
+                    s.active = false;
+                    s.ended = false;
+                    s.error = Some(
+                        t!(
+                            "Failed to open the audio output device: %{error}",
+                            error = format!("{error:#}")
+                        )
+                        .to_string(),
+                    );
+                });
+                return;
+            }
+        };
     log::info!(
         "audio output device opened; name={:?} channels={} sample_rate={}",
         output_name,
@@ -122,7 +123,10 @@ pub(super) fn run_worker(
         }
     };
 
-    let output = AudioOutput::new(DevicePlayback::new(device_sink, output_name, visualizer));
+    let output = AudioOutput::with_target(
+        DevicePlayback::new(device_sink, output_name, output_health, visualizer),
+        output_device,
+    );
     run_playback(rx, state, initial_cache_dir, client, output);
 }
 
@@ -153,6 +157,7 @@ struct PlaybackWorker {
     volume: f32,
     command_serial: u64,
     diagnostics: crate::diagnostics::PlaybackDiagnostics,
+    next_output_recovery: Option<Instant>,
 }
 
 impl PlaybackWorker {
@@ -191,6 +196,7 @@ impl PlaybackWorker {
             volume,
             command_serial,
             diagnostics: Default::default(),
+            next_output_recovery: None,
         }
     }
 
@@ -219,6 +225,13 @@ impl PlaybackWorker {
             self.poll_preparation(&mut ready_output);
             if let Some(ready) = ready_output {
                 self.attach_output(ready);
+            }
+            // Recover after this iteration's prepared output is attached. If a
+            // play command and device loss race, recovery then rebuilds that
+            // newly selected track instead of seeking the previous one or
+            // attaching an old-format preload directly to the replacement.
+            if self.recover_output_if_needed(Instant::now()) {
+                continue;
             }
             self.poll_next_and_publish();
         }
