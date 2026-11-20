@@ -105,31 +105,17 @@ impl OpenSubsonicProvider {
         self.request_json(view, params, false).await
     }
 
+    async fn get_response(&self, view: &str, params: &[(&str, &str)]) -> Result<reqwest::Response> {
+        self.request_response(view, params, false, false).await
+    }
+
     async fn request_json(&self, view: &str, params: &[(&str, &str)], post: bool) -> Result<Value> {
-        // Large playlists belong in a form body, not in a URL that a proxy may truncate.
-        let request = if post {
-            self.client.post(self.url_for(view, &[])?).form(params)
-        } else {
-            self.client.get(self.url_for(view, params)?)
-        };
-        let response = request
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(reqwest::Error::without_url)
-            .with_context(|| t!("request to %{view} failed", view = view))?;
-        let status = response.status();
+        let response = self.request_response(view, params, post, true).await?;
         let text = response
             .text()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| t!("read response from %{view} failed", view = view))?;
-
-        if !status.is_success() {
-            return Err(anyhow!(
-                "server returned HTTP {status}: {}",
-                text.chars().take(240).collect::<String>()
-            ));
-        }
 
         let root: Value = serde_json::from_str(&text).with_context(|| {
             format!(
@@ -155,6 +141,44 @@ impl OpenSubsonicProvider {
         }
 
         Ok(body.clone())
+    }
+
+    async fn request_response(
+        &self,
+        view: &str,
+        params: &[(&str, &str)],
+        post: bool,
+        total_timeout: bool,
+    ) -> Result<reqwest::Response> {
+        // Large playlists belong in a form body, not in a URL that a proxy may truncate.
+        let request = if post {
+            self.client.post(self.url_for(view, &[])?).form(params)
+        } else {
+            self.client.get(self.url_for(view, params)?)
+        };
+        let request = if total_timeout {
+            request.timeout(std::time::Duration::from_secs(30))
+        } else {
+            request
+        };
+        let response = request
+            .send()
+            .await
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| t!("request to %{view} failed", view = view))?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response
+                .text()
+                .await
+                .map_err(reqwest::Error::without_url)
+                .with_context(|| t!("read response from %{view} failed", view = view))?;
+            return Err(anyhow!(
+                "server returned HTTP {status}: {}",
+                text.chars().take(240).collect::<String>()
+            ));
+        }
+        Ok(response)
     }
 
     pub async fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {

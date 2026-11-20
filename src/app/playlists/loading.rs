@@ -3,7 +3,6 @@
 use super::library::PlaylistDetailChange;
 use crate::app::prelude::*;
 use crate::playlist::loading::playlist_update_channel;
-use crate::playlist::PlaylistDetails;
 
 const DETAIL_UPDATES_PER_POLL: usize = 16;
 const DETAIL_UPDATE_BUDGET: Duration = Duration::from_millis(4);
@@ -67,26 +66,14 @@ impl NavidromeApp {
         else {
             return;
         };
-        if matches!(&api, MusicSource::Bilibili(_)) {
-            let source = api.id().clone();
-            let (updates, receiver) = playlist_update_channel();
-            let task = self.runtime.spawn(async move {
-                api.load_playlist(&playlist_id, updates).await;
-            });
-            self.state.playlists.attach_detail_stream(
-                request,
-                source,
-                receiver,
-                task.abort_handle(),
-            );
-        } else {
-            let tx = self.tx.clone();
-            let task = self.runtime.spawn(async move {
-                let result = api.playlist(&playlist_id).await.map_err(error_message);
-                let _ = tx.send(Msg::PlaylistSongs { request, result });
-            });
-            self.state.playlists.attach_detail(task.abort_handle());
-        }
+        let source = api.id().clone();
+        let (updates, receiver) = playlist_update_channel();
+        let task = self.runtime.spawn(async move {
+            api.load_playlist(&playlist_id, updates).await;
+        });
+        self.state
+            .playlists
+            .attach_detail_stream(request, source, receiver, task.abort_handle());
     }
 
     pub(in crate::app) fn poll_playlist_detail(&mut self) -> bool {
@@ -134,41 +121,5 @@ impl NavidromeApp {
             self.load_visible_song_covers(SongScope::PlaylistDetail);
         }
         changed
-    }
-
-    pub(in crate::app) fn finish_playlist_detail(
-        &mut self,
-        request: LibraryRequest,
-        result: Result<PlaylistDetails, String>,
-    ) {
-        let Some(result) = self.state.playlists.complete_detail(request, result) else {
-            return;
-        };
-        match result {
-            Ok(details) => {
-                let unavailable = details.unavailable_count;
-                let cover = details.playlist.cover_art.clone();
-                let covers = details
-                    .songs
-                    .iter()
-                    .filter_map(|song| song.cover_art.clone())
-                    .take(40)
-                    .collect();
-                self.state
-                    .clear_song_selection_for_scope(SongScope::PlaylistDetail);
-                self.ensure_cover(cover.as_deref(), true);
-                self.preload_covers(covers);
-                if unavailable > 0 {
-                    self.notify_warning(t!(
-                        "Skipped %{count} unavailable favorites",
-                        count = unavailable
-                    ));
-                }
-            }
-            Err(error) => {
-                let error = error.to_string();
-                self.notify_error(error);
-            }
-        }
     }
 }

@@ -20,6 +20,36 @@ fn begin() -> (PlaylistLibrary, LibraryRequests, LibraryRequest) {
     (library, requests, request)
 }
 
+#[test]
+fn partial_stream_metadata_preserves_the_playlist_summary_until_later_fields_arrive() {
+    let mut library = PlaylistLibrary::default();
+    let mut requests = LibraryRequests::default();
+    library.select(Playlist {
+        id: "5".into(),
+        name: "Known name".into(),
+        song_count: Some(4000),
+        duration: Some(123_456),
+        owner: Some("alice".into()),
+        public: Some(true),
+        ..Default::default()
+    });
+    let request = library.begin_detail(&mut requests).unwrap();
+    library.apply_detail_update(
+        request,
+        PlaylistUpdate::Metadata(Playlist {
+            id: "5".into(),
+            ..Default::default()
+        }),
+    );
+
+    let playlist = library.playlist().unwrap();
+    assert_eq!(playlist.name, "Known name");
+    assert_eq!(playlist.song_count, Some(4000));
+    assert_eq!(playlist.duration, Some(123_456));
+    assert_eq!(playlist.owner.as_deref(), Some("alice"));
+    assert_eq!(playlist.public, Some(true));
+}
+
 fn batch(ids: &[&str], count: usize) -> PlaylistUpdate {
     PlaylistUpdate::Batch {
         songs: ids

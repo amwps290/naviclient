@@ -9,7 +9,7 @@ use crate::app::{
 use crate::audio::OutputDevice;
 use crate::import::{ImportedPlaylist, MatchedSongs};
 use crate::models::{Album, Artist, Favorites, Genre, Playlist, SearchResults, ServerInfo, Song};
-use crate::playlist::{PlaylistDetails, PlaylistEdited};
+use crate::playlist::PlaylistEdited;
 use crate::recommendation::{DailyMixSnapshot, RecommendedTrack};
 
 #[derive(Debug)]
@@ -122,10 +122,6 @@ pub enum Msg {
     FavoriteChanged {
         change: FavoriteChange,
         result: Result<(), String>,
-    },
-    PlaylistSongs {
-        request: LibraryRequest,
-        result: Result<PlaylistDetails, String>,
     },
     Search {
         request: LibraryRequest,

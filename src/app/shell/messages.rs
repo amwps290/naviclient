@@ -117,9 +117,6 @@ impl NavidromeApp {
                 Msg::FavoriteChanged { change, result } => {
                     self.finish_favorite_change(change, result);
                 }
-                Msg::PlaylistSongs { request, result } => {
-                    self.finish_playlist_detail(request, result);
-                }
                 Msg::Search { request, result } => self.finish_search(request, result),
                 Msg::LibraryPlayback { request, result } => {
                     self.finish_library_playback(request, result);

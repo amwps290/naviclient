@@ -99,10 +99,6 @@ impl PlaylistLibrary {
     pub(in crate::app) fn attach_list(&mut self, task: tokio::task::AbortHandle) {
         self.list_task = Some(task);
     }
-    pub(in crate::app) fn attach_detail(&mut self, task: tokio::task::AbortHandle) {
-        self.detail_task = Some(task);
-    }
-
     pub(in crate::app) fn detail_error(&self) -> Option<&str> {
         self.detail_load.error()
     }
@@ -134,6 +130,7 @@ impl PlaylistLibrary {
         Some(self.detail_load.begin(requests))
     }
 
+    #[cfg(test)]
     pub(in crate::app) fn complete_detail(
         &mut self,
         request: LibraryRequest,

@@ -1,6 +1,55 @@
 use super::*;
+use crate::playlist::loading::{playlist_update_channel, PlaylistUpdate};
 use crate::test_support::http::{success, Server};
 use serde_json::json;
+
+#[tokio::test]
+async fn opensubsonic_playlist_loading_uses_bounded_ordered_batches() {
+    let entries: Vec<_> = (0..300)
+        .map(|index| json!({"id":index.to_string(),"title":format!("Track {index}")}))
+        .collect();
+    let server = Server::new(vec![success(json!({"subsonic-response": {
+        "status": "ok",
+        "playlist": {
+            "id": "large",
+            "name": "Large playlist",
+            "songCount": 300,
+            "entry": entries
+        }
+    }}))]);
+    let source =
+        MusicSource::opensubsonic("stable-profile", &server.url(""), "fixture", "password")
+            .unwrap();
+    let expected_source = source.id().clone();
+    let (sender, mut receiver) = playlist_update_channel();
+    let load = tokio::spawn(async move { source.load_playlist("large", sender).await });
+
+    let mut batch_sizes = Vec::new();
+    let mut final_count = None;
+    while let Some(update) = receiver.recv().await {
+        match update {
+            PlaylistUpdate::Metadata(playlist) => assert_eq!(playlist.id, "large"),
+            PlaylistUpdate::Batch { songs, progress } => {
+                assert!(songs
+                    .iter()
+                    .all(|song| song.source.as_ref() == Some(&expected_source)));
+                batch_sizes.push(songs.len());
+                assert_eq!(progress.songs, batch_sizes.iter().sum::<usize>());
+            }
+            PlaylistUpdate::Complete(progress) => {
+                final_count = Some(progress.songs);
+                break;
+            }
+            PlaylistUpdate::Progress(_) => {}
+            PlaylistUpdate::Failed(error) => panic!("playlist load failed: {}", error.message),
+        }
+    }
+    load.await.unwrap();
+
+    assert_eq!(batch_sizes, [128, 128, 44]);
+    assert_eq!(final_count, Some(300));
+    assert_eq!(server.requests()[0].url.path(), "/rest/getPlaylist.view");
+}
 
 #[tokio::test]
 async fn search_dispatch_preserves_remote_ids_counts_and_subsonic_authentication() {

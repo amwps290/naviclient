@@ -1,13 +1,15 @@
-//! Adapt complete server responses and progressive favorites to one UI stream.
+//! Stream provider playlist results through one bounded UI update channel.
 
 use anyhow::Result;
 use tokio::sync::mpsc::Sender;
 
 use super::MusicSource;
 use crate::playlist::loading::{
-    PlaylistFailureKind, PlaylistLoadError, PlaylistProgress, PlaylistUpdate, PLAYLIST_BATCH_SIZE,
+    PlaylistFailureKind, PlaylistLoadError, PlaylistProgress, PlaylistUpdate,
 };
 use crate::source::bilibili::client::BilibiliError;
+
+mod opensubsonic;
 
 impl MusicSource {
     pub(crate) async fn load_playlist(&self, id: &str, updates: Sender<PlaylistUpdate>) {
@@ -18,37 +20,9 @@ impl MusicSource {
                     let summary = provider.load_favorite_tracks(id, &updates).await?;
                     Ok(summary.progress)
                 }
-                Self::OpenSubsonic(_) => {
-                    let details = self.playlist(id).await?;
-                    let mut progress = PlaylistProgress {
-                        unavailable_count: details.unavailable_count,
-                        ..Default::default()
-                    };
-                    updates
-                        .send(PlaylistUpdate::Metadata(details.playlist))
-                        .await?;
-                    let mut songs = Vec::with_capacity(PLAYLIST_BATCH_SIZE);
-                    for song in details.songs {
-                        songs.push(song);
-                        progress.songs += 1;
-                        if songs.len() == PLAYLIST_BATCH_SIZE {
-                            updates
-                                .send(PlaylistUpdate::Batch {
-                                    songs: std::mem::replace(
-                                        &mut songs,
-                                        Vec::with_capacity(PLAYLIST_BATCH_SIZE),
-                                    ),
-                                    progress,
-                                })
-                                .await?;
-                        }
-                    }
-                    if !songs.is_empty() {
-                        updates
-                            .send(PlaylistUpdate::Batch { songs, progress })
-                            .await?;
-                    }
-                    Ok(progress)
+                Self::OpenSubsonic(adapter) => {
+                    opensubsonic::load(adapter.provider(), self.id().clone(), id, updates.clone())
+                        .await
                 }
             }
         }

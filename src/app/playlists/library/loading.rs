@@ -3,7 +3,9 @@
 use std::time::Instant;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
-use super::{LibraryRequest, PlaylistDetails, PlaylistLibrary};
+#[cfg(test)]
+use super::PlaylistDetails;
+use super::{LibraryRequest, PlaylistLibrary};
 use crate::playlist::loading::{
     PlaylistFailureKind, PlaylistLoadError, PlaylistProgress, PlaylistUpdate, PLAYLIST_BATCH_SIZE,
 };
@@ -48,6 +50,7 @@ impl PlaylistDetailLoad {
         self.stream = None;
     }
 
+    #[cfg(test)]
     pub(super) fn accept_complete(&mut self, request: LibraryRequest, details: &PlaylistDetails) {
         self.stream = None;
         self.snapshot = Some(request);
@@ -134,6 +137,21 @@ impl PlaylistLibrary {
                 let selected = self.selected.as_mut()?;
                 if playlist.id != selected.playlist.id {
                     return Some(self.fail_detail(request, PlaylistLoadError::invalid_response()));
+                }
+                if playlist.name.is_empty() {
+                    playlist.name.clone_from(&selected.playlist.name);
+                }
+                if playlist.song_count.is_none() {
+                    playlist.song_count = selected.playlist.song_count;
+                }
+                if playlist.duration.is_none() {
+                    playlist.duration = selected.playlist.duration;
+                }
+                if playlist.owner.is_none() {
+                    playlist.owner.clone_from(&selected.playlist.owner);
+                }
+                if playlist.public.is_none() {
+                    playlist.public = selected.playlist.public;
                 }
                 self.detail.metadata_cover = playlist.cover_art.clone();
                 if playlist.cover_art.is_none() {

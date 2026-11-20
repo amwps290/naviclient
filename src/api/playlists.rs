@@ -26,6 +26,11 @@ impl OpenSubsonicProvider {
         Ok(serde_json::from_value(body["playlist"].clone())?)
     }
 
+    pub(crate) async fn playlist_response(&self, playlist_id: &str) -> Result<reqwest::Response> {
+        self.get_response("getPlaylist", &[("id", playlist_id)])
+            .await
+    }
+
     pub async fn edit_playlist(&self, edit: &PlaylistEdit) -> Result<PlaylistEdited> {
         if let Some(id) = edit.id() {
             let current = self.playlist(id).await?;
