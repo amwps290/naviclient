@@ -27,6 +27,7 @@ impl NavidromeApp {
         set_mini_window_surface(window, false, cx);
         self.mini_window.frame.set_mini(window, false, cx);
         window.resize(restore.size);
+        self.mini_window.frame.restore_position(window);
         if restore.maximized && !window.is_maximized() {
             window.zoom_window();
         }
