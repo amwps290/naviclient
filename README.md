@@ -52,7 +52,10 @@ JavaScript runtime.
   The folder browser supports local name filtering and bounded card batches;
   artwork uses 16:9 thumbnails
   in the shared memory-bounded cache, with explicit placeholders when no cover
-  is available. Bilibili's Search page accepts explicit video queries, BV/AV
+  is available. Folder covers are read from list metadata when provided, then
+  loaded lazily from account-owned folder information with at most four
+  requests in flight; stale list/account replies are ignored and refresh can
+  retry failures. Bilibili's Search page accepts explicit video queries, BV/AV
   IDs, official video URLs and b23.tv links; results are paged metadata and
   open a part preview before playback. Part selection, play-all and append-all
   reuse the existing audio engine, with source/request checks and independent

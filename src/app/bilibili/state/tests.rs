@@ -1,4 +1,6 @@
 use super::*;
+
+mod folder_covers;
 use crate::models::ListeningEvent;
 use crate::source::ProviderKind;
 

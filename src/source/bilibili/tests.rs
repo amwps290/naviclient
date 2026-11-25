@@ -11,6 +11,7 @@ use std::{
     thread,
 };
 
+mod folder_covers;
 mod streaming;
 
 pub(super) fn session() -> AuthSession {

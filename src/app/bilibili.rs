@@ -3,6 +3,7 @@
 mod discovery;
 pub(in crate::app) mod discovery_state;
 mod discovery_view;
+mod folder_covers;
 pub(in crate::app) mod state;
 mod view;
 
@@ -129,6 +130,7 @@ impl NavidromeApp {
                 }
             });
         }
-        changed || search_value_changed || search_placeholder_changed
+        let covers_changed = self.poll_bilibili_folder_covers();
+        changed || search_value_changed || search_placeholder_changed || covers_changed
     }
 }

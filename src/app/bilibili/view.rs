@@ -535,6 +535,16 @@ impl NavidromeApp {
                         .child(error.to_string()),
                 )
             })
+            .when(self.state.bilibili.cover_failures > 0, |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(palette(cx).text_secondary)
+                        .child(t!(
+                            "Some folder covers could not be loaded. Refresh to retry."
+                        )),
+                )
+            })
             .when(
                 self.state.playlists.list_loading() && self.state.playlists.items().is_empty(),
                 |this| this.child(self.render_album_skeleton_grid(window, cx)),

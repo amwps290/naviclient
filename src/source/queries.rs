@@ -160,6 +160,16 @@ impl MusicSource {
         }
     }
 
+    pub async fn bilibili_folder_cover(
+        &self,
+        folder_id: u64,
+    ) -> Result<Option<String>, super::bilibili::client::BilibiliError> {
+        match self {
+            Self::Bilibili(provider) => provider.favorite_folder_cover(folder_id).await,
+            _ => Err(super::bilibili::client::BilibiliError::InvalidResponse),
+        }
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         match self {
             Self::OpenSubsonic(_) => self.subsonic()?.playlists().await,
@@ -170,6 +180,10 @@ impl MusicSource {
                 .map(|folder| Playlist {
                     id: folder.id.to_string(),
                     name: folder.title,
+                    cover_art: folder
+                        .cover
+                        .as_deref()
+                        .and_then(|cover| provider.cover_url(cover).ok()),
                     song_count: i32::try_from(folder.media_count).ok(),
                     ..Default::default()
                 })
@@ -189,6 +203,11 @@ impl MusicSource {
                     playlist: Playlist {
                         id: id.to_string(),
                         name: tracks.folder.title,
+                        cover_art: tracks
+                            .folder
+                            .cover
+                            .as_deref()
+                            .and_then(|cover| provider.cover_url(cover).ok()),
                         song_count: i32::try_from(tracks.songs.len()).ok(),
                         duration: i32::try_from(
                             tracks

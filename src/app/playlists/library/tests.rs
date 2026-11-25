@@ -1,5 +1,6 @@
 use super::*;
 
+mod cover_metadata;
 mod search;
 
 fn playlist(id: &str) -> Playlist {

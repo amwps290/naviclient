@@ -21,6 +21,7 @@ pub(in crate::app) struct PlaylistLibrary {
     visible: usize,
     selected: Option<PlaylistDetails>,
     list_load: LibraryLoad,
+    list_snapshot: Option<LibraryRequest>,
     detail_load: LibraryLoad,
     detail: PlaylistDetailLoad,
     edits: PlaylistEdits,
@@ -44,6 +45,36 @@ impl Drop for PlaylistLibrary {
 impl PlaylistLibrary {
     pub(in crate::app) fn items(&self) -> &[Playlist] {
         &self.items
+    }
+
+    pub(in crate::app) fn list_snapshot(&self) -> Option<LibraryRequest> {
+        self.list_snapshot
+    }
+
+    pub(in crate::app) fn apply_folder_cover(
+        &mut self,
+        snapshot: LibraryRequest,
+        id: &str,
+        cover: Option<String>,
+    ) -> bool {
+        if self.list_snapshot != Some(snapshot) {
+            return false;
+        }
+        let Some(folder) = self.items.iter_mut().find(|folder| folder.id == id) else {
+            return false;
+        };
+        if let Some(cover) = cover {
+            folder.cover_art = Some(cover.clone());
+            if let Some(selected) = self
+                .selected
+                .as_mut()
+                .filter(|details| details.playlist.id == id)
+            {
+                selected.playlist.cover_art = Some(cover);
+            }
+            return true;
+        }
+        false
     }
 
     pub(in crate::app) fn visible_items(&self) -> &[Playlist] {
@@ -118,6 +149,7 @@ impl PlaylistLibrary {
     }
 
     pub(in crate::app) fn begin_list(&mut self, requests: &mut LibraryRequests) -> LibraryRequest {
+        self.list_snapshot = None;
         if let Some(task) = self.list_task.take() {
             task.abort();
         }
@@ -138,6 +170,7 @@ impl PlaylistLibrary {
     ) -> Option<Result<&[Playlist], &str>> {
         Some(match self.list_load.complete(request, result)? {
             Ok(items) => {
+                self.list_snapshot = Some(request);
                 self.visible = items.len().min(INITIAL_VISIBLE);
                 self.items = items;
                 Ok(&self.items)
@@ -220,6 +253,7 @@ impl PlaylistLibrary {
         let completion = self.edits.complete(request, result)?;
         // Reads begun while a write was pending can still contain pre-write
         // data. Invalidate them on success and failure before refreshing.
+        self.list_snapshot = None;
         self.list_load = LibraryLoad::default();
         self.detail_load = LibraryLoad::default();
         self.detail.cancel();
@@ -246,6 +280,7 @@ impl PlaylistLibrary {
     }
 
     fn invalidate_reads(&mut self) {
+        self.list_snapshot = None;
         self.search.suspend();
         self.pending_index = None;
         if let Some(task) = self.list_task.take() {

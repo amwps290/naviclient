@@ -29,6 +29,13 @@ pub struct DecodedCover {
 
 #[derive(Debug)]
 pub enum Msg {
+    BilibiliFolderCover {
+        source: crate::source::SourceId,
+        snapshot: LibraryRequest,
+        request: LibraryRequest,
+        folder_id: String,
+        result: Result<Option<String>, crate::source::bilibili::client::BilibiliError>,
+    },
     BilibiliSearch {
         source: crate::source::SourceId,
         request: LibraryRequest,

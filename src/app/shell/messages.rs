@@ -52,6 +52,15 @@ impl NavidromeApp {
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
             match message {
+                Msg::BilibiliFolderCover {
+                    source,
+                    snapshot,
+                    request,
+                    folder_id,
+                    result,
+                } => {
+                    self.finish_bilibili_folder_cover(source, snapshot, request, folder_id, result);
+                }
                 Msg::BilibiliSearch {
                     source,
                     request,

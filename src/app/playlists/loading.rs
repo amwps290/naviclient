@@ -22,8 +22,25 @@ impl NavidromeApp {
     pub(in crate::app) fn finish_playlists(
         &mut self,
         request: LibraryRequest,
-        result: Result<Vec<Playlist>, String>,
+        mut result: Result<Vec<Playlist>, String>,
     ) {
+        if self.browsing_bilibili() {
+            if let Ok(folders) = &mut result {
+                for folder in folders {
+                    if folder.cover_art.is_none()
+                        && folder.song_count.is_some_and(|count| count > 0)
+                    {
+                        folder.cover_art = self
+                            .state
+                            .playlists
+                            .items()
+                            .iter()
+                            .find(|previous| previous.id == folder.id)
+                            .and_then(|previous| previous.cover_art.clone());
+                    }
+                }
+            }
+        }
         let Some(result) = self.state.playlists.complete_list(request, result) else {
             return;
         };

@@ -101,6 +101,7 @@ pub struct NavidromeApp {
     /// 由 UI 循环统一用 window.push_notification 冲刷。
     pending_notifications: Vec<(NotificationType, SharedString)>,
     cover_slots: Arc<tokio::sync::Semaphore>,
+    folder_cover_slots: Arc<tokio::sync::Semaphore>,
     /// Retention and pending texture/asset releases survive server state resets.
     cover_textures: RefCell<CoverTextures>,
     text_width_cache: RefCell<TextWidthCache>,

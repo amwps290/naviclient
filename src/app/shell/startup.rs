@@ -205,6 +205,7 @@ impl NavidromeApp {
             song_list_scrolls: RefCell::new(HashMap::new()),
             pending_notifications: Vec::new(),
             cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            folder_cover_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             cover_textures: RefCell::new(cover_textures),
             text_width_cache: RefCell::new(TextWidthCache::default()),
             tray_rx: mpsc::channel().1,

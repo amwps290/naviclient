@@ -29,6 +29,8 @@ pub struct FavoriteFolder {
     pub title: String,
     #[serde(default)]
     pub media_count: u32,
+    #[serde(default)]
+    pub cover: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -162,6 +164,40 @@ impl BilibiliProvider {
             return Err(BilibiliError::InvalidResponse);
         }
         Ok(folders)
+    }
+
+    pub async fn favorite_folder_cover(
+        &self,
+        folder_id: u64,
+    ) -> Result<Option<String>, BilibiliError> {
+        if folder_id == 0 {
+            return Err(BilibiliError::InvalidResponse);
+        }
+        let id = folder_id.to_string();
+        let response = self
+            .client
+            .get(
+                false,
+                "/x/v3/fav/folder/info",
+                &[("media_id", &id)],
+                Some(&self.session),
+            )
+            .await?;
+        let info = BilibiliClient::json::<Envelope<FolderInfo>>(response)
+            .await?
+            .into_data()?;
+        if info.folder.id != folder_id {
+            return Err(BilibiliError::InvalidResponse);
+        }
+        if info.upper.mid != self.session.account_id() {
+            return Err(BilibiliError::PermissionDenied);
+        }
+        Ok(info
+            .folder
+            .cover
+            .as_deref()
+            .and_then(safe_artwork)
+            .map(|url| url.to_string()))
     }
 
     pub(super) async fn video(&self, bvid: &str) -> Result<Video, BilibiliError> {
@@ -333,6 +369,11 @@ impl BilibiliProvider {
                 .send(PlaylistUpdate::Metadata(Playlist {
                     id: current_folder.id.to_string(),
                     name: current_folder.title.clone(),
+                    cover_art: current_folder
+                        .cover
+                        .as_deref()
+                        .and_then(safe_artwork)
+                        .map(|url| url.to_string()),
                     ..Default::default()
                 }))
                 .await?;

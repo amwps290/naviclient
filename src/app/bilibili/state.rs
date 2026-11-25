@@ -14,11 +14,21 @@ pub(in crate::app) struct BilibiliWorkspace {
     pub folder_query: String,
     pub folder_limit: usize,
     pub visited: Vec<String>,
+    cover_snapshot: Option<LibraryRequest>,
+    cover_attempted: std::collections::HashSet<String>,
+    cover_jobs: std::collections::HashMap<String, (LibraryRequest, tokio::task::AbortHandle)>,
+    pub cover_failures: usize,
+    cover_stopped: bool,
+    cover_stop_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    query_changed_at: Option<std::time::Instant>,
 }
 
 impl Drop for BilibiliWorkspace {
     fn drop(&mut self) {
         if let Some(task) = self.history_task.take() {
+            task.abort();
+        }
+        for (_, task) in self.cover_jobs.values() {
             task.abort();
         }
     }
@@ -70,7 +80,85 @@ impl BilibiliWorkspace {
     pub fn history_error(&self) -> Option<&str> {
         self.history_load.error()
     }
+    pub fn sync_cover_snapshot(&mut self, snapshot: Option<LibraryRequest>) {
+        if self.cover_snapshot == snapshot {
+            return;
+        }
+        for (_, task) in self.cover_jobs.values() {
+            task.abort();
+        }
+        self.cover_jobs.clear();
+        self.cover_attempted.clear();
+        self.cover_failures = 0;
+        self.cover_stopped = false;
+        self.cover_stop_signal = Default::default();
+        self.cover_snapshot = snapshot;
+    }
+    pub fn prune_cover_jobs(&mut self, wanted: &std::collections::HashSet<String>) {
+        let obsolete = self
+            .cover_jobs
+            .keys()
+            .filter(|id| !wanted.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in obsolete {
+            if let Some((_, task)) = self.cover_jobs.remove(&id) {
+                task.abort();
+            }
+            self.cover_attempted.remove(&id);
+        }
+    }
+    pub fn cover_query_settled(&self) -> bool {
+        self.query_changed_at
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(200))
+    }
+    pub fn cover_stop_signal(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.cover_stop_signal.clone()
+    }
+    pub fn needs_cover(&self, id: &str) -> bool {
+        !self.cover_stopped
+            && !self
+                .cover_stop_signal
+                .load(std::sync::atomic::Ordering::Relaxed)
+            && !self.cover_attempted.contains(id)
+    }
+    pub fn attach_cover(
+        &mut self,
+        id: String,
+        request: LibraryRequest,
+        task: tokio::task::AbortHandle,
+    ) {
+        self.cover_attempted.insert(id.clone());
+        self.cover_jobs.insert(id, (request, task));
+    }
+    pub fn finish_cover(&mut self, id: &str, request: LibraryRequest) -> bool {
+        if self
+            .cover_jobs
+            .get(id)
+            .is_none_or(|(current, _)| *current != request)
+        {
+            return false;
+        }
+        self.cover_jobs.remove(id);
+        true
+    }
+    pub fn cover_failed(&mut self, stop: bool) {
+        self.cover_failures += 1;
+        if stop {
+            self.cover_stopped = true;
+            self.cover_stop_signal
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            for (_, task) in self.cover_jobs.values() {
+                task.abort();
+            }
+            self.cover_jobs.clear();
+        }
+    }
+
     pub fn set_folder_query(&mut self, query: String) {
+        if self.folder_query != query {
+            self.query_changed_at = Some(std::time::Instant::now());
+        }
         self.folder_query = query;
         self.folder_limit = 50;
     }
