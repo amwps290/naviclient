@@ -29,6 +29,16 @@ pub struct DecodedCover {
 
 #[derive(Debug)]
 pub enum Msg {
+    BilibiliFavoriteRead {
+        source: crate::source::SourceId,
+        request: LibraryRequest,
+        result: Result<crate::source::bilibili::favorites::FavoriteSnapshot, String>,
+    },
+    BilibiliFavoriteWrite {
+        source: crate::source::SourceId,
+        request: LibraryRequest,
+        result: Result<crate::source::bilibili::favorites::FavoriteOutcome, String>,
+    },
     BilibiliFolderCover {
         source: crate::source::SourceId,
         snapshot: LibraryRequest,

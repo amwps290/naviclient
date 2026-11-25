@@ -4,6 +4,7 @@ pub(crate) mod account;
 pub mod auth;
 pub mod client;
 pub mod discovery;
+pub mod favorites;
 mod library;
 mod playback;
 

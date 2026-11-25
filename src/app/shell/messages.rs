@@ -52,6 +52,16 @@ impl NavidromeApp {
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
             match message {
+                Msg::BilibiliFavoriteRead {
+                    source,
+                    request,
+                    result,
+                } => self.finish_bilibili_favorite_read(source, request, result),
+                Msg::BilibiliFavoriteWrite {
+                    source,
+                    request,
+                    result,
+                } => self.finish_bilibili_favorite_write(source, request, result),
                 Msg::BilibiliFolderCover {
                     source,
                     snapshot,

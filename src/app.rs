@@ -75,6 +75,8 @@ pub struct NavidromeApp {
     turntable: covers::turntable::Turntable,
     state: AppState,
     playlist_ui: PlaylistUi,
+    favorite_ui: bilibili::favorite_state::FavoriteUi,
+    favorite_writes: Arc<std::sync::atomic::AtomicUsize>,
     import_ui: ImportUi,
     search_input: Entity<InputState>,
     bilibili_folder_search: Entity<InputState>,

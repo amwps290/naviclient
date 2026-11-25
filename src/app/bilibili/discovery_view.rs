@@ -132,6 +132,8 @@ impl NavidromeApp {
                 .map(|video| {
                     let bvid = video.bvid.clone();
                     let owner = source.clone();
+                    let favorite_owner = source.clone();
+                    let favorite_bvid = video.bvid.clone();
                     let open = cx.listener(move |this, _, _, cx| {
                         if this.api.as_ref().map(|api| api.id()) != Some(&owner)
                             || this.state.bilibili_discovery.search_loading()
@@ -174,11 +176,41 @@ impl NavidromeApp {
                             .on_click(open),
                         ))
                         .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .truncate()
-                                .child(video.title.clone()),
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .truncate()
+                                        .child(video.title.clone()),
+                                )
+                                .child(
+                                    Button::new(SharedString::from(format!(
+                                        "save-bilibili-video-{}",
+                                        video.bvid
+                                    )))
+                                    .icon(AppIcon::Heart)
+                                    .tooltip(t!("Save video to…"))
+                                    .accessibility_label(t!("Save video to…"))
+                                    .ghost()
+                                    .small()
+                                    .disabled(state.search_loading() || self.favorite_ui.writing)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_bilibili_favorite(
+                                            favorite_owner.clone(),
+                                            favorite_bvid.clone(),
+                                            super::favorite_state::FavoriteDialogKind::Picker,
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                                ),
                         )
                         .child(
                             h_flex()
@@ -362,6 +394,13 @@ impl NavidromeApp {
             });
         if let (Some(video), Some(request)) = (&state.video, state.video_request) {
             let selected = video.selected;
+            let favorite_owner = video.source.clone();
+            let favorite_bvid = video
+                .songs
+                .first()
+                .and_then(|song| song.bilibili_part.as_ref())
+                .map(|part| part.bvid.clone())
+                .unwrap_or_default();
             panel = panel.child(h_flex().w_full().gap_3().items_center()
                 .child(self.render_bilibili_thumbnail(video.cover.as_deref().and_then(|id| self.browsing_cover_image(id)).cloned(), tokens::HERO_COVER_COMPACT, cx))
                 .child(v_flex().flex_1().min_w_0().gap_1()
@@ -376,7 +415,15 @@ impl NavidromeApp {
                     .child(Button::new("play-all-bilibili-parts").label(t!("Play all")).ghost()
                         .on_click(cx.listener(move |this, _, _, cx| { this.play_bilibili_preview(request, 0, false); cx.notify(); })))
                     .child(Button::new("append-all-bilibili-parts").label(t!("Append all parts")).ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| { this.play_bilibili_preview(request, 0, true); cx.notify(); }))))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.play_bilibili_preview(request, 0, true); cx.notify(); })))
+                    .child(Button::new("save-bilibili-preview-video").label(t!("Save video to…")).icon(AppIcon::Heart).ghost()
+                        .disabled(favorite_bvid.is_empty() || self.favorite_ui.writing)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.state.bilibili_discovery.video_request == Some(request) {
+                                this.open_bilibili_favorite(favorite_owner.clone(), favorite_bvid.clone(),
+                                    super::favorite_state::FavoriteDialogKind::Picker, window, cx);
+                            }
+                        }))))
                 .child(uniform_list("bilibili-video-parts", video.songs.len(), cx.processor(move |this, range: Range<usize>, _, cx| {
                     if this.state.bilibili_discovery.video_request != Some(request) {
                         return range.map(|_| div().into_any_element()).collect();

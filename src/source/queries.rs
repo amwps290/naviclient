@@ -170,6 +170,28 @@ impl MusicSource {
         }
     }
 
+    pub async fn prepare_bilibili_favorite(
+        &self,
+        bvid: &str,
+    ) -> Result<super::bilibili::favorites::FavoriteSnapshot> {
+        match self {
+            Self::Bilibili(provider) => Ok(provider.prepare_video_favorite(bvid).await?),
+            _ => anyhow::bail!("This source does not support Bilibili favorites"),
+        }
+    }
+    pub async fn change_bilibili_favorite(
+        &self,
+        snapshot: &super::bilibili::favorites::FavoriteSnapshot,
+        operation: super::bilibili::favorites::FavoriteOperation,
+    ) -> Result<super::bilibili::favorites::FavoriteOutcome> {
+        match self {
+            Self::Bilibili(provider) => {
+                Ok(provider.change_video_favorite(snapshot, operation).await?)
+            }
+            _ => anyhow::bail!("This source does not support Bilibili favorites"),
+        }
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         match self {
             Self::OpenSubsonic(_) => self.subsonic()?.playlists().await,

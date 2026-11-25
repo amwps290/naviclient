@@ -111,6 +111,16 @@ impl AuthSession {
         self.account_id
     }
 
+    pub(super) fn csrf(&self) -> Result<Zeroizing<String>, BilibiliError> {
+        let token = self
+            .cookie
+            .split("; ")
+            .find_map(|pair| pair.strip_prefix("bili_jct="))
+            .filter(|value| valid_cookie_value(value))
+            .ok_or(BilibiliError::NotAuthenticated)?;
+        Ok(Zeroizing::new(token.to_string()))
+    }
+
     pub(super) fn cookie_header(&self) -> Result<HeaderValue, BilibiliError> {
         let mut value =
             HeaderValue::from_str(&self.cookie).map_err(|_| BilibiliError::InvalidResponse)?;

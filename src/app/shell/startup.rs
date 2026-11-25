@@ -13,7 +13,16 @@ impl Drop for NavidromeApp {
         // Close the bounded frame channel before Runtime::drop waits for its
         // blocking worker; otherwise a producer could wait on a full queue.
         self.vinyl_cover.cancel_pending();
+        let pending_favorites = self.favorite_writes.clone();
         let _ = self.runtime.block_on(async {
+            // Source methods bound preflight, POST and verification to <=70s.
+            // Keep the runtime alive for accepted writes during graceful exit.
+            let _ = tokio::time::timeout(Duration::from_secs(90), async {
+                while pending_favorites.load(Ordering::SeqCst) > 0 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await;
             tokio::time::timeout(
                 Duration::from_secs(30),
                 secrets::source_credentials::settle_staging(),
@@ -175,6 +184,8 @@ impl NavidromeApp {
             turntable: Default::default(),
             state: AppState::default(),
             playlist_ui: PlaylistUi::default(),
+            favorite_ui: Default::default(),
+            favorite_writes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             import_ui: ImportUi::default(),
             search_input: search_input.clone(),
             bilibili_folder_search: cx.new(|cx| {
@@ -264,6 +275,17 @@ impl NavidromeApp {
         let close_quitting = app.quitting.clone();
         let close_hwnd = app.main_hwnd;
         window.on_window_should_close(cx, move |window, cx| {
+            if let Some(Some(root)) = window.root::<NavidromeApp>() {
+                let pending = root.read(cx).favorite_writes.load(Ordering::SeqCst) > 0;
+                if pending {
+                    root.update(cx, |app, _| {
+                        app.notify_warning(t!(
+                            "Wait for the favorite operation to finish before closing."
+                        ))
+                    });
+                    return false;
+                }
+            }
             if close_quitting.load(Ordering::Relaxed) {
                 // 真正退出前保存最后状态。
                 if let Some(Some(root)) = window.root::<NavidromeApp>() {

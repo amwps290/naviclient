@@ -60,8 +60,13 @@ JavaScript runtime.
   open a part preview before playback. Part selection, play-all and append-all
   reuse the existing audio engine, with source/request checks and independent
   account-free short-link resolution. Requests use the configured source route.
-  HE-AAC, FLAC and Dolby playback, video output, and Bilibili favorite editing
-  are not supported in this version.
+  Bilibili favorite actions save a video to an owned folder or remove it from
+  the current folder after confirmation. Operations verify the account, video
+  AID, target owner, CSRF and resulting membership; uncertain results require
+  a status check and never automatically repeat a POST. Video-level changes
+  affect all parts of that video without stopping current playback.
+  HE-AAC, FLAC and Dolby playback, video output, and Bilibili folder creation,
+  rename/delete or reordering are not supported in this version.
 - Album cover art loaded from the Navidrome API
 - Native font discovery with a CJK-capable UI family selected per platform:
   Microsoft YaHei/JhengHei UI on Windows, PingFang on macOS, and

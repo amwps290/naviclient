@@ -117,6 +117,8 @@ pub struct SourceCapabilities {
     pub search: bool,
     pub favorite_read: bool,
     pub favorite_write: bool,
+    /// Video membership in owned Bilibili folders; not a Song star operation.
+    pub video_favorite_write: bool,
     pub playlist_read: bool,
     pub playlist_write: bool,
     pub lyrics: bool,
@@ -154,6 +156,7 @@ impl ProviderKind {
                 search: true,
                 favorite_read: true,
                 favorite_write: true,
+                video_favorite_write: false,
                 playlist_read: true,
                 playlist_write: true,
                 lyrics: true,
@@ -163,6 +166,7 @@ impl ProviderKind {
             },
             Self::Bilibili => SourceCapabilities {
                 search: true,
+                video_favorite_write: true,
                 favorite_read: true,
                 playlist_read: true,
                 ..SourceCapabilities::default()

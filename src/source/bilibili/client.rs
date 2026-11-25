@@ -100,6 +100,14 @@ pub(super) struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
+    pub(super) fn into_success(self) -> Result<(), BilibiliError> {
+        if self.code == 0 {
+            Ok(())
+        } else {
+            Err(BilibiliError::content_api(self.code))
+        }
+    }
+
     pub(super) fn into_data(self) -> Result<T, BilibiliError> {
         if self.code != 0 {
             return Err(BilibiliError::content_api(self.code));
@@ -241,6 +249,34 @@ impl BilibiliClient {
             request = request.header(header::COOKIE, session.cookie_header()?);
         }
         let response = request.send().await.map_err(transport_error)?;
+        if !response.status().is_success() {
+            return Err(if matches!(response.status().as_u16(), 412 | 429) {
+                BilibiliError::RateLimited
+            } else {
+                BilibiliError::Http(response.status().as_u16())
+            });
+        }
+        Ok(response)
+    }
+
+    pub(super) async fn post_favorite(
+        &self,
+        params: &[(&str, &str)],
+        session: &AuthSession,
+    ) -> Result<Response, BilibiliError> {
+        let origin = "https://api.bilibili.com";
+        #[cfg(test)]
+        let origin = self.test_origin.as_deref().unwrap_or(origin);
+        let response = self
+            .http
+            .post(format!("{origin}/x/v3/fav/resource/deal"))
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::REFERER, REFERER)
+            .header(header::COOKIE, session.cookie_header()?)
+            .form(params)
+            .send()
+            .await
+            .map_err(transport_error)?;
         if !response.status().is_success() {
             return Err(if matches!(response.status().as_u16(), 412 | 429) {
                 BilibiliError::RateLimited

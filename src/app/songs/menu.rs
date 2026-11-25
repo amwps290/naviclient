@@ -220,6 +220,31 @@ impl NavidromeApp {
                     })),
             );
         }
+        if is_bilibili && browsing_owner && capabilities.video_favorite_write {
+            if let (Some(owner), Some(part)) = (song.source.clone(), song.bilibili_part.as_ref()) {
+                let bvid = part.bvid.clone();
+                menu = menu
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(t!("Save video to…")).on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                if !playlist_target
+                                    .is_none_or(|target| target.is_current(&this.state))
+                                {
+                                    return;
+                                }
+                                this.open_bilibili_favorite(
+                                owner.clone(),
+                                bvid.clone(),
+                                crate::app::bilibili::favorite_state::FavoriteDialogKind::Picker,
+                                window,
+                                cx,
+                            );
+                            },
+                        )),
+                    );
+            }
+        }
         if !is_bilibili {
             let radio_seed = song.clone();
             let radio_loading = self.song_radio_loading(&song.id);
@@ -321,6 +346,21 @@ impl NavidromeApp {
         } = context.source
         {
             if is_bilibili {
+                if let (Some(owner), Some(part), Ok(folder_id)) = (
+                    song.source.clone(),
+                    song.bilibili_part.as_ref(),
+                    playlist.id.parse::<u64>(),
+                ) {
+                    let bvid = part.bvid.clone();
+                    let name = playlist.name.clone();
+                    menu = menu.separator().item(PopupMenuItem::new(t!("Remove from this favorite folder"))
+                        .disabled(!capabilities.video_favorite_write || !browsing_owner || !playback_allowed || self.favorite_ui.writing)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if !playlist_target.is_none_or(|target| target.can_play(&this.state)) { return; }
+                            this.open_bilibili_favorite(owner.clone(), bvid.clone(),
+                                crate::app::bilibili::favorite_state::FavoriteDialogKind::Remove { folder_id, folder_name: name.clone() }, window, cx);
+                        })));
+                }
                 return menu;
             }
             let disabled = self.state.playlists.editing()

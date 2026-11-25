@@ -74,6 +74,7 @@ fn bilibili_supports_video_search_but_keeps_collections_read_only() {
     assert!(bilibili.favorite_read);
     assert!(bilibili.playlist_read);
     assert!(!bilibili.favorite_write);
+    assert!(bilibili.video_favorite_write);
     assert!(!bilibili.playlist_write);
     assert!(!bilibili.library);
     assert!(bilibili.search);
@@ -82,5 +83,6 @@ fn bilibili_supports_video_search_but_keeps_collections_read_only() {
     assert!(!bilibili.scrobble);
     assert!(!bilibili.transcoding);
     let subsonic = ProviderKind::OpenSubsonic.capabilities();
+    assert!(!subsonic.video_favorite_write);
     assert!(subsonic.library && subsonic.search && subsonic.scrobble && subsonic.transcoding);
 }

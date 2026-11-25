@@ -3,6 +3,9 @@
 mod discovery;
 pub(in crate::app) mod discovery_state;
 mod discovery_view;
+pub(in crate::app) mod favorite_state;
+mod favorite_view;
+mod favorites;
 mod folder_covers;
 pub(in crate::app) mod state;
 mod view;
