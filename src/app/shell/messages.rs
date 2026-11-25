@@ -52,6 +52,21 @@ impl NavidromeApp {
         while let Ok(message) = self.rx.try_recv() {
             changed = true;
             match message {
+                Msg::BilibiliSearch {
+                    source,
+                    request,
+                    result,
+                } => self.finish_bilibili_search(source, request, result),
+                Msg::BilibiliVideo {
+                    source,
+                    request,
+                    result,
+                } => self.finish_bilibili_video(source, request, result),
+                Msg::BilibiliHistory {
+                    source,
+                    request,
+                    result,
+                } => self.finish_bilibili_home(source, request, result),
                 Msg::BilibiliLogin { request, update } => {
                     self.finish_bilibili_login(request, update)
                 }

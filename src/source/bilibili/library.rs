@@ -81,6 +81,8 @@ struct FavoriteVideo {
 }
 #[derive(Deserialize)]
 pub(super) struct Video {
+    #[serde(default)]
+    pub aid: u64,
     pub bvid: String,
     pub title: String,
     #[serde(default)]
@@ -163,15 +165,26 @@ impl BilibiliProvider {
     }
 
     pub(super) async fn video(&self, bvid: &str) -> Result<Video, BilibiliError> {
-        if !valid_bvid(bvid) {
-            return Err(BilibiliError::InvalidResponse);
-        }
+        self.video_by_id(&super::discovery::VideoId::Bvid(bvid.into()))
+            .await
+    }
+
+    pub(super) async fn video_by_id(
+        &self,
+        id: &super::discovery::VideoId,
+    ) -> Result<Video, BilibiliError> {
+        use super::discovery::VideoId;
+        let (key, value) = match id {
+            VideoId::Bvid(bvid) if valid_bvid(bvid) => ("bvid", bvid.clone()),
+            VideoId::Aid(aid) if *aid > 0 => ("aid", aid.to_string()),
+            _ => return Err(BilibiliError::InvalidResponse),
+        };
         let response = self
             .client
             .get(
                 false,
                 "/x/web-interface/view",
-                &[("bvid", bvid)],
+                &[(key, &value)],
                 Some(&self.session),
             )
             .await?;
@@ -179,13 +192,22 @@ impl BilibiliProvider {
             .await?
             .into_data()?;
         let mut ids = HashSet::new();
-        if video.bvid != bvid
+        let identity_matches = match id {
+            VideoId::Bvid(bvid) => video.bvid == *bvid,
+            VideoId::Aid(aid) => video.aid == *aid,
+        };
+        if !identity_matches
+            || !valid_bvid(&video.bvid)
+            || video.title.len() > 4096
+            || video.owner.name.len() > 4096
+            || video.pic.len() > 2048
             || video.pages.is_empty()
             || video.pages.len() > MAX_PARTS
             || video.pages.iter().any(|part| {
                 part.cid == 0
                     || part.page == 0
                     || !ids.insert(part.cid)
+                    || part.part.len() > 4096
                     || part.duration > i32::MAX as u64
             })
         {
@@ -404,7 +426,7 @@ impl BilibiliProvider {
 }
 
 impl Video {
-    fn into_songs(self, provider: &BilibiliProvider) -> impl Iterator<Item = Song> {
+    pub(super) fn into_songs(self, provider: &BilibiliProvider) -> impl Iterator<Item = Song> {
         let count = self.pages.len() as u32;
         let collection_title = self
             .ugc_season

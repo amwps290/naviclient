@@ -170,6 +170,18 @@ impl NavidromeApp {
             self.focus_playlist_search(window, cx);
             return;
         }
+        if self.browsing_bilibili() {
+            if self.state.view == View::Playlists && !self.state.settings.open {
+                self.bilibili_folder_search
+                    .update(cx, |input, cx| input.focus(window, cx));
+            } else {
+                self.navigate_to(View::Search);
+                self.bilibili_search_input
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
+            cx.notify();
+            return;
+        }
         self.state.navigate_to(View::Search);
         cx.notify();
         let mut async_cx = window.to_async(cx);

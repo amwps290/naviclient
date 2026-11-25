@@ -29,6 +29,21 @@ pub struct DecodedCover {
 
 #[derive(Debug)]
 pub enum Msg {
+    BilibiliSearch {
+        source: crate::source::SourceId,
+        request: LibraryRequest,
+        result: Result<crate::source::bilibili::discovery::SearchPage, String>,
+    },
+    BilibiliVideo {
+        source: crate::source::SourceId,
+        request: LibraryRequest,
+        result: Result<crate::source::bilibili::discovery::VideoTracks, String>,
+    },
+    BilibiliHistory {
+        source: crate::source::SourceId,
+        request: LibraryRequest,
+        result: Result<crate::models::ListeningHistory, String>,
+    },
     BilibiliLogin {
         request: u128,
         update: crate::app::settings::bilibili_state::LoginUpdate,

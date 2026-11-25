@@ -43,6 +43,16 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn open_playlist(&mut self, playlist: Playlist) {
+        if self.browsing_bilibili()
+            && self
+                .state
+                .playlists
+                .items()
+                .iter()
+                .any(|folder| folder.id == playlist.id)
+        {
+            self.state.bilibili.visit(&playlist.id);
+        }
         self.clear_song_multi();
         self.song_list_scrolls
             .borrow_mut()

@@ -17,6 +17,7 @@ pub enum BilibiliError {
     Timeout,
     Http(u16),
     Api(i64),
+    InvalidVideoInput,
     InvalidResponse,
     InvalidProxy,
     NotAuthenticated,
@@ -40,7 +41,10 @@ impl fmt::Display for BilibiliError {
                 Self::Network => {
                     t!("Cannot reach Bilibili. Check the connection or proxy and retry.")
                 }
-                Self::Timeout => t!("Bilibili request timed out. Retry playback."),
+                Self::Timeout => t!("Bilibili request timed out. Retry."),
+                Self::InvalidVideoInput => {
+                    t!("Enter valid keywords, a BV/AV ID, or an official Bilibili video link.")
+                }
                 Self::InvalidResponse => {
                     t!("Bilibili returned an invalid response. Refresh and retry.")
                 }
@@ -238,13 +242,51 @@ impl BilibiliClient {
         }
         let response = request.send().await.map_err(transport_error)?;
         if !response.status().is_success() {
-            return Err(if response.status().as_u16() == 429 {
+            return Err(if matches!(response.status().as_u16(), 412 | 429) {
                 BilibiliError::RateLimited
             } else {
                 BilibiliError::Http(response.status().as_u16())
             });
         }
         Ok(response)
+    }
+
+    pub(super) async fn short_location(&self, url: &url::Url) -> Result<url::Url, BilibiliError> {
+        if !super::discovery::short_url(url) {
+            return Err(BilibiliError::InvalidVideoInput);
+        }
+        #[cfg(test)]
+        let test_address = self
+            .test_origin
+            .as_ref()
+            .map(|origin| format!("{origin}{}", &url[url::Position::BeforePath..]));
+        #[cfg(test)]
+        let address = test_address.as_deref().unwrap_or(url.as_str());
+        #[cfg(not(test))]
+        let address = url.as_str();
+        // No session argument, cookie jar, or inherited Cookie header. Never
+        // follow redirects automatically when resolving a user-supplied link.
+        let response = self
+            .http
+            .get(address)
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::REFERER, REFERER)
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if response.status().as_u16() == 429 {
+            return Err(BilibiliError::RateLimited);
+        }
+        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Err(BilibiliError::InvalidVideoInput);
+        }
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(BilibiliError::InvalidResponse)?;
+        url.join(location)
+            .map_err(|_| BilibiliError::InvalidVideoInput)
     }
 
     pub(super) async fn json<T: DeserializeOwned>(

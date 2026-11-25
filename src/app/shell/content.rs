@@ -9,13 +9,16 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         match self.state.view {
+            View::Home if self.browsing_bilibili() => self.render_bilibili_home(window, cx),
             View::Home => self.render_home(window, cx),
             view @ (View::Favorites
             | View::Artists
             | View::Albums
             | View::Genres
             | View::GenreDetail) => self.render_library_browse(view, window, cx),
+            View::Playlists if self.browsing_bilibili() => self.render_bilibili_folders(window, cx),
             View::Playlists => self.render_playlists(window, cx),
+            View::Search if self.browsing_bilibili() => self.render_bilibili_discovery(window, cx),
             View::Search => self.render_search(window, cx),
             View::ArtistDetail => self.render_artist_detail(window, cx),
             View::AlbumDetail => self.render_album_detail(window, cx),

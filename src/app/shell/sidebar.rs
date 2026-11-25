@@ -30,20 +30,27 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let collapsed = layout.sidebar_collapsed;
         if self.browsing_bilibili() {
-            return v_flex()
-                .w(px(layout.sidebar_width))
-                .h_full()
-                .p_3()
-                .gap_2()
-                .child(div().text_sm().child(self.active_server_label()))
-                .child(self.nav_button(
-                    View::Playlists,
-                    Some(self.state.playlists.items().len()),
-                    collapsed,
-                    cx,
-                ))
-                .child(self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx))
-                .into_any_element();
+            return bilibili_sidebar_content(
+                layout,
+                self.active_server_label().into(),
+                v_flex()
+                    .gap_1()
+                    .child(self.nav_button(View::Home, None, collapsed, cx))
+                    .child(self.nav_button(
+                        View::Playlists,
+                        Some(self.state.playlists.items().len()),
+                        collapsed,
+                        cx,
+                    ))
+                    .when(
+                        self.api
+                            .as_ref()
+                            .is_some_and(|api| api.capabilities().search),
+                        |this| this.child(self.nav_button(View::Search, None, collapsed, cx)),
+                    )
+                    .into_any_element(),
+                self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx),
+            );
         }
         v_flex()
             .w(px(layout.sidebar_width))
@@ -133,10 +140,7 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let (label, icon) =
             if self.browsing_bilibili() && matches!(view, View::Playlists | View::PlaylistDetail) {
-                (
-                    t!("My Bilibili favorites").into(),
-                    Icon::new(AppIcon::Playlists),
-                )
+                (t!("Favorite folders").into(), Icon::new(AppIcon::Playlists))
             } else {
                 view.navigation_presentation()
             };
@@ -335,3 +339,38 @@ impl NavidromeApp {
             .into_any_element()
     }
 }
+
+fn bilibili_sidebar_content(
+    layout: &ShellLayout,
+    source_label: SharedString,
+    navigation: gpui_kit::AnyElement,
+    footer: gpui_kit::AnyElement,
+) -> gpui_kit::AnyElement {
+    v_flex()
+        .id("bilibili-sidebar")
+        .debug_selector(|| "bilibili-sidebar".into())
+        .w(px(layout.sidebar_width))
+        .h_full()
+        .flex_none()
+        .when(layout.sidebar_collapsed, |this| this.p_2())
+        .when(!layout.sidebar_collapsed, |this| this.p_3())
+        .gap_2()
+        .when(!layout.sidebar_collapsed, |this| {
+            this.child(
+                div()
+                    .id("bilibili-source-label")
+                    .debug_selector(|| "bilibili-source-label".into())
+                    .w_full()
+                    .min_w_0()
+                    .text_sm()
+                    .truncate()
+                    .child(source_label),
+            )
+        })
+        .child(navigation)
+        .child(footer)
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests;

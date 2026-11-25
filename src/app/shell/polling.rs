@@ -42,6 +42,7 @@ impl NavidromeApp {
         changed |= self.poll_messages(window, cx);
         changed |= self.poll_playlist_detail();
         changed |= self.poll_playlist_search(window, cx);
+        changed |= self.poll_bilibili_workspace(window, cx);
         changed |= self.poll_logs(window, cx);
         self.release_unused_cover_textures(window, cx);
         // 冲刷排队的 Toast：gpui-component 的通知系统由窗口 Root

@@ -139,6 +139,27 @@ impl MusicSource {
         Ok(result)
     }
 
+    pub async fn search_bilibili_videos(
+        &self,
+        keyword: &str,
+        page: u32,
+    ) -> Result<super::bilibili::discovery::SearchPage> {
+        match self {
+            Self::Bilibili(provider) => Ok(provider.search_videos(keyword, page).await?),
+            _ => anyhow::bail!("This source does not support Bilibili video search"),
+        }
+    }
+
+    pub async fn open_bilibili_video(
+        &self,
+        input: &str,
+    ) -> Result<super::bilibili::discovery::VideoTracks> {
+        match self {
+            Self::Bilibili(provider) => Ok(provider.open_video(input).await?),
+            _ => anyhow::bail!("This source does not support Bilibili videos"),
+        }
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         match self {
             Self::OpenSubsonic(_) => self.subsonic()?.playlists().await,

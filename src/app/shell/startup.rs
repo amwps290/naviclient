@@ -177,6 +177,16 @@ impl NavidromeApp {
             playlist_ui: PlaylistUi::default(),
             import_ui: ImportUi::default(),
             search_input: search_input.clone(),
+            bilibili_folder_search: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(t!("Find a favorite folder…"))
+                    .clean_on_escape()
+            }),
+            bilibili_search_input: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(t!("Search Bilibili videos or paste a BV/AV ID or link…"))
+            }),
+            bilibili_parts_scroll: UniformListScrollHandle::new(),
             playlist_search_input: cx.new(|cx| {
                 InputState::new(window, cx)
                     .placeholder(t!("Search song titles, artists or albums…"))
@@ -220,6 +230,8 @@ impl NavidromeApp {
         app.subscribe_lyrics_inputs(cx);
         app.subscribe_log_search(cx);
         app.subscribe_playlist_search(cx);
+        app.subscribe_bilibili_folder_search(cx);
+        app.subscribe_bilibili_discovery(cx);
         // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
         {
             let prune_config = app.config.clone();
@@ -330,7 +342,7 @@ impl NavidromeApp {
         if app.api.is_some() {
             app.refresh_library();
         } else if app.browsing_bilibili() {
-            app.state.view = View::Playlists;
+            app.state.view = View::Home;
             app.state.status = t!("Verifying Bilibili account…").to_string();
         } else {
             app.state.status = t!("Open Settings to configure the server").to_string();

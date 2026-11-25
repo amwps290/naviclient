@@ -69,14 +69,14 @@ fn legacy_source_identity_defaults_to_opensubsonic() {
 }
 
 #[test]
-fn bilibili_first_release_capabilities_only_allow_collection_reads() {
+fn bilibili_supports_video_search_but_keeps_collections_read_only() {
     let bilibili = ProviderKind::Bilibili.capabilities();
     assert!(bilibili.favorite_read);
     assert!(bilibili.playlist_read);
     assert!(!bilibili.favorite_write);
     assert!(!bilibili.playlist_write);
     assert!(!bilibili.library);
-    assert!(!bilibili.search);
+    assert!(bilibili.search);
     assert!(!bilibili.lyrics);
     assert!(!bilibili.recommendations);
     assert!(!bilibili.scrobble);

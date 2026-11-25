@@ -5,6 +5,7 @@ mod tests;
 
 pub(in crate::app) mod prelude;
 
+mod bilibili;
 mod covers;
 mod desktop;
 mod home;
@@ -76,6 +77,9 @@ pub struct NavidromeApp {
     playlist_ui: PlaylistUi,
     import_ui: ImportUi,
     search_input: Entity<InputState>,
+    bilibili_folder_search: Entity<InputState>,
+    bilibili_search_input: Entity<InputState>,
+    bilibili_parts_scroll: UniformListScrollHandle,
     playlist_search_input: Entity<InputState>,
     playlist_list_focus: gpui_kit::FocusHandle,
     server_input: Entity<InputState>,

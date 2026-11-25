@@ -3,6 +3,7 @@
 pub(crate) mod account;
 pub mod auth;
 pub mod client;
+pub mod discovery;
 mod library;
 mod playback;
 

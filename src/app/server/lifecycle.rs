@@ -26,7 +26,7 @@ impl NavidromeApp {
                 .active_source
                 .as_ref()
                 .and_then(|id| self.available_source(id));
-            self.state.view = View::Playlists;
+            self.state.view = View::Home;
             self.prune_source_covers();
             if self.api.is_some() {
                 if self.playback_source.is_none() {

@@ -132,6 +132,7 @@ pub(in crate::app) const CARD_TITLE: f32 = 26.0;
 pub(in crate::app) const CARD_TITLE_COMPACT: f32 = 22.0;
 pub(in crate::app) const HERO_CARD_HEIGHT: f32 = 176.0;
 pub(in crate::app) const HERO_CARD_COMPACT_HEIGHT: f32 = 144.0;
+pub(in crate::app) const HOME_FEATURE_PAIR_MIN_WIDTH: f32 = 640.0;
 pub(in crate::app) const HERO_COVER: f32 = 128.0;
 pub(in crate::app) const HERO_COVER_COMPACT: f32 = 96.0;
 pub(in crate::app) const HOVER_PLAY_BUTTON: f32 = 40.0;

@@ -22,6 +22,40 @@ fn source_image() -> Arc<Image> {
 }
 
 #[test]
+fn video_thumbnails_keep_wide_aspect_and_do_not_upscale_or_mutate_sources() {
+    for (width, height, expected) in [(1600, 900, (160, 90)), (80, 160, (80, 45)), (1, 1, (1, 1))] {
+        let source = render_image(RgbaImage::from_pixel(
+            width,
+            height,
+            Rgba([190, 80, 15, 127]),
+        ));
+        let output = filter_wide(&source, 160).unwrap();
+        assert_eq!(output.buffer().dimensions(), expected);
+        assert!(output
+            .buffer()
+            .pixels()
+            .all(|pixel| pixel.0 == [190, 80, 15, 127]));
+        assert_eq!(source.size(0).width.0, width as i32);
+        assert_eq!(source.size(0).height.0, height as i32);
+    }
+}
+
+#[test]
+fn square_and_video_versions_never_share_a_thumbnail_key() {
+    let square = Key {
+        source: 42,
+        side: 160,
+        wide: false,
+    };
+    let video = Key {
+        wide: true,
+        ..square
+    };
+    assert!(square != video);
+    assert_eq!(HashSet::from([square, video]).len(), 2);
+}
+
+#[test]
 fn strong_reduction_filters_fine_patterns_without_mutating_the_original() {
     let source = render_image(RgbaImage::from_fn(1024, 1024, |x, y| {
         let value = if (x + y) % 2 == 0 { 0 } else { 255 };
@@ -98,6 +132,7 @@ fn background_completion_reuses_textures_and_updates_for_display_scale(cx: &mut 
     let key = Key {
         source: source.id(),
         side: 16,
+        wide: false,
     };
     let first = cache.borrow().entries[&key].image.clone().unwrap();
     assert_eq!(first.size(0).width.0, 16);
@@ -113,6 +148,7 @@ fn background_completion_reuses_textures_and_updates_for_display_scale(cx: &mut 
     let key = Key {
         source: source.id(),
         side: 32,
+        wide: false,
     };
     assert_eq!(
         cache.borrow().entries[&key]
@@ -137,7 +173,11 @@ fn background_completion_reuses_textures_and_updates_for_display_scale(cx: &mut 
 }
 
 fn insert(cache: &mut CoverThumbnails, source: u64, side: u32) -> Key {
-    let key = Key { source, side };
+    let key = Key {
+        source,
+        side,
+        wide: false,
+    };
     let image = render_image(RgbaImage::new(side, side));
     cache.bytes += image.as_bytes(0).unwrap().len();
     cache.entries.insert(

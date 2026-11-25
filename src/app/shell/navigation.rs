@@ -45,12 +45,19 @@ impl NavidromeApp {
         let view = if self.browsing_bilibili()
             && !matches!(
                 view,
-                View::Playlists | View::PlaylistDetail | View::NowPlaying
+                View::Home
+                    | View::Playlists
+                    | View::PlaylistDetail
+                    | View::Search
+                    | View::NowPlaying
             ) {
             View::Playlists
         } else {
             view
         };
+        if self.browsing_bilibili() && view == View::Search {
+            self.state.queue_drawer_open = false;
+        }
         self.state.navigate_to(view);
         match view {
             View::Artists if self.state.artists.is_empty() => self.load_artists(),

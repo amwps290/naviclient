@@ -162,6 +162,7 @@ impl ProviderKind {
                 transcoding: true,
             },
             Self::Bilibili => SourceCapabilities {
+                search: true,
                 favorite_read: true,
                 playlist_read: true,
                 ..SourceCapabilities::default()

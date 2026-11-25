@@ -44,8 +44,21 @@ JavaScript runtime.
   show their part names, with video/collection context shown separately;
   single-page videos hide redundant part numbering. Credentials,
   queues, history and artwork are isolated by source, and Bilibili audio uses
-  bounded temporary caches. HE-AAC, FLAC and Dolby playback, video output,
-  Bilibili search and favorite editing are not supported in this version.
+  bounded temporary caches. A dedicated Bilibili Home shows source-isolated
+  recent listening and recently opened folders. Continue Listening is a compact
+  card paired with folder shortcuts when space allows; its play control sits
+  beside the metadata, while recent-track play controls overlay the thumbnail.
+  Narrow content stacks the feature cards rather than stretching their controls.
+  The folder browser supports local name filtering and bounded card batches;
+  artwork uses 16:9 thumbnails
+  in the shared memory-bounded cache, with explicit placeholders when no cover
+  is available. Bilibili's Search page accepts explicit video queries, BV/AV
+  IDs, official video URLs and b23.tv links; results are paged metadata and
+  open a part preview before playback. Part selection, play-all and append-all
+  reuse the existing audio engine, with source/request checks and independent
+  account-free short-link resolution. Requests use the configured source route.
+  HE-AAC, FLAC and Dolby playback, video output, and Bilibili favorite editing
+  are not supported in this version.
 - Album cover art loaded from the Navidrome API
 - Native font discovery with a CJK-capable UI family selected per platform:
   Microsoft YaHei/JhengHei UI on Windows, PingFang on macOS, and
@@ -158,7 +171,9 @@ JavaScript runtime.
   by default
 - Responsive desktop compact mode below 1040px: the sidebar becomes an icon rail,
   the player narrows its metadata/control zones, and song tables hide secondary
-  columns and actions without removing them from menus
+  columns and actions without removing them from menus. Bilibili uses the same
+  rail padding and hides its account heading when collapsed; long account names
+  stay on one truncated line when the sidebar is expanded
 - Persistent volume with mute/restore, mouse-wheel adjustment, and a compact
   vertical slider shown above the player on hover
 - Audio output device management: pick a specific output device (or follow the

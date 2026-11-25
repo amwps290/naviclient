@@ -26,6 +26,8 @@ use crate::app::sound::loudness_state::LoudnessCache;
 use crate::app::sound::output::OutputDevices;
 
 pub(in crate::app) struct AppState {
+    pub(in crate::app) bilibili_discovery: crate::app::bilibili::discovery_state::DiscoveryState,
+    pub(in crate::app) bilibili: crate::app::bilibili::state::BilibiliWorkspace,
     pub(in crate::app) connection: ServerConnection,
     pub(in crate::app) view: View,
     pub(in crate::app) artists: ArtistLibrary,
@@ -75,6 +77,8 @@ impl AppState {
     /// Replace page-owned data while retaining the playback occurrence, queue,
     /// lyrics, history, output state and source-qualified artwork requests.
     pub(in crate::app) fn reset_browsing(&mut self) {
+        self.bilibili_discovery = Default::default();
+        self.bilibili = Default::default();
         self.connection = ServerConnection::default();
         self.view = View::Home;
         self.artists = ArtistLibrary::default();
@@ -99,6 +103,8 @@ impl AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            bilibili_discovery: Default::default(),
+            bilibili: Default::default(),
             connection: ServerConnection::default(),
             view: View::Home,
             artists: ArtistLibrary::default(),

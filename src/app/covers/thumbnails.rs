@@ -20,6 +20,7 @@ const BYTE_BUDGET: usize = 32 * 1024 * 1024;
 struct Key {
     source: u64,
     side: u32,
+    wide: bool,
 }
 
 struct Entry {
@@ -45,9 +46,21 @@ impl CoverThumbnails {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Arc<RenderImage>> {
+        Self::image_shape(cache, source, side, false, window, cx)
+    }
+
+    fn image_shape(
+        cache: &Rc<RefCell<Self>>,
+        source: &Arc<Image>,
+        side: u32,
+        wide: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Arc<RenderImage>> {
         let key = Key {
             source: source.id(),
             side: side.max(1),
+            wide,
         };
         {
             let mut cache = cache.borrow_mut();
@@ -66,7 +79,12 @@ impl CoverThumbnails {
             return None;
         }
         let worker = cx.background_executor().spawn(async move {
-            filter(&decoded, key.side).map(|pixels| Arc::new(RenderImage::new(vec![pixels])))
+            let pixels = if key.wide {
+                filter_wide(&decoded, key.side)
+            } else {
+                filter(&decoded, key.side)
+            };
+            pixels.map(|pixels| Arc::new(RenderImage::new(vec![pixels])))
         });
         let weak_cache = Rc::downgrade(cache);
         let task = window.spawn(cx, async move |cx| {
@@ -195,6 +213,59 @@ impl RenderOnce for FilteredCover {
             .flex_none()
             .rounded(px(self.radius))
             .shadow(self.shadows)
+    }
+}
+
+fn filter_wide(source: &RenderImage, side: u32) -> anyhow::Result<Frame> {
+    let size = source.size(0);
+    let width = u32::try_from(size.width.0)?;
+    let height = u32::try_from(size.height.0)?;
+    anyhow::ensure!(width > 0 && height > 0, "empty video artwork");
+    let image = ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(
+        width,
+        height,
+        source.as_bytes(0).context("missing video artwork pixels")?,
+    )
+    .context("invalid video artwork pixels")?;
+    let crop_width = width.min(height.saturating_mul(16) / 9).max(1);
+    let crop_height = height.min(crop_width.saturating_mul(9) / 16).max(1);
+    let crop = imageops::crop_imm(
+        &image,
+        (width - crop_width).div_ceil(2),
+        (height - crop_height).div_ceil(2),
+        crop_width,
+        crop_height,
+    );
+    let output_width = side.max(1).min(crop_width);
+    let output_height = (output_width.saturating_mul(9) / 16)
+        .max(1)
+        .min(crop_height);
+    Ok(Frame::new(imageops::resize(
+        &*crop,
+        output_width,
+        output_height,
+        FilterType::Lanczos3,
+    )))
+}
+
+#[derive(IntoElement)]
+pub(in crate::app) struct FilteredVideoCover {
+    pub source: Arc<Image>,
+    pub cache: Rc<RefCell<CoverThumbnails>>,
+    pub width: f32,
+}
+
+impl RenderOnce for FilteredVideoCover {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let side = (self.width * window.scale_factor()).round().max(1.0) as u32;
+        let image = CoverThumbnails::image_shape(&self.cache, &self.source, side, true, window, cx)
+            .map(ImageSource::Render)
+            .unwrap_or_else(|| self.source.into());
+        img(image)
+            .w(px(self.width))
+            .h(px(self.width * 9.0 / 16.0))
+            .object_fit(ObjectFit::Cover)
+            .flex_none()
     }
 }
 

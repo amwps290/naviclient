@@ -11,6 +11,7 @@ impl NavidromeApp {
         self.refresh_connection();
         if self.browsing_bilibili() {
             self.load_playlists();
+            self.load_bilibili_home();
             return;
         }
         self.load_artists();
@@ -53,6 +54,7 @@ impl NavidromeApp {
             View::Albums => self.load_more_albums(),
             View::GenreDetail => self.load_more_genre_albums(),
             View::Artists => self.state.artists.show_more(),
+            View::Playlists if self.browsing_bilibili() => self.state.bilibili.show_more_folders(),
             View::Playlists => self.state.playlists.show_more(),
             _ => {}
         }
