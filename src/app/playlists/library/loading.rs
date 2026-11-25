@@ -236,6 +236,11 @@ impl PlaylistLibrary {
                 self.detail.progress = progress;
                 self.detail.complete = true;
                 self.detail_load.complete(request, Ok(()));
+                if let Some((index_request, index)) = self.pending_index.take() {
+                    if index_request == request {
+                        self.search.replace(request, index);
+                    }
+                }
                 self.finish_detail_stream();
                 PlaylistDetailChange::Complete {
                     reset,
@@ -257,6 +262,7 @@ impl PlaylistLibrary {
             // from the new prefix instead of carrying the old first song over.
             selected.playlist.cover_art = self.detail.metadata_cover.clone();
         }
+        self.search.reset_snapshot();
         self.detail.snapshot = Some(request);
         self.detail.replacing = false;
         true
@@ -267,6 +273,8 @@ impl PlaylistLibrary {
         request: LibraryRequest,
         error: PlaylistLoadError,
     ) -> PlaylistDetailChange {
+        self.search.suspend();
+        self.pending_index = None;
         let reset = error.kind == PlaylistFailureKind::Authorization;
         if reset {
             if let Some(selected) = &mut self.selected {
@@ -274,6 +282,7 @@ impl PlaylistLibrary {
                 selected.unavailable_count = 0;
             }
             self.detail.snapshot = None;
+            self.search.reset_snapshot();
         }
         self.detail.complete = false;
         self.detail_load

@@ -68,9 +68,14 @@ impl NavidromeApp {
         };
         let source = api.id().clone();
         let (updates, receiver) = playlist_update_channel();
-        let task = self.runtime.spawn(async move {
-            api.load_playlist(&playlist_id, updates).await;
-        });
+        let tx = self.tx.clone();
+        let task = self.runtime.spawn(super::search::load_indexed_playlist(
+            api,
+            playlist_id,
+            request,
+            updates,
+            tx,
+        ));
         self.state
             .playlists
             .attach_detail_stream(request, source, receiver, task.abort_handle());

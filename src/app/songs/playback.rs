@@ -58,7 +58,10 @@ impl SongPlayback {
 
 impl AppState {
     pub(in crate::app) fn song_scope_ready(&self, scope: SongScope) -> bool {
-        scope != SongScope::PlaylistDetail || self.playlists.detail_ready()
+        scope != SongScope::PlaylistDetail
+            || (self.playlists.detail_ready()
+                && self.playlists.search.ready()
+                && !self.playlists.editing())
     }
 
     pub(in crate::app) fn song_playback_at(
@@ -68,6 +71,14 @@ impl AppState {
     ) -> Option<SongPlayback> {
         if !self.song_scope_ready(scope) {
             return None;
+        }
+        if scope == SongScope::PlaylistDetail {
+            let original = self.songs_for_scope(scope)?.original_index(index)?;
+            return Some(SongPlayback::Replace {
+                songs: self.playlists.songs().to_vec(),
+                index: original,
+                origin: QueueOrigin::Playlist,
+            });
         }
         SongPlayback::row(scope, self.songs_for_scope(scope)?, index)
     }
@@ -81,6 +92,25 @@ impl AppState {
 }
 
 impl NavidromeApp {
+    pub(in crate::app) fn play_playlist_all(&mut self) {
+        if self.state.playlists.detail_ready() && !self.state.playlists.editing() {
+            self.replace_queue_and_play(
+                self.state.playlists.songs().to_vec(),
+                0,
+                QueueOrigin::Playlist,
+            );
+        }
+    }
+
+    pub(in crate::app) fn append_playlist_all(&mut self) {
+        if self.state.playlists.detail_ready() && !self.state.playlists.editing() {
+            self.append_all_with_origin(
+                self.state.playlists.songs().to_vec(),
+                QueueOrigin::Playlist,
+            );
+        }
+    }
+
     /// Append the current list with its scope's origin, without starting playback.
     pub(in crate::app) fn append_songs_at_scope(&mut self, scope: SongScope) {
         if !self.state.song_scope_ready(scope) {

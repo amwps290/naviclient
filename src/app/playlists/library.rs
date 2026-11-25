@@ -1,9 +1,12 @@
 //! Playlist data and request ownership, independent of dialogs and menus.
 
 use super::edit_state::{PlaylistEditCompletion, PlaylistEditOrigin, PlaylistEdits};
+use super::search_index::PlaylistSearchIndex;
+use super::search_state::{PlaylistSearch, PlaylistSearchRequest};
 use crate::app::library::requests::{LibraryLoad, LibraryRequest, LibraryRequests};
 use crate::models::{Playlist, Song};
 use crate::playlist::{PlaylistDetails, PlaylistEdited};
+use std::sync::Arc;
 
 mod loading;
 pub(in crate::app) use loading::PlaylistDetailChange;
@@ -23,6 +26,8 @@ pub(in crate::app) struct PlaylistLibrary {
     edits: PlaylistEdits,
     list_task: Option<tokio::task::AbortHandle>,
     detail_task: Option<tokio::task::AbortHandle>,
+    pub search: PlaylistSearch,
+    pending_index: Option<(LibraryRequest, Arc<PlaylistSearchIndex>)>,
 }
 
 impl Drop for PlaylistLibrary {
@@ -76,7 +81,30 @@ impl PlaylistLibrary {
         self.edits.editing()
     }
 
+    pub(in crate::app) fn search_identity(&self) -> Option<PlaylistSearchRequest> {
+        Some(self.search.identity(self.snapshot()?))
+    }
+
+    pub(in crate::app) fn accept_search_index(
+        &mut self,
+        request: LibraryRequest,
+        index: Arc<PlaylistSearchIndex>,
+    ) {
+        if self.detail_load.pending(request) {
+            if self.pending_index.is_none() {
+                self.pending_index = Some((request, index));
+            }
+        } else if self.detail_ready()
+            && self.snapshot() == Some(request)
+            && !self.search.indexed(request)
+        {
+            self.search.replace(request, index);
+        }
+    }
+
     pub(in crate::app) fn select(&mut self, playlist: Playlist) {
+        self.search = PlaylistSearch::default();
+        self.pending_index = None;
         if let Some(task) = self.detail_task.take() {
             task.abort();
         }
@@ -126,6 +154,8 @@ impl PlaylistLibrary {
         if let Some(task) = self.detail_task.take() {
             task.abort();
         }
+        self.search.suspend();
+        self.pending_index = None;
         self.detail.begin();
         Some(self.detail_load.begin(requests))
     }
@@ -152,6 +182,16 @@ impl PlaylistLibrary {
                     item.cover_art = details.playlist.cover_art.clone();
                 }
                 self.detail.accept_complete(request, &details);
+                self.search.replace(
+                    request,
+                    Arc::new(
+                        PlaylistSearchIndex::build(
+                            &details.songs,
+                            &super::search_index::Cancellation::default(),
+                        )
+                        .expect("test index is not cancelled"),
+                    ),
+                );
                 self.selected = Some(details);
                 Ok(self
                     .selected
@@ -197,6 +237,8 @@ impl PlaylistLibrary {
                 {
                     self.selected = None;
                     self.detail = PlaylistDetailLoad::default();
+                    self.search = PlaylistSearch::default();
+                    self.pending_index = None;
                 }
             }
         }
@@ -204,6 +246,8 @@ impl PlaylistLibrary {
     }
 
     fn invalidate_reads(&mut self) {
+        self.search.suspend();
+        self.pending_index = None;
         if let Some(task) = self.list_task.take() {
             task.abort();
         }

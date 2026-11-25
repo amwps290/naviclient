@@ -1,5 +1,7 @@
 use super::*;
 
+mod search;
+
 fn playlist(id: &str) -> Playlist {
     Playlist {
         id: id.to_string(),

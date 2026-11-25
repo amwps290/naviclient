@@ -28,11 +28,17 @@ enum SongMenuSource {
 struct PlaylistMenuTarget {
     snapshot: Option<LibraryRequest>,
     complete: bool,
+    view: Option<crate::app::PlaylistSearchRequest>,
+    filtered: bool,
 }
 
 impl PlaylistMenuTarget {
     fn is_current(self, state: &AppState) -> bool {
-        self.snapshot.is_some() && self.snapshot == state.playlists.snapshot()
+        self.snapshot.is_some()
+            && self.snapshot == state.playlists.snapshot()
+            && self.view == state.playlists.search_identity()
+            && state.playlists.search.ready()
+            && (!self.filtered || state.playlists.detail_ready())
     }
 
     fn can_play(self, state: &AppState) -> bool {
@@ -62,6 +68,12 @@ impl SongMenuSource {
 
 impl SongMenuContext {
     fn for_scope(state: &AppState, scope: SongScope, index: usize) -> Option<Self> {
+        if scope == SongScope::PlaylistDetail
+            && (!state.playlists.search.ready()
+                || (state.playlists.search.filtered() && !state.playlists.detail_ready()))
+        {
+            return None;
+        }
         let songs = state.songs_for_scope(scope)?;
         let song = songs.get(index)?.clone();
         let complete = state.song_scope_ready(scope);
@@ -71,8 +83,14 @@ impl SongMenuContext {
             SongMenuSource::Library {
                 // Preview menus can operate on the captured song, but never
                 // freeze a partial list into a future "play all" action.
-                songs: Arc::new(if complete { songs.to_vec() } else { Vec::new() }),
-                index,
+                songs: Arc::new(if !complete {
+                    Vec::new()
+                } else if scope == SongScope::PlaylistDetail {
+                    state.playlists.songs().to_vec()
+                } else {
+                    songs.to_vec()
+                }),
+                index: songs.original_index(index)?,
                 playlist: (scope == SongScope::PlaylistDetail)
                     .then(|| state.playlists.playlist().cloned())
                     .flatten(),
@@ -80,6 +98,8 @@ impl SongMenuContext {
                     PlaylistMenuTarget {
                         snapshot: state.playlists.snapshot(),
                         complete,
+                        view: state.playlists.search_identity(),
+                        filtered: state.playlists.search.filtered(),
                     },
                 ),
             }
@@ -324,9 +344,15 @@ impl NavidromeApp {
                 };
                 menu = menu.item(
                     PopupMenuItem::new(label)
-                        .disabled(disabled || to.is_none())
+                        .disabled(
+                            disabled
+                                || to.is_none()
+                                || playlist_target.is_some_and(|target| target.filtered),
+                        )
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if !playlist_target.is_none_or(|target| target.can_play(&this.state)) {
+                            if !playlist_target.is_none_or(|target| target.can_play(&this.state))
+                                || this.state.playlists.search.filtered()
+                            {
                                 return;
                             }
                             this.start_playlist_edit(edit.clone(), PlaylistEditOrigin::Menu, cx)

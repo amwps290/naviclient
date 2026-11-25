@@ -307,6 +307,7 @@ impl NavidromeApp {
                     ))
                     .into_any_element(),
                 actions: h_flex()
+                    .w_full()
                     .gap_2()
                     .flex_wrap()
                     .items_center()
@@ -319,7 +320,7 @@ impl NavidromeApp {
                         )
                         .disabled(playback_disabled)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.play_song_at_scope(SongScope::PlaylistDetail, 0);
+                            this.play_playlist_all();
                             cx.notify();
                         })),
                     )
@@ -329,7 +330,7 @@ impl NavidromeApp {
                             .label(t!("Append all"))
                             .disabled(playback_disabled)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.append_songs_at_scope(SongScope::PlaylistDetail);
+                                this.append_playlist_all();
                                 cx.notify();
                             })),
                     )
@@ -368,6 +369,7 @@ impl NavidromeApp {
                                 cx.notify();
                             })),
                     )
+                    .child(self.render_playlist_search(window, cx))
                     .into_any_element(),
             },
             window,
@@ -384,7 +386,21 @@ impl NavidromeApp {
                     .px(px(padding))
                     .pb(px(padding))
                     .gap_3()
-                    .child(self.render_playlist_status(bilibili, read_only, cx))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(self.render_playlist_status(bilibili, read_only, cx)),
+                            )
+                            .when(self.state.playlists.search.expanded, |this| {
+                                this.child(self.render_playlist_search_feedback(cx))
+                            }),
+                    )
                     .child(self.render_song_list(SongScope::PlaylistDetail, cx)),
             )
             .into_any_element()

@@ -61,6 +61,7 @@ pub(in crate::app) enum PlaylistDialog {
     },
     Confirm {
         edit: PlaylistEdit,
+        target: Option<crate::app::PlaylistSearchRequest>,
         title: String,
         message: String,
     },
@@ -135,8 +136,15 @@ impl NavidromeApp {
         if self.state.playlists.editing() || self.import_ui.flow.stage().is_some() {
             return;
         }
+        let target = matches!(
+            edit,
+            PlaylistEdit::Remove { .. } | PlaylistEdit::Move { .. }
+        )
+        .then(|| self.state.playlists.search_identity())
+        .flatten();
         self.playlist_ui.dialog = Some(PlaylistDialog::Confirm {
             edit,
+            target,
             title,
             message,
         });
@@ -213,7 +221,20 @@ impl NavidromeApp {
                     }
                 }
             }
-            Some(PlaylistDialog::Confirm { edit, .. }) => edit.clone(),
+            Some(PlaylistDialog::Confirm { edit, target, .. }) => {
+                if target.is_some()
+                    && (*target != self.state.playlists.search_identity()
+                        || !self.state.song_scope_ready(SongScope::PlaylistDetail))
+                {
+                    self.playlist_ui.error = Some(
+                        t!("This playlist changed on the server. Refresh it and try again.")
+                            .to_string(),
+                    );
+                    cx.notify();
+                    return;
+                }
+                edit.clone()
+            }
             _ => return,
         };
         self.start_playlist_edit(edit, PlaylistEditOrigin::Dialog, cx);

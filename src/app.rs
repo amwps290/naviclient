@@ -33,6 +33,8 @@ pub(crate) use library::paged_collection::PageRequest;
 pub(crate) use library::playback::LibraryPlaybackRequest;
 pub(crate) use library::requests::LibraryRequest;
 pub(crate) use playback::resolution_state::PlaybackResolveRequest;
+pub(crate) use playlists::search_index::PlaylistSearchIndex;
+pub(crate) use playlists::search_state::PlaylistSearchRequest;
 pub(crate) use recommendations::auto_continue_state::AutoContinueRequest;
 pub(crate) use recommendations::daily_mix_state::DailyMixRequest;
 pub(crate) use recommendations::radio_state::RadioRequest;
@@ -74,6 +76,8 @@ pub struct NavidromeApp {
     playlist_ui: PlaylistUi,
     import_ui: ImportUi,
     search_input: Entity<InputState>,
+    playlist_search_input: Entity<InputState>,
+    playlist_list_focus: gpui_kit::FocusHandle,
     server_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,

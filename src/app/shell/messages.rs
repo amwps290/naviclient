@@ -105,6 +105,12 @@ impl NavidromeApp {
                 Msg::AlbumSongs { request, result } => {
                     self.finish_album_details(request, result);
                 }
+                Msg::PlaylistIndexed { request, index } => {
+                    self.state.playlists.accept_search_index(request, index);
+                }
+                Msg::PlaylistFiltered { request, result } => {
+                    self.finish_playlist_search(request, result);
+                }
                 Msg::Playlists { request, result } => {
                     self.finish_playlists(request, result);
                 }

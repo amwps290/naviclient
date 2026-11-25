@@ -2,6 +2,8 @@ use super::*;
 use crate::playlist::loading::{PlaylistProgress, PlaylistUpdate};
 use crate::playlist::PlaylistDetails;
 
+mod search;
+
 fn song(title: &str) -> Song {
     Song {
         id: "duplicate".into(),

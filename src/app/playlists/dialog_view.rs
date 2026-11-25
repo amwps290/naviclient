@@ -113,6 +113,7 @@ impl NavidromeApp {
                 title,
                 message,
                 edit,
+                ..
             }) => {
                 content = content.child(div().text_sm().child(message.clone()));
                 (

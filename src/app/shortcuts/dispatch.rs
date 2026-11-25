@@ -166,6 +166,10 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.view == View::PlaylistDetail && !self.state.settings.open {
+            self.focus_playlist_search(window, cx);
+            return;
+        }
         self.state.navigate_to(View::Search);
         cx.notify();
         let mut async_cx = window.to_async(cx);

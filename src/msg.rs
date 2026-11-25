@@ -111,6 +111,14 @@ pub enum Msg {
         request: LibraryRequest,
         result: Result<Vec<Playlist>, String>,
     },
+    PlaylistIndexed {
+        request: LibraryRequest,
+        index: Arc<crate::app::PlaylistSearchIndex>,
+    },
+    PlaylistFiltered {
+        request: crate::app::PlaylistSearchRequest,
+        result: Result<Vec<usize>, String>,
+    },
     PlaylistEdited {
         request: LibraryRequest,
         result: Result<PlaylistEdited, String>,

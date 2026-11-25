@@ -16,18 +16,25 @@ impl NavidromeApp {
             return div().into_any_element();
         };
         if songs.is_empty() {
-            return if scope == SongScope::PlaylistDetail {
-                crate::app::playlists::detail_view::render_playlist_placeholder(
-                    &self.state.playlists,
-                    cx,
-                )
-            } else {
-                render_empty_song_list(
-                    t!("No tracks here yet").to_string(),
-                    t!("Tracks will appear here when they are available.").to_string(),
-                    cx,
-                )
-            };
+            if scope == SongScope::PlaylistDetail {
+                return div()
+                    .flex_1()
+                    .min_h_0()
+                    .track_focus(&self.playlist_list_focus)
+                    .tab_index(0)
+                    .child(
+                        crate::app::playlists::search_view::render_playlist_search_empty(
+                            &self.state.playlists,
+                            cx,
+                        ),
+                    )
+                    .into_any_element();
+            }
+            return render_empty_song_list(
+                t!("No tracks here yet").to_string(),
+                t!("Tracks will appear here when they are available.").to_string(),
+                cx,
+            );
         }
         let handle = self.song_list_scroll(scope);
         let list_width = f32::from(self.content_scroll_handle.bounds().size.width);
@@ -67,6 +74,16 @@ impl NavidromeApp {
             .relative()
             .w_full()
             .overflow_hidden()
+            .when(scope == SongScope::PlaylistDetail, |this| {
+                this.track_focus(&self.playlist_list_focus)
+                    .tab_index(0)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            this.playlist_list_focus.focus(window, cx);
+                        }),
+                    )
+            })
             .when(fill, |this| this.flex_1().min_h_0())
             .when(self.multi_selection_count(scope) > 0, |this| {
                 this.child(self.render_multi_action_bar(scope, cx))
@@ -110,6 +127,21 @@ impl NavidromeApp {
             })
             .child(list)
             .child(Scrollbar::vertical(&handle))
+            .when(
+                scope == SongScope::PlaylistDetail
+                    && (!self.state.playlists.search.ready()
+                        || (self.state.playlists.search.filtered()
+                            && !self.state.playlists.detail_ready())),
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .occlude()
+                            .bg(palette(cx).page.opacity(0.45)),
+                    )
+                },
+            )
             .into_any_element()
     }
 

@@ -210,6 +210,23 @@ JavaScript runtime.
 - Create, rename, and delete Navidrome playlists; add songs or whole albums,
   save the current queue as a playlist, and move or remove individual entries.
   Duplicate tracks keep their order; shared playlists owned by others are read-only.
+- Local search within playlist details and Bilibili favorite folders: type a
+  title, artist or album, or an uploader/video/part/collection name for Bilibili.
+  Search runs locally after the entire list has loaded, preserves original
+  order and duplicate entries, and shows matching/total track counts. The
+  search icon beside Refresh or `Ctrl+F` expands and focuses the input to
+  the icon's right in the same toolbar, with the icon staying fixed. Icon,
+  editor and close button share one capsule surface matching the full-library
+  search style, instead of a separate boxed input beside the icon. Closing
+  retracts the capsule and clears the filter. Matching counts use the existing
+  status row; focus highlights the capsule's inset rounded border, not an
+  outer ring that the reveal would clip.
+  Escape clears the query first, then collapses search and focuses the list.
+  Double-clicking a result starts at its original
+  position in the complete playlist; batch actions use only selected results,
+  while Play all/Append all continue to use the whole playlist. Filtered menus
+  remove the exact original entry; clear search before reordering. Queries
+  stay in memory for the current playlist and reset on playlist/source changes.
 - Artist and album names are clickable links everywhere they appear: song
   rows (artist column and album subtitle), the player bar, the now-playing
   header, album cards, and the album detail header all navigate to the

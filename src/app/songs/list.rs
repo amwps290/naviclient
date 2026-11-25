@@ -8,6 +8,10 @@ use crate::models::{QueueEntry, Song};
 #[derive(Clone, Copy)]
 pub(in crate::app) enum SongList<'a> {
     Songs(&'a [Song]),
+    Indexed {
+        songs: &'a [Song],
+        indices: &'a [usize],
+    },
     Queue(&'a [QueueEntry]),
 }
 
@@ -15,6 +19,7 @@ impl<'a> SongList<'a> {
     pub(in crate::app) fn len(self) -> usize {
         match self {
             Self::Songs(songs) => songs.len(),
+            Self::Indexed { indices, .. } => indices.len(),
             Self::Queue(entries) => entries.len(),
         }
     }
@@ -26,8 +31,17 @@ impl<'a> SongList<'a> {
     pub(in crate::app) fn get(self, index: usize) -> Option<&'a Song> {
         match self {
             Self::Songs(songs) => songs.get(index),
+            Self::Indexed { songs, indices } => songs.get(*indices.get(index)?),
             Self::Queue(entries) => entries.get(index).map(|entry| &entry.song),
         }
+    }
+
+    pub(in crate::app) fn original_index(self, index: usize) -> Option<usize> {
+        self.get(index)?;
+        Some(match self {
+            Self::Indexed { indices, .. } => indices[index],
+            _ => index,
+        })
     }
 
     pub(in crate::app) fn last(self) -> Option<&'a Song> {
@@ -37,10 +51,7 @@ impl<'a> SongList<'a> {
     pub(in crate::app) fn iter(
         self,
     ) -> impl DoubleEndedIterator<Item = &'a Song> + ExactSizeIterator {
-        (0..self.len()).map(move |index| match self {
-            Self::Songs(songs) => &songs[index],
-            Self::Queue(entries) => &entries[index].song,
-        })
+        (0..self.len()).map(move |index| self.get(index).expect("valid song projection"))
     }
 
     pub(in crate::app) fn to_vec(self) -> Vec<Song> {
@@ -54,6 +65,7 @@ impl std::ops::Index<usize> for SongList<'_> {
     fn index(&self, index: usize) -> &Self::Output {
         match self {
             Self::Songs(songs) => &songs[index],
+            Self::Indexed { songs, indices } => &songs[indices[index]],
             Self::Queue(entries) => &entries[index].song,
         }
     }
@@ -107,7 +119,13 @@ impl AppState {
         match scope {
             SongScope::AlbumDetail => Some(SongList::Songs(self.album_details.songs())),
             SongScope::ArtistTop => Some(SongList::Songs(self.artist_details.top_songs())),
-            SongScope::PlaylistDetail => Some(SongList::Songs(self.playlists.songs())),
+            SongScope::PlaylistDetail => Some(match self.playlists.search.indices() {
+                Some(indices) => SongList::Indexed {
+                    songs: self.playlists.songs(),
+                    indices,
+                },
+                None => SongList::Songs(self.playlists.songs()),
+            }),
             SongScope::Favorites => Some(SongList::Songs(&self.favorites.items().songs)),
             SongScope::Search => Some(SongList::Songs(&self.search.results()?.songs)),
             SongScope::Queue => Some(SongList::Queue(self.queue.entries())),
@@ -131,6 +149,7 @@ impl NavidromeApp {
     pub(in crate::app) fn select_song_row(&mut self, scope: SongScope, index: usize) {
         let len = self.state.songs_for_scope(scope).map_or(0, SongList::len);
         self.state.song_selection.select(scope, index, len);
+        self.remember_playlist_row(scope, index);
     }
 
     /// 取得（或首次创建）某作用域歌曲列表的滚动句柄。
@@ -164,6 +183,7 @@ impl NavidromeApp {
         let Some(next) = self.state.song_selection.move_cursor(scope, delta, len) else {
             return;
         };
+        self.remember_playlist_row(scope, next);
         self.song_list_scroll(scope)
             .scroll_to_item(next, gpui_kit::ScrollStrategy::Nearest);
         cx.notify();
@@ -198,6 +218,7 @@ impl NavidromeApp {
     pub(in crate::app) fn toggle_song_multi(&mut self, scope: SongScope, index: usize) {
         let len = self.state.songs_for_scope(scope).map_or(0, SongList::len);
         self.state.song_selection.toggle(scope, index, len);
+        self.remember_playlist_row(scope, index);
     }
 
     /// Shift+点击：从锚点到点击行做范围选择。锚点优先级：已有同作用域
@@ -205,6 +226,17 @@ impl NavidromeApp {
     pub(in crate::app) fn range_song_multi(&mut self, scope: SongScope, index: usize) {
         let len = self.state.songs_for_scope(scope).map_or(0, SongList::len);
         self.state.song_selection.range(scope, index, len);
+        self.remember_playlist_row(scope, index);
+    }
+
+    fn remember_playlist_row(&mut self, scope: SongScope, index: usize) {
+        if scope == SongScope::PlaylistDetail && self.state.playlists.search.filtered() {
+            self.state.playlists.search.located = self
+                .state
+                .playlists
+                .search
+                .original_index(index, self.state.playlists.songs().len());
+        }
     }
 
     /// Ctrl+A：全选当前作用域的全部歌曲。

@@ -40,7 +40,12 @@ impl NavidromeApp {
             .media_key()
             .map(|key| key.cache_key())
             .unwrap_or_else(|| song.id.clone());
-        let key = item_instance_key(scope.id(), "song", index, &media_id);
+        let original_index = self
+            .state
+            .songs_for_scope(scope)
+            .and_then(|songs| songs.original_index(index))
+            .unwrap_or(index);
+        let key = item_instance_key(scope.id(), "song", original_index, &media_id);
         let menu_app = cx.entity().downgrade();
         let button_menu_app = menu_app.clone();
         let current_song = self
@@ -118,7 +123,7 @@ impl NavidromeApp {
                 } else {
                     p.text_muted
                 })
-                .child((index + 1).to_string())
+                .child((original_index + 1).to_string())
                 .into_any_element()
         };
         row.child(

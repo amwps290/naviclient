@@ -177,6 +177,11 @@ impl NavidromeApp {
             playlist_ui: PlaylistUi::default(),
             import_ui: ImportUi::default(),
             search_input: search_input.clone(),
+            playlist_search_input: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(t!("Search song titles, artists or albums…"))
+            }),
+            playlist_list_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             server_input,
             username_input,
             password_input,
@@ -214,6 +219,7 @@ impl NavidromeApp {
         app.state.playback_modes = app.config.playback_modes;
         app.subscribe_lyrics_inputs(cx);
         app.subscribe_log_search(cx);
+        app.subscribe_playlist_search(cx);
         // 封面磁盘缓存总量控制：超限时从最旧开始清理（后台线程，不阻塞启动）。
         {
             let prune_config = app.config.clone();

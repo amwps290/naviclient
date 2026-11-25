@@ -1,7 +1,6 @@
 //! Resolve visible row events before applying selection or queue operations.
 
 use super::scope::SongScope;
-use crate::app::library::requests::LibraryRequest;
 use crate::app::shell::state::AppState;
 use crate::app::shell::view_helpers::SongRowClickAction;
 use crate::app::NavidromeApp;
@@ -20,7 +19,7 @@ pub(in crate::app) struct SongRowTarget {
     scope: SongScope,
     position: RowPosition,
     source: Option<[u8; 16]>,
-    playlist_snapshot: Option<LibraryRequest>,
+    playlist_snapshot: Option<crate::app::PlaylistSearchRequest>,
 }
 
 impl SongRowTarget {
@@ -32,7 +31,7 @@ impl SongRowTarget {
         let song = state.songs_for_scope(scope)?.get(index)?;
         let source = song.source.as_ref().map(|source| source.fingerprint());
         let playlist_snapshot = if scope == SongScope::PlaylistDetail {
-            Some(state.playlists.snapshot()?)
+            Some(state.playlists.search_identity()?)
         } else {
             None
         };
@@ -51,7 +50,9 @@ impl SongRowTarget {
 
     pub(in crate::app) fn resolve(self, state: &AppState) -> Option<(SongScope, usize)> {
         if self.scope == SongScope::PlaylistDetail
-            && self.playlist_snapshot != state.playlists.snapshot()
+            && (self.playlist_snapshot != state.playlists.search_identity()
+                || !state.playlists.search.ready()
+                || (state.playlists.search.filtered() && !state.playlists.detail_ready()))
         {
             return None;
         }
