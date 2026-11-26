@@ -29,6 +29,12 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let collapsed = layout.sidebar_collapsed;
+        let footer = self.render_sidebar_footer(
+            collapsed,
+            layout.auto_collapsed,
+            layout.player_clearance(),
+            cx,
+        );
         if self.browsing_bilibili() {
             return bilibili_sidebar_content(
                 layout,
@@ -49,7 +55,7 @@ impl NavidromeApp {
                         |this| this.child(self.nav_button(View::Search, None, collapsed, cx)),
                     )
                     .into_any_element(),
-                self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx),
+                footer,
                 cx,
             );
         }
@@ -101,7 +107,7 @@ impl NavidromeApp {
                 cx,
             ))
             .child(self.nav_button(View::Search, None, collapsed, cx))
-            .child(self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx))
+            .child(footer)
             .into_any_element()
     }
 
@@ -234,6 +240,7 @@ impl NavidromeApp {
         &self,
         collapsed: bool,
         auto_collapsed: bool,
+        bottom_clearance: f32,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let p = palette(cx);
@@ -267,6 +274,10 @@ impl NavidromeApp {
         if collapsed {
             return v_flex()
                 .mt_auto()
+                .mb(px(bottom_clearance))
+                .pt_2()
+                .border_t_1()
+                .border_color(p.border.opacity(0.45))
                 .w_full()
                 .items_center()
                 .gap_1()
@@ -298,6 +309,10 @@ impl NavidromeApp {
 
         h_flex()
             .mt_auto()
+            .mb(px(bottom_clearance))
+            .pt_2()
+            .border_t_1()
+            .border_color(p.border.opacity(0.45))
             .w_full()
             .items_center()
             .gap_1()

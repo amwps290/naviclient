@@ -25,6 +25,18 @@ pub(in crate::app) struct ShellLayout {
     pub(in crate::app) content_width: f32,
 }
 
+impl ShellLayout {
+    /// Bottom clearance reserved for the floating translucent player dock.
+    pub(in crate::app) fn player_clearance(&self) -> f32 {
+        let height = if self.compact {
+            tokens::PLAYER_COMPACT_HEIGHT
+        } else {
+            tokens::PLAYER_HEIGHT
+        };
+        height + self.player_margin * 2.0
+    }
+}
+
 fn shell_layout(input: ShellInput) -> ShellLayout {
     let compact = compact_window_layout(input.viewport_width);
     let sidebar_collapsed = input.sidebar_preference_collapsed || compact;

@@ -34,6 +34,56 @@ pub(in crate::app) fn raised_surface<E: Styled>(element: E, radius: f32, cx: &Ap
     }
 }
 
+/// Translucent floating glass surface for the player dock, popovers and overlays.
+/// Optionally blends a whisper of the active cover color while preserving text contrast.
+pub(in crate::app) fn translucent_surface<E: Styled>(
+    element: E,
+    radius: f32,
+    tint: Option<Hsla>,
+    cx: &App,
+) -> E {
+    let p = palette(cx);
+    let dark = cx.theme().is_dark();
+    let base = match tint {
+        Some(accent) => p.raised.blend(
+            hsla(
+                accent.h,
+                accent.s.min(0.45),
+                if dark { 0.40 } else { 0.62 },
+                1.0,
+            )
+            .opacity(if dark { 0.11 } else { 0.07 }),
+        ),
+        None => p.raised,
+    };
+    let element = element
+        .bg(base.opacity(if dark { 0.82 } else { 0.86 }))
+        .rounded(px(radius))
+        .border_1();
+    if dark {
+        element
+            .border_color(hsla(0.0, 0.0, 1.0, 0.10))
+            .shadow(vec![box_shadow(
+                px(0.0),
+                px(10.0),
+                px(28.0),
+                px(-2.0),
+                hsla(0.0, 0.0, 0.0, 0.45),
+            )])
+    } else {
+        element.border_color(p.border.opacity(0.85)).shadow(vec![
+            box_shadow(px(0.0), px(1.0), px(2.0), px(0.0), shadow_color(cx, 0.06)),
+            box_shadow(
+                px(0.0),
+                px(10.0),
+                px(28.0),
+                px(-2.0),
+                shadow_color(cx, 0.12),
+            ),
+        ])
+    }
+}
+
 pub(in crate::app) fn cover_shadow(hovered: bool, cx: &App) -> Vec<BoxShadow> {
     let color = if cx.theme().is_dark() {
         hsla(0.0, 0.0, 0.0, if hovered { 0.6 } else { 0.4 })

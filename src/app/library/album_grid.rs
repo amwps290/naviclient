@@ -44,6 +44,10 @@ impl NavidromeApp {
         let p = palette(cx);
         let key = item_instance_key(scope, "album", index, &album.id);
         let hovered = self.state.hovered_item.as_deref() == Some(key.as_str());
+        let starred = self
+            .state
+            .favorites
+            .is_starred(&FavoriteKey::new(FavoriteKind::Album, &album.id));
         let album_for_click = album.clone();
         let album_for_play = album.clone();
         let album_for_cover = album.clone();
@@ -73,15 +77,18 @@ impl NavidromeApp {
                         tokens::radius::COVER,
                         cover_shadow(hovered, cx),
                     ))
-                    .child(
-                        div()
-                            .absolute()
-                            .top_2()
-                            .right_2()
-                            .rounded_full()
-                            .bg(p.raised.opacity(0.72))
-                            .child(self.favorite_button(FavoriteKind::Album, &album.id, cx)),
-                    )
+                    .when(hovered || starred, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top_2()
+                                .right_2()
+                                .rounded_full()
+                                .bg(p.raised.opacity(0.84))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .child(self.favorite_button(FavoriteKind::Album, &album.id, cx)),
+                        )
+                    })
                     .when(hovered, |this| {
                         this.child(
                             div()

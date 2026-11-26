@@ -90,17 +90,30 @@ impl Render for NavidromeApp {
                             this.child(self.render_queue_drawer(
                                 layout.queue_drawer_width,
                                 true,
+                                layout.player_clearance(),
                                 cx,
                             ))
                         })
                         .when(settings_open, |this| {
-                            this.child(self.render_settings_overlay(layout.auto_collapsed, cx))
-                        }),
+                            this.child(self.render_settings_overlay(
+                                layout.auto_collapsed,
+                                layout.player_clearance(),
+                                cx,
+                            ))
+                        })
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .child(self.render_player(window, cx)),
+                        ),
                 )
-                .child(self.render_player(window, cx))
                 .into_any_element();
         }
 
+        let player_clearance = layout.player_clearance();
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -118,31 +131,63 @@ impl Render for NavidromeApp {
                     .child(self.render_sidebar(&layout, cx))
                     .child(
                         div()
-                            .id("content")
+                            .relative()
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.content_scroll_handle)
-                            .on_scroll_wheel(cx.listener(|this, _, _, _| {
-                                this.maybe_load_more_content();
-                            }))
-                            .when(!self.state.view.has_detail_hero(), |this| {
-                                this.p(px(layout.page_padding))
-                            })
-                            .child(self.render_content(window, cx)),
+                            .child(
+                                div()
+                                    .id("content")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.content_scroll_handle)
+                                    .on_scroll_wheel(cx.listener(|this, _, _, _| {
+                                        this.maybe_load_more_content();
+                                    }))
+                                    .when(!self.state.view.has_detail_hero(), |this| {
+                                        this.px(px(layout.page_padding))
+                                            .pt(px(layout.page_padding))
+                                            .pb(px(layout.page_padding + player_clearance))
+                                    })
+                                    .child(self.render_content(window, cx)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .top_0()
+                                    .bottom_0()
+                                    .w(px(1.0))
+                                    .bg(palette(cx).border.opacity(0.45)),
+                            ),
                     )
                     .when(self.state.queue_drawer_open, |row| {
                         // 普通浏览页使用真正的分栏，让专辑网格和歌曲列表
                         // 获得抽屉打开后的实际宽度并自然重排，而不是被覆盖裁切。
-                        row.child(self.render_queue_drawer(layout.queue_drawer_width, false, cx))
+                        row.child(self.render_queue_drawer(
+                            layout.queue_drawer_width,
+                            false,
+                            player_clearance,
+                            cx,
+                        ))
                     })
                     // 设置为内容区覆盖层：点击背景关闭，标题栏与播放条保持可操作。
                     .when(settings_open, |row| {
-                        row.child(self.render_settings_overlay(layout.auto_collapsed, cx))
-                    }),
+                        row.child(self.render_settings_overlay(
+                            layout.auto_collapsed,
+                            player_clearance,
+                            cx,
+                        ))
+                    })
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .child(self.render_player(window, cx)),
+                    ),
             )
-            .child(self.render_player(window, cx))
             .into_any_element()
     }
 }

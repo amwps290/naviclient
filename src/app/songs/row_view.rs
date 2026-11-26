@@ -89,8 +89,19 @@ impl NavidromeApp {
             .rounded(px(tokens::radius::ROW))
             .when(highlighted, |this| this.bg(p.brand_soft))
             .when(!highlighted, |this| this.hover(|style| style.bg(p.sunken)))
-            // 当前播放歌曲添加左侧品牌色强调条
-            .when(current, |this| this.border_l_4().border_color(p.brand))
+            // 当前播放歌曲使用内收圆角强调竖条，不破坏行容器圆角。
+            .when(current, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(3.0))
+                        .top(px(10.0))
+                        .bottom(px(10.0))
+                        .w(px(3.0))
+                        .rounded_full()
+                        .bg(p.brand),
+                )
+            })
             .cursor_pointer();
         let position_indicator = if multi_selected {
             div()

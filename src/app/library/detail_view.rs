@@ -17,7 +17,9 @@ impl NavidromeApp {
         let popular_disabled = self.state.artist_details.top_songs_loading() || popular_count == 0;
         let artist_for_play_all = artist.clone();
         let artist_radio_loading = self.artist_radio_loading(&artist.id);
-        let padding = self.shell_layout(window).page_padding;
+        let layout = self.shell_layout(window);
+        let padding = layout.page_padding;
+        let player_clearance = layout.player_clearance();
         let p = palette(cx);
         let hero = self.render_detail_hero(
             DetailHero {
@@ -139,7 +141,7 @@ impl NavidromeApp {
             .child(
                 v_flex()
                     .px(px(padding))
-                    .pb(px(padding))
+                    .pb(px(padding + player_clearance))
                     .gap(px(tokens::SECTION_GAP))
                     .child(shelf_section(
                         section_title(t!("Popular songs"), cx).into_any_element(),
@@ -175,7 +177,9 @@ impl NavidromeApp {
         };
         let actions_disabled =
             self.state.album_details.loading() || self.state.album_details.songs().is_empty();
-        let padding = self.shell_layout(window).page_padding;
+        let layout = self.shell_layout(window);
+        let padding = layout.page_padding;
+        let player_clearance = layout.player_clearance();
         let hero = self.render_detail_hero(
             DetailHero {
                 kind: t!("Album").into(),
@@ -255,7 +259,7 @@ impl NavidromeApp {
                     .flex_1()
                     .min_h_0()
                     .px(px(padding))
-                    .pb(px(padding))
+                    .pb(px(player_clearance))
                     .gap_3()
                     .when(self.state.album_details.failed(), |this| {
                         this.child(
@@ -290,7 +294,9 @@ impl NavidromeApp {
             read_only || self.state.playlists.editing() || self.state.playlists.detail_loading();
         let playback_disabled =
             self.state.playlists.songs().is_empty() || !self.state.playlists.detail_ready();
-        let padding = self.shell_layout(window).page_padding;
+        let layout = self.shell_layout(window);
+        let padding = layout.page_padding;
+        let player_clearance = layout.player_clearance();
         let hero = self.render_detail_hero(
             DetailHero {
                 kind: if bilibili {
@@ -387,7 +393,7 @@ impl NavidromeApp {
                     .flex_1()
                     .min_h_0()
                     .px(px(padding))
-                    .pb(px(padding))
+                    .pb(px(player_clearance))
                     .gap_3()
                     .child(
                         h_flex()

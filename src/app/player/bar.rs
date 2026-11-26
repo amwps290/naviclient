@@ -18,7 +18,8 @@ impl NavidromeApp {
         // Keep the technical chip on wider windows; details are also available
         // on the now-playing page.
         let show_technical_chip = viewport_width >= 1080.0;
-        raised_surface(
+        let cover_tint = self.now_playing_cover_palette().map(|(base, _)| base);
+        translucent_surface(
             h_flex()
                 .flex_none()
                 .h(px(if compact_player {
@@ -32,8 +33,10 @@ impl NavidromeApp {
                 .when(!compact_player, |this| this.px_3())
                 .gap(if compact_player { px(8.0) } else { px(16.0) })
                 .items_center()
-                .justify_between(),
+                .justify_between()
+                .occlude(),
             tokens::radius::LARGE,
+            cover_tint,
             cx,
         )
         .child(self.render_player_track(compact_player, cx))
@@ -96,7 +99,7 @@ impl NavidromeApp {
                     song,
                     player_cover_size,
                     tokens::radius::COVER,
-                    Vec::new(),
+                    cover_shadow(false, cx),
                 ))
                 .child(
                     v_flex()
@@ -263,15 +266,18 @@ fn technical_info_chip(
     div()
         .id(id)
         .h(px(20.0))
-        .max_w(px(64.0))
-        .px_1p5()
+        .max_w(px(68.0))
+        .px_2()
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(tokens::radius::CONTROL))
-        .bg(p.sunken)
-        .text_size(px(tokens::CAPTION))
-        .text_color(p.text_secondary)
+        .rounded_full()
+        .bg(p.brand_soft)
+        .border_1()
+        .border_color(p.brand.opacity(0.18))
+        .text_size(px(11.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(p.brand)
         .truncate()
         .child(label)
         .into_any_element()

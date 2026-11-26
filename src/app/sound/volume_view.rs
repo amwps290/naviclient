@@ -37,7 +37,7 @@ impl NavidromeApp {
             }))
             .when(self.volume.panel_open(), |this| {
                 this.child(
-                    raised_surface(
+                    translucent_surface(
                         v_flex()
                             .id("player-volume-panel")
                             .absolute()
@@ -49,6 +49,7 @@ impl NavidromeApp {
                             .gap_1()
                             .text_color(cx.theme().popover_foreground),
                         tokens::radius::COVER,
+                        self.now_playing_cover_palette().map(|(base, _)| base),
                         cx,
                     )
                     .capture_any_mouse_down(cx.listener(|this, _, _, cx| {

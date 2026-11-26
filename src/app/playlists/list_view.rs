@@ -20,6 +20,9 @@ impl NavidromeApp {
                 .iter()
                 .map(|playlist| {
                     let playlist_for_click = playlist.clone();
+                    let hover_key = format!("playlist-row-{}", playlist.id);
+                    let hovered = self.state.hovered_item.as_deref() == Some(hover_key.as_str());
+                    let hover_key_for_cb = hover_key.clone();
                     let shared_owner =
                         (!crate::playlist::can_edit(playlist, &self.config.username))
                             .then_some(playlist.owner.as_deref())
@@ -38,15 +41,18 @@ impl NavidromeApp {
                         )
                     };
                     v_flex()
-                        .id(SharedString::from(format!("playlist-row-{}", playlist.id)))
+                        .id(SharedString::from(hover_key))
                         .min_w_0()
                         .gap_1()
                         .cursor_pointer()
+                        .on_hover(cx.listener(move |this, hovering, _, cx| {
+                            this.set_hovered(&hover_key_for_cb, *hovering, cx);
+                        }))
                         .child(div().mb_1().child(self.render_cover_styled(
                             playlist.cover_art.as_deref(),
                             columns.width,
                             tokens::radius::COVER,
-                            cover_shadow(false, cx),
+                            cover_shadow(hovered, cx),
                         )))
                         .child(
                             div()

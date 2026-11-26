@@ -205,11 +205,26 @@ impl NavidromeApp {
                 .into_any_element()
         };
 
+        let layout = self.shell_layout(window);
+        let player_clearance = layout.player_clearance();
+        let halo_color = self
+            .now_playing_cover_palette()
+            .map(|(_, accent)| {
+                hsla(
+                    accent.h,
+                    accent.s.min(0.50),
+                    if cx.theme().is_dark() { 0.48 } else { 0.60 },
+                    if cx.theme().is_dark() { 0.16 } else { 0.14 },
+                )
+            })
+            .unwrap_or_else(|| p.brand.opacity(0.10));
+
         h_flex()
             .size_full()
             .min_h_0()
             .px_8()
-            .py_6()
+            .pt_6()
+            .pb(px(24.0 + player_clearance))
             .gap_8()
             .items_center()
             .child(
@@ -218,7 +233,35 @@ impl NavidromeApp {
                     .flex_none()
                     .items_center()
                     .gap_4()
-                    .child(self.render_vinyl_record(cover_size, cx))
+                    .child(
+                        div()
+                            .relative()
+                            .size(px(cover_size))
+                            .flex_none()
+                            .rounded_full()
+                            .shadow(vec![
+                                box_shadow(
+                                    px(0.0),
+                                    px(0.0),
+                                    px(cover_size * 0.22),
+                                    px(cover_size * 0.015),
+                                    halo_color,
+                                ),
+                                box_shadow(
+                                    px(0.0),
+                                    px(18.0),
+                                    px(44.0),
+                                    px(-8.0),
+                                    hsla(
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        if cx.theme().is_dark() { 0.48 } else { 0.18 },
+                                    ),
+                                ),
+                            ])
+                            .child(self.render_vinyl_record(cover_size, cx)),
+                    )
                     .child(
                         v_flex()
                             .items_center()

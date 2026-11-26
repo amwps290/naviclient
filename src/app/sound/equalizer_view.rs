@@ -47,11 +47,13 @@ impl NavidromeApp {
                             .child(h_flex().gap_1().children(
                                 [(true, t!("On")), (false, t!("Off"))].map(|(enable, label)| {
                                     let app = app.clone();
+                                    let active = enabled == enable;
                                     Button::new(SharedString::from(format!("eq-popover-{enable}")))
                                         .label(label)
+                                        .custom(soft_toggle_style(active, popover_cx))
                                         .small()
-                                        .ghost()
-                                        .selected(enabled == enable)
+                                        .rounded_full()
+                                        .selected(active)
                                         .on_click(move |_, _, cx| {
                                             let _ = app.update(cx, |this, cx| {
                                                 this.set_eq_enabled(enable, cx);
@@ -65,11 +67,13 @@ impl NavidromeApp {
                         |(name, preset_gains)| {
                             let preset_gains = *preset_gains;
                             let app = app.clone();
+                            let active = enabled && gains == preset_gains;
                             Button::new(SharedString::from(format!("eq-popover-preset-{name}")))
                                 .label(EqSettings::preset_label(name))
+                                .custom(soft_toggle_style(active, popover_cx))
                                 .small()
-                                .ghost()
-                                .selected(enabled && gains == preset_gains)
+                                .rounded_full()
+                                .selected(active)
                                 .on_click(move |_, window, cx| {
                                     let _ = app.update(cx, |this, cx| {
                                         this.set_eq_preset(preset_gains, window, cx);
@@ -98,7 +102,14 @@ impl NavidromeApp {
                                             .text_color(if enabled { emphasis } else { muted })
                                             .child(format!("{:+.0}", gains[band])),
                                     )
-                                    .child(Slider::new(slider).vertical().h(px(96.0)))
+                                    .child(
+                                        Slider::new(slider)
+                                            .vertical()
+                                            .h(px(96.0))
+                                            .bg(emphasis)
+                                            .text_color(emphasis)
+                                            .rounded_full(),
+                                    )
                                     .child(div().text_xs().text_color(muted).child(label))
                             })),
                     )

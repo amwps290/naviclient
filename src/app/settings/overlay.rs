@@ -8,8 +8,10 @@ impl NavidromeApp {
     pub(in crate::app) fn render_settings_overlay(
         &self,
         compact: bool,
+        player_clearance: f32,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let p = palette(cx);
         let settings_content = div()
             .id("settings-content")
             .flex_1()
@@ -27,7 +29,12 @@ impl NavidromeApp {
                 .flex_1()
                 .min_h_0()
                 .items_stretch()
-                .child(self.render_settings_navigation(true, cx))
+                .child(
+                    div()
+                        .border_b_1()
+                        .border_color(p.border.opacity(0.55))
+                        .child(self.render_settings_navigation(true, cx)),
+                )
                 .child(settings_content)
                 .into_any_element()
         } else {
@@ -36,7 +43,13 @@ impl NavidromeApp {
                 .flex_1()
                 .min_h_0()
                 .items_stretch()
-                .child(self.render_settings_navigation(false, cx))
+                .child(
+                    div()
+                        .h_full()
+                        .border_r_1()
+                        .border_color(p.border.opacity(0.55))
+                        .child(self.render_settings_navigation(false, cx)),
+                )
                 .child(settings_content)
                 .into_any_element()
         };
@@ -45,6 +58,7 @@ impl NavidromeApp {
             .id("settings-backdrop")
             .absolute()
             .inset_0()
+            .pb(px(player_clearance))
             .occlude() // 遮罩挡住背后所有命中框：后方页面不再响应滚轮/悬停
             .flex()
             .justify_center()
@@ -67,7 +81,7 @@ impl NavidromeApp {
                         .h(px(650.0))
                         .max_w(relative(if compact { 0.96 } else { 0.94 }))
                         .max_h(relative(if compact { 0.94 } else { 0.88 }))
-                        .mt(px(if compact { 16.0 } else { 48.0 }))
+                        .mt(px(if compact { 16.0 } else { 40.0 }))
                         .overflow_hidden(),
                     tokens::radius::LARGE,
                     cx,
@@ -81,6 +95,8 @@ impl NavidromeApp {
                         .flex_none()
                         .when(compact, |this| this.px_4().py_2())
                         .when(!compact, |this| this.px_6().py_4())
+                        .border_b_1()
+                        .border_color(p.border.opacity(0.55))
                         .justify_between()
                         .items_center()
                         .child(section_title(t!("Settings"), cx))
