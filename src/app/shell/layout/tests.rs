@@ -5,7 +5,6 @@ fn input(width: f32) -> ShellInput {
         viewport_width: width,
         window_padding: 0.0,
         sidebar_preference_collapsed: false,
-        queue_open: false,
     }
 }
 
@@ -49,12 +48,11 @@ fn collapsed_preference_is_not_auto_collapse() {
 }
 
 #[test]
-fn open_queue_drawer_takes_width_and_margin_from_content() {
-    let layout = shell_layout(ShellInput {
-        queue_open: true,
-        ..input(1280.0)
-    });
-    assert_eq!(layout.content_width, 1280.0 - 200.0 - 380.0 - 12.0 - 64.0);
+fn player_clearance_accounts_for_dock_height_and_margins() {
+    let regular = shell_layout(input(1280.0));
+    assert_eq!(regular.player_clearance(), 72.0 + 12.0 * 2.0);
+    let compact = shell_layout(input(1039.0));
+    assert_eq!(compact.player_clearance(), 64.0 + 8.0 * 2.0);
 }
 
 #[test]

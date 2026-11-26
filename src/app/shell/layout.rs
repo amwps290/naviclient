@@ -10,7 +10,6 @@ struct ShellInput {
     viewport_width: f32,
     window_padding: f32,
     sidebar_preference_collapsed: bool,
-    queue_open: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,14 +54,8 @@ fn shell_layout(input: ShellInput) -> ShellLayout {
     } else {
         tokens::PAGE_PADDING
     };
-    let drawer = if input.queue_open {
-        queue_drawer_width + tokens::QUEUE_DRAWER_MARGIN
-    } else {
-        0.0
-    };
     let content_width =
-        (input.viewport_width - input.window_padding - sidebar_width - drawer - page_padding * 2.0)
-            .max(0.0);
+        (input.viewport_width - input.window_padding - sidebar_width - page_padding * 2.0).max(0.0);
     ShellLayout {
         compact,
         sidebar_collapsed,
@@ -86,7 +79,6 @@ impl NavidromeApp {
             viewport_width: f32::from(window.viewport_size().width),
             window_padding: f32::from(paddings.left + paddings.right),
             sidebar_preference_collapsed: self.config.sidebar_collapsed,
-            queue_open: self.state.queue_drawer_open,
         })
     }
 

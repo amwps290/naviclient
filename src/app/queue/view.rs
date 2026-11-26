@@ -8,7 +8,6 @@ impl NavidromeApp {
     pub(in crate::app) fn render_queue_drawer(
         &self,
         width: f32,
-        overlay: bool,
         player_clearance: f32,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
@@ -18,72 +17,78 @@ impl NavidromeApp {
             QueueDrawerTab::UpNext => self.state.queue.len(),
             QueueDrawerTab::History => self.state.listening.recent_songs().len(),
         };
+        let dim = if cx.theme().is_dark() { 0.22 } else { 0.08 };
 
-        let container = v_flex()
-            .id("queue-drawer")
-            .w(px(width))
-            .min_w_0()
-            .flex_none()
-            .when(overlay, |this| {
-                this.absolute()
-                    .top_0()
-                    .right(px(tokens::QUEUE_DRAWER_MARGIN))
-                    .bottom(px(player_clearance))
-            })
-            .when(!overlay, |this| {
-                this.mr(px(tokens::QUEUE_DRAWER_MARGIN))
-                    .mb(px(player_clearance))
-            })
+        let drawer = translucent_surface(
+            v_flex()
+                .id("queue-drawer")
+                .w(px(width))
+                .h_full()
+                .min_w_0()
+                .flex_none()
+                .occlude()
+                .overflow_hidden(),
+            tokens::radius::LARGE,
+            self.now_playing_cover_palette().map(|(base, _)| base),
+            cx,
+        )
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(self.render_queue_drawer_header(tab, visible_count, cx))
+        .child(self.render_queue_drawer_tabs(tab, cx))
+        .when(tab == QueueDrawerTab::UpNext, |this| {
+            this.child(self.render_auto_continue_control(cx))
+        })
+        .when(
+            tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
+            |this| this.child(self.render_queue_empty_state(false, cx)),
+        )
+        .when(
+            tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
+            |this| {
+                this.child(self.render_queue_action_bar(compact, cx)).child(
+                    v_flex()
+                        .flex_1()
+                        .min_h(px(200.0))
+                        .child(self.render_song_list(SongScope::Queue, cx)),
+                )
+            },
+        )
+        .when(
+            tab == QueueDrawerTab::History && self.state.listening.recent_songs().is_empty(),
+            |this| this.child(self.render_queue_empty_state(true, cx)),
+        )
+        .when(
+            tab == QueueDrawerTab::History && !self.state.listening.recent_songs().is_empty(),
+            |this| {
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .min_h(px(200.0))
+                        .child(self.render_song_list(SongScope::History, cx)),
+                )
+            },
+        );
+
+        div()
+            .id("queue-backdrop")
+            .absolute()
+            .inset_0()
+            .pt(px(tokens::QUEUE_DRAWER_MARGIN))
+            .pr(px(tokens::QUEUE_DRAWER_MARGIN))
+            .pb(px(player_clearance))
             .occlude()
-            .overflow_hidden();
-
-        let shell = if overlay {
-            translucent_surface(
-                container,
-                tokens::radius::LARGE,
-                self.now_playing_cover_palette().map(|(base, _)| base),
-                cx,
+            .flex()
+            .justify_end()
+            .bg(hsla(0.0, 0.0, 0.0, dim))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.state.queue_drawer_open = false;
+                    this.clear_song_multi();
+                    cx.notify();
+                }),
             )
-        } else {
-            raised_surface(container, tokens::radius::LARGE, cx)
-        };
-
-        shell
-            .child(self.render_queue_drawer_header(tab, visible_count, cx))
-            .child(self.render_queue_drawer_tabs(tab, cx))
-            .when(tab == QueueDrawerTab::UpNext, |this| {
-                this.child(self.render_auto_continue_control(cx))
-            })
-            .when(
-                tab == QueueDrawerTab::UpNext && self.state.queue.is_empty(),
-                |this| this.child(self.render_queue_empty_state(false, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::UpNext && !self.state.queue.is_empty(),
-                |this| {
-                    this.child(self.render_queue_action_bar(compact, cx)).child(
-                        v_flex()
-                            .flex_1()
-                            .min_h(px(200.0))
-                            .child(self.render_song_list(SongScope::Queue, cx)),
-                    )
-                },
-            )
-            .when(
-                tab == QueueDrawerTab::History && self.state.listening.recent_songs().is_empty(),
-                |this| this.child(self.render_queue_empty_state(true, cx)),
-            )
-            .when(
-                tab == QueueDrawerTab::History && !self.state.listening.recent_songs().is_empty(),
-                |this| {
-                    this.child(
-                        v_flex()
-                            .flex_1()
-                            .min_h(px(200.0))
-                            .child(self.render_song_list(SongScope::History, cx)),
-                    )
-                },
-            )
+            .child(drawer)
             .into_any_element()
     }
 

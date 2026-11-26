@@ -89,7 +89,6 @@ impl Render for NavidromeApp {
                         .when(self.state.queue_drawer_open, |this| {
                             this.child(self.render_queue_drawer(
                                 layout.queue_drawer_width,
-                                true,
                                 layout.player_clearance(),
                                 cx,
                             ))
@@ -162,11 +161,9 @@ impl Render for NavidromeApp {
                             ),
                     )
                     .when(self.state.queue_drawer_open, |row| {
-                        // 普通浏览页使用真正的分栏，让专辑网格和歌曲列表
-                        // 获得抽屉打开后的实际宽度并自然重排，而不是被覆盖裁切。
+                        // 全站统一为右侧半透明悬浮抽屉：不挤压重排主内容，点击外部自动关闭。
                         row.child(self.render_queue_drawer(
                             layout.queue_drawer_width,
-                            false,
                             player_clearance,
                             cx,
                         ))
