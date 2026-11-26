@@ -1,6 +1,7 @@
 //! The shared cover column grid.
 
 pub(in crate::app) const GRID_MIN_COLUMN: f32 = 160.0;
+pub(in crate::app) const VIDEO_GRID_MIN_COLUMN: f32 = 228.0;
 pub(in crate::app) const GRID_GAP: f32 = 20.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -9,13 +10,22 @@ pub(in crate::app) struct GridColumns {
     pub(in crate::app) width: f32,
 }
 
+fn columns_for_min_width(available: f32, min_column: f32) -> GridColumns {
+    let available = available.max(0.0);
+    let count = (((available + GRID_GAP) / (min_column + GRID_GAP)).floor() as usize).max(2);
+    let width = ((available - (count as f32 - 1.0) * GRID_GAP) / count as f32).max(0.0);
+    GridColumns { count, width }
+}
+
 /// As many columns as fit at the minimum width, stretched to fill exactly, so
 /// every shelf shares its left and right edges with the row above it.
 pub(in crate::app) fn grid_columns(available: f32) -> GridColumns {
-    let available = available.max(0.0);
-    let count = (((available + GRID_GAP) / (GRID_MIN_COLUMN + GRID_GAP)).floor() as usize).max(2);
-    let width = ((available - (count as f32 - 1.0) * GRID_GAP) / count as f32).max(0.0);
-    GridColumns { count, width }
+    columns_for_min_width(available, GRID_MIN_COLUMN)
+}
+
+/// Wider column grid sized for 16:9 video artwork and longer video titles.
+pub(in crate::app) fn video_grid_columns(available: f32) -> GridColumns {
+    columns_for_min_width(available, VIDEO_GRID_MIN_COLUMN)
 }
 
 #[cfg(test)]

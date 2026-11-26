@@ -72,6 +72,47 @@ impl NavidromeApp {
         .into_any_element()
     }
 
+    /// 16:9 视频网格骨架屏：Bilibili 收藏夹与搜索加载期间占位，避免比例跳动。
+    pub(in crate::app) fn render_video_skeleton_grid(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let columns = self.video_content_columns(window);
+        let sunken = palette(cx).sunken;
+        let height = columns.width * 9.0 / 16.0;
+        cover_grid(
+            columns,
+            (0..columns.count * 2).map(|i| {
+                v_flex()
+                    .gap_2()
+                    .child(skeleton_bar(
+                        format!("skel-video-cover-{i}"),
+                        px(columns.width),
+                        px(height),
+                        px(tokens::radius::COVER),
+                        sunken,
+                    ))
+                    .child(skeleton_bar(
+                        format!("skel-video-title-{i}"),
+                        relative(0.8),
+                        px(12.0),
+                        px(6.0),
+                        sunken,
+                    ))
+                    .child(skeleton_bar(
+                        format!("skel-video-meta-{i}"),
+                        relative(0.5),
+                        px(10.0),
+                        px(5.0),
+                        sunken,
+                    ))
+                    .into_any_element()
+            }),
+        )
+        .into_any_element()
+    }
+
     /// 列表行骨架屏：播放列表 / 歌曲列表加载期间占位。
     pub(in crate::app) fn render_list_skeleton(
         &self,

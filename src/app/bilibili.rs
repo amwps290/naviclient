@@ -74,12 +74,16 @@ impl NavidromeApp {
         {
             return;
         }
-        let covers = self
-            .bilibili_recent_tracks()
+        let recent = self.bilibili_recent_tracks();
+        let lead_cover = recent.first().and_then(|song| song.cover_art.clone());
+        let covers = recent
             .iter()
             .filter_map(|song| song.cover_art.clone())
             .collect();
         self.preload_covers(covers);
+        if let Some(cover) = lead_cover {
+            self.ensure_cover(Some(&cover), true);
+        }
     }
 
     pub(in crate::app) fn bilibili_recent_tracks(&self) -> Vec<&Song> {

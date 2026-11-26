@@ -24,7 +24,7 @@ struct SidebarProbe {
 }
 
 impl Render for SidebarProbe {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .w(px(tokens::SIDEBAR_WIDTH))
             .h(px(300.0))
@@ -44,6 +44,7 @@ impl Render for SidebarProbe {
                     .w_full()
                     .h(px(34.0))
                     .into_any_element(),
+                cx,
             ))
     }
 }
@@ -107,7 +108,7 @@ fn expanded_bilibili_sidebar_keeps_long_account_name_on_one_line(cx: &mut TestAp
     let navigation = visual.debug_bounds("sidebar-probe-navigation").unwrap();
     assert_eq!(label.size.width, px(176.0));
     assert!(
-        label.size.height <= px(24.0),
+        label.size.height <= px(32.0),
         "long Chinese/Latin names must be truncated, not wrap"
     );
     assert!(navigation.origin.y >= label.origin.y + label.size.height);

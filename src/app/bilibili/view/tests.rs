@@ -10,19 +10,21 @@ struct LayoutProbe {
 impl Render for LayoutProbe {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let thumbnail = div()
-            .w(px(tokens::HERO_COVER_COMPACT))
-            .h(px(tokens::HERO_COVER_COMPACT * 9.0 / 16.0))
+            .w(px(tokens::VIDEO_HERO_COVER_COMPACT))
+            .h(px(tokens::VIDEO_HERO_COVER_COMPACT * 9.0 / 16.0))
             .into_any_element();
         let continue_card = compact_continue_card(
             "很长的歌曲名Long video title".repeat(20).into(),
             "UP 主名称Long uploader".repeat(10).into(),
             thumbnail,
-            round_play_button("probe-continue", PlayerIcon::Play, t!("Play"), 32.0)
+            round_play_button("probe-continue", PlayerIcon::Play, t!("Play"), 36.0)
                 .debug_selector(|| "probe-continue".into())
                 .on_click(cx.listener(|probe, _, _, cx| {
                     probe.played += 1;
                     cx.notify();
                 })),
+            None,
+            true,
             cx,
         );
         let folders_card = div()
@@ -33,22 +35,25 @@ impl Render for LayoutProbe {
             .into_any_element();
         let recent = recent_play_cover(
             "probe-recent-cover".into(),
-            180.0,
+            228.0,
             div()
-                .w(px(180.0))
-                .h(px(180.0 * 9.0 / 16.0))
+                .w(px(228.0))
+                .h(px(228.0 * 9.0 / 16.0))
                 .into_any_element(),
-            round_play_button(
-                "probe-recent-play",
-                PlayerIcon::Play,
-                t!("Play"),
-                tokens::HOVER_PLAY_BUTTON,
-            )
-            .debug_selector(|| "probe-recent-play".into())
-            .on_click(cx.listener(|probe, _, _, cx| {
-                probe.played += 1;
-                cx.notify();
-            })),
+            Some(
+                round_play_button(
+                    "probe-recent-play",
+                    PlayerIcon::Play,
+                    t!("Play"),
+                    tokens::HOVER_PLAY_BUTTON,
+                )
+                .debug_selector(|| "probe-recent-play".into())
+                .on_click(cx.listener(|probe, _, _, cx| {
+                    probe.played += 1;
+                    cx.notify();
+                })),
+            ),
+            None,
         );
         v_flex()
             .w(px(self.width))
@@ -87,13 +92,13 @@ fn assert_inline_action(visual: &mut VisualTestContext) {
     let row = visual.debug_bounds("bilibili-continue-main").unwrap();
     let title = visual.debug_bounds("bilibili-continue-title").unwrap();
     let action = visual.debug_bounds("probe-continue").unwrap();
-    assert_eq!(action.size.width, px(32.0));
+    assert_eq!(action.size.width, px(36.0));
     assert!(action.size.width < card.size.width / 4.0);
     assert!(action.origin.x > title.origin.x);
     assert!(action.origin.y >= row.origin.y);
     assert!(action.origin.y + action.size.height <= row.origin.y + row.size.height);
     assert!(
-        title.size.height <= px(24.0),
+        title.size.height <= px(28.0),
         "long metadata must truncate rather than force a new action row"
     );
 }

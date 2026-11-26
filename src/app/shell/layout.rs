@@ -3,7 +3,7 @@
 
 use super::view_helpers::compact_window_layout;
 use crate::app::prelude::*;
-use crate::app::style::grid::{grid_columns, GridColumns};
+use crate::app::style::grid::{grid_columns, video_grid_columns, GridColumns};
 
 #[derive(Clone, Copy, Debug)]
 struct ShellInput {
@@ -80,6 +80,10 @@ impl NavidromeApp {
 
     pub(in crate::app) fn content_columns(&self, window: &Window) -> GridColumns {
         grid_columns(self.shell_layout(window).content_width)
+    }
+
+    pub(in crate::app) fn video_content_columns(&self, window: &Window) -> GridColumns {
+        video_grid_columns(self.shell_layout(window).content_width)
     }
 }
 

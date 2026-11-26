@@ -135,6 +135,8 @@ pub(in crate::app) const HERO_CARD_COMPACT_HEIGHT: f32 = 144.0;
 pub(in crate::app) const HOME_FEATURE_PAIR_MIN_WIDTH: f32 = 640.0;
 pub(in crate::app) const HERO_COVER: f32 = 128.0;
 pub(in crate::app) const HERO_COVER_COMPACT: f32 = 96.0;
+pub(in crate::app) const VIDEO_HERO_COVER: f32 = 168.0;
+pub(in crate::app) const VIDEO_HERO_COVER_COMPACT: f32 = 124.0;
 pub(in crate::app) const HOVER_PLAY_BUTTON: f32 = 40.0;
 
 // Search.
@@ -145,6 +147,8 @@ pub(in crate::app) const DETAIL_TITLE: f32 = 40.0;
 pub(in crate::app) const DETAIL_TITLE_COMPACT: f32 = 28.0;
 pub(in crate::app) const DETAIL_COVER: f32 = 220.0;
 pub(in crate::app) const DETAIL_COVER_COMPACT: f32 = 140.0;
+pub(in crate::app) const DETAIL_VIDEO_COVER: f32 = 264.0;
+pub(in crate::app) const DETAIL_VIDEO_COVER_COMPACT: f32 = 192.0;
 pub(in crate::app) const DETAIL_ARTIST_COVER: f32 = 150.0;
 pub(in crate::app) const DETAIL_ARTIST_COVER_COMPACT: f32 = 110.0;
 pub(in crate::app) const DETAIL_PLAY_BUTTON: f32 = 48.0;

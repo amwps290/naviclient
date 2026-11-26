@@ -171,7 +171,7 @@ impl NavidromeApp {
             .video
             .as_ref()
             .and_then(|video| video.cover.clone());
-        self.ensure_cover(cover.as_deref(), false);
+        self.ensure_cover(cover.as_deref(), true);
         if let Some(video) = self.state.bilibili_discovery.video.as_ref() {
             self.bilibili_parts_scroll
                 .scroll_to_item(video.selected, gpui_kit::ScrollStrategy::Nearest);

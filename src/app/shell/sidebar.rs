@@ -50,6 +50,7 @@ impl NavidromeApp {
                     )
                     .into_any_element(),
                 self.render_sidebar_footer(collapsed, layout.auto_collapsed, cx),
+                cx,
             );
         }
         v_flex()
@@ -345,7 +346,9 @@ fn bilibili_sidebar_content(
     source_label: SharedString,
     navigation: gpui_kit::AnyElement,
     footer: gpui_kit::AnyElement,
+    cx: &App,
 ) -> gpui_kit::AnyElement {
+    let p = palette(cx);
     v_flex()
         .id("bilibili-sidebar")
         .debug_selector(|| "bilibili-sidebar".into())
@@ -354,7 +357,7 @@ fn bilibili_sidebar_content(
         .flex_none()
         .when(layout.sidebar_collapsed, |this| this.p_2())
         .when(!layout.sidebar_collapsed, |this| this.p_3())
-        .gap_2()
+        .gap_1()
         .when(!layout.sidebar_collapsed, |this| {
             this.child(
                 div()
@@ -362,7 +365,12 @@ fn bilibili_sidebar_content(
                     .debug_selector(|| "bilibili-source-label".into())
                     .w_full()
                     .min_w_0()
-                    .text_sm()
+                    .px_3()
+                    .pt_1()
+                    .pb_2()
+                    .text_size(px(tokens::CAPTION))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(p.text_muted)
                     .truncate()
                     .child(source_label),
             )

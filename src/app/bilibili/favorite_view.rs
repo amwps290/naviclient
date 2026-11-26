@@ -11,6 +11,7 @@ impl NavidromeApp {
         dialog: Dialog,
         cx: &Context<Self>,
     ) -> Dialog {
+        let p = palette(cx);
         let ui = &self.favorite_ui;
         let removing = matches!(ui.kind, Some(FavoriteDialogKind::Remove { .. }));
         let active_source = self.api.as_ref().map(|api| api.id()) == ui.source.as_ref();
@@ -19,18 +20,34 @@ impl NavidromeApp {
             .w_full()
             .gap_3()
             .child(
-                div()
-                    .text_xs()
-                    .text_color(palette(cx).text_secondary)
-                    .child(ui.source_label.clone()),
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().size(px(6.0)).rounded_full().bg(if active_source {
+                        p.online
+                    } else {
+                        p.text_muted
+                    }))
+                    .child(
+                        div()
+                            .text_size(px(tokens::CAPTION))
+                            .text_color(p.text_secondary)
+                            .child(ui.source_label.clone()),
+                    ),
             )
             .when(ui.loading, |this| {
-                this.child(div().text_sm().child(t!("Loading favorite status…")))
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(p.text_secondary)
+                        .child(t!("Loading favorite status…")),
+                )
             })
             .when(ui.writing, |this| {
                 this.child(
                     div()
                         .text_sm()
+                        .text_color(p.text_secondary)
                         .child(t!("Saving favorite… Do not close the app.")),
                 )
             })
@@ -42,47 +59,74 @@ impl NavidromeApp {
         if let Some(snapshot) = &ui.snapshot {
             content = content.child(
                 div()
-                    .text_sm()
+                    .w_full()
+                    .px_3()
+                    .py_2p5()
+                    .rounded(px(tokens::radius::ROW))
+                    .bg(p.sunken)
+                    .text_size(px(tokens::BODY))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(snapshot.video.title.clone()),
             );
             match &ui.kind {
                 Some(FavoriteDialogKind::Picker) => {
                     if snapshot.folders.is_empty() {
-                        content = content.child(div().text_sm().child(t!(
-                            "No owned favorite folders. Create one in Bilibili first."
-                        )));
+                        content =
+                            content.child(div().text_sm().text_color(p.text_secondary).child(t!(
+                                "No owned favorite folders. Create one in Bilibili first."
+                            )));
                     }
                     content = content.child(
                         v_flex()
                             .id("bilibili-favorite-folder-picker")
                             .max_h(px(280.0))
                             .overflow_y_scroll()
-                            .gap_2()
+                            .gap_1()
                             .children(snapshot.folders.iter().map(|folder| {
                                 let id = folder.id;
                                 h_flex()
                                     .w_full()
+                                    .min_h(px(40.0))
+                                    .px_3()
+                                    .py_1p5()
                                     .gap_3()
                                     .items_center()
+                                    .rounded(px(tokens::radius::ROW))
+                                    .hover(|style| style.bg(p.sunken))
+                                    .child(
+                                        Icon::new(AppIcon::Playlists)
+                                            .with_size(px(15.0))
+                                            .text_color(p.text_muted),
+                                    )
                                     .child(
                                         div()
                                             .flex_1()
                                             .min_w_0()
-                                            .text_sm()
+                                            .text_size(px(tokens::BODY))
                                             .truncate()
                                             .child(folder.title.clone()),
                                     )
                                     .child(if folder.contains == Some(true) {
                                         div()
-                                            .text_xs()
-                                            .text_color(palette(cx).text_secondary)
+                                            .flex_none()
+                                            .px_2p5()
+                                            .py_0p5()
+                                            .rounded_full()
+                                            .bg(p.brand_soft)
+                                            .text_size(px(tokens::CAPTION))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(p.brand)
                                             .child(t!("Already saved"))
                                             .into_any_element()
                                     } else if folder.contains.is_none() {
                                         div()
-                                            .text_xs()
-                                            .text_color(palette(cx).text_secondary)
+                                            .flex_none()
+                                            .px_2p5()
+                                            .py_0p5()
+                                            .rounded_full()
+                                            .bg(p.sunken)
+                                            .text_size(px(tokens::CAPTION))
+                                            .text_color(p.text_muted)
                                             .child(t!("Favorite status unknown"))
                                             .into_any_element()
                                     } else {
@@ -91,6 +135,7 @@ impl NavidromeApp {
                                         )))
                                         .label(t!("Save here"))
                                         .primary()
+                                        .rounded_full()
                                         .small()
                                         .disabled(disabled)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -118,12 +163,20 @@ impl NavidromeApp {
                         .find(|folder| folder.id == *folder_id)
                         .map(|folder| folder.title.as_str())
                         .unwrap_or(folder_name);
-                    content = content.child(div().text_sm().child(t!(
-                        "Remove this video from “%{folder}”? All its parts will leave this folder; the video and current playback are not deleted.", folder = name)));
+                    content = content.child(
+                        div()
+                            .text_sm()
+                            .text_color(p.text_secondary)
+                            .child(t!(
+                                "Remove this video from “%{folder}”? All its parts will leave this folder; the video and current playback are not deleted.",
+                                folder = name
+                            )),
+                    );
                     if snapshot.membership(*folder_id) == Some(false) {
                         content = content.child(
                             div()
                                 .text_sm()
+                                .text_color(p.text_secondary)
                                 .child(t!("This video is no longer in this folder.")),
                         );
                     }
@@ -134,8 +187,12 @@ impl NavidromeApp {
         if let Some(feedback) = ui.feedback {
             content = content.child(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded(px(tokens::radius::CONTROL))
+                    .bg(p.sunken)
                     .text_sm()
-                    .text_color(palette(cx).text_secondary)
+                    .text_color(p.text_secondary)
                     .child(match feedback {
                         FavoriteFeedback::Saved(true) => t!("Favorite saved and verified."),
                         FavoriteFeedback::Saved(false) => {

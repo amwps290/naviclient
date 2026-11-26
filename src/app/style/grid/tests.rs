@@ -35,3 +35,15 @@ fn tiny_and_zero_widths_keep_two_columns_without_negative_sizes() {
     assert_eq!(grid_columns(100.0).width, 40.0);
     assert_eq!(grid_columns(-50.0).width, 0.0);
 }
+
+#[test]
+fn video_grid_uses_wider_columns_for_16_by_9_cards() {
+    for available in [600.0, 800.0, 1016.0, 1600.0] {
+        let square = grid_columns(available);
+        let video = video_grid_columns(available);
+        let used = video.width * video.count as f32 + GRID_GAP * (video.count as f32 - 1.0);
+        assert!((used - available).abs() < 0.01, "{available}");
+        assert!(video.width >= VIDEO_GRID_MIN_COLUMN, "{available}");
+        assert!(video.count <= square.count, "{available}");
+    }
+}

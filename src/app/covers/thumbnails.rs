@@ -253,6 +253,8 @@ pub(in crate::app) struct FilteredVideoCover {
     pub source: Arc<Image>,
     pub cache: Rc<RefCell<CoverThumbnails>>,
     pub width: f32,
+    pub radius: f32,
+    pub shadows: Vec<gpui_kit::BoxShadow>,
 }
 
 impl RenderOnce for FilteredVideoCover {
@@ -266,6 +268,8 @@ impl RenderOnce for FilteredVideoCover {
             .h(px(self.width * 9.0 / 16.0))
             .object_fit(ObjectFit::Cover)
             .flex_none()
+            .rounded(px(self.radius))
+            .shadow(self.shadows)
     }
 }
 

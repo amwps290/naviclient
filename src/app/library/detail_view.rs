@@ -25,6 +25,7 @@ impl NavidromeApp {
                 title: artist.name.clone().into(),
                 cover_id: artist.cover_art.clone(),
                 round_cover: true,
+                wide_cover: false,
                 meta: div()
                     .child(t!(
                         "%{albums} albums · %{songs} songs",
@@ -181,6 +182,7 @@ impl NavidromeApp {
                 title: album.name.clone().into(),
                 cover_id: album.cover_art.clone(),
                 round_cover: false,
+                wide_cover: false,
                 meta: h_flex()
                     .gap_1()
                     .min_w_0()
@@ -300,6 +302,7 @@ impl NavidromeApp {
                 title: playlist.name.clone().into(),
                 cover_id: playlist.cover_art.clone(),
                 round_cover: false,
+                wide_cover: bilibili,
                 meta: div()
                     .child(crate::app::playlists::detail_view::playlist_track_label(
                         &self.state.playlists,
