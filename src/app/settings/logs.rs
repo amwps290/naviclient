@@ -7,6 +7,7 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::ClipboardItem;
 
+use super::components::{settings_card, settings_divider, settings_group, settings_row};
 use crate::app::prelude::*;
 use crate::diagnostics::{sanitize_urls, LogFilter, LogTail, MAX_LOG_ENTRIES};
 
@@ -231,59 +232,272 @@ impl NavidromeApp {
     pub(in crate::app) fn render_log_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
         let filter = self.logs.filter;
-        v_flex().gap_3()
-            .child(h_flex().justify_between().items_center().gap_3()
-                .child(v_flex().flex_1().min_w_0().gap_1()
-                    .child(div().text_sm().child(t!("Write logs to file")))
-                    .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Save logs for later troubleshooting. Changes take effect immediately."))))
-                .child(Switch::new("file-logging-enabled").checked(self.config.log_to_file).accessibility_label(t!("Write logs to file"))
-                    .on_change(cx.listener(|this, checked, _, cx| this.set_file_logging(*checked, cx)))))
-            .child(div().text_xs().text_color(palette(cx).text_secondary).child(config::log_path().display().to_string()))
-            .child(h_flex().flex_wrap().items_center().gap_2()
-                .child(Button::new("refresh-logs").icon(AppIcon::Refresh).label(t!("Refresh logs")).outline().small()
-                    .disabled(self.logs.pending.is_some()).on_click(cx.listener(|this, _, _, cx| {
-                        this.logs.refresh(); cx.notify();
-                    })))
-                .child(Button::new("copy-logs").label(t!("Copy log report")).outline().small()
-                    .disabled(self.logs.updated_at.is_none() || self.logs.dirty)
-                    .on_click(cx.listener(|this, _, _, cx| this.copy_log_report(cx))))
-                .child(Button::new("open-log-directory").label(t!("Open log directory")).outline().small()
-                    .on_click(cx.listener(|this, _, _, cx| match crate::logging::open_directory() {
-                        Ok(directory) => cx.open_with_system(&directory),
-                        Err(error) => this.notify_error(t!("Could not open log directory: %{error}", error = error)),
-                    }))))
-            .child(h_flex().flex_wrap().items_center().gap_3()
-                .child(Button::new("log-filter").label(filter.label()).dropdown_caret(true).outline().small()
-                    .dropdown_menu(move |menu, _, cx| app.update(cx, |_, cx| {
-                        [LogFilter::All, LogFilter::WarningsAndErrors, LogFilter::Playback].into_iter().fold(menu, |menu, choice| {
-                            menu.item(PopupMenuItem::new(choice.label()).checked(choice == filter)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.logs.filter = choice; this.logs.dirty = true; cx.notify();
-                                })))
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
+
+        let file_logging_card = settings_group(
+            None,
+            None,
+            vec![
+                settings_row(
+                    t!("Write logs to file"),
+                    Some(
+                        t!("Save logs for later troubleshooting. Changes take effect immediately.")
+                            .into(),
+                    ),
+                    Switch::new("file-logging-enabled")
+                        .checked(self.config.log_to_file)
+                        .accessibility_label(t!("Write logs to file"))
+                        .on_change(
+                            cx.listener(|this, checked, _, cx| this.set_file_logging(*checked, cx)),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
+                h_flex()
+                    .w_full()
+                    .px_4()
+                    .py_2p5()
+                    .justify_between()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(p.text_muted)
+                            .child(config::log_path().display().to_string()),
+                    )
+                    .child(
+                        Button::new("open-log-directory")
+                            .label(t!("Open log directory"))
+                            .outline()
+                            .compact_action()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                match crate::logging::open_directory() {
+                                    Ok(directory) => cx.open_with_system(&directory),
+                                    Err(error) => this.notify_error(t!(
+                                        "Could not open log directory: %{error}",
+                                        error = error
+                                    )),
+                                }
+                            })),
+                    )
+                    .into_any_element(),
+            ],
+            cx,
+        );
+
+        let snapshot_card = self.logs.updated_at.is_some().then(|| {
+            settings_group(
+                Some(t!("Playback snapshot").into()),
+                None,
+                vec![v_flex()
+                    .w_full()
+                    .px_4()
+                    .py_3()
+                    .gap_1()
+                    .children(self.log_playback_details().into_iter().map(|detail| {
+                        div()
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(p.text_secondary)
+                            .child(detail)
+                    }))
+                    .into_any_element()],
+                cx,
+            )
+        });
+
+        let viewer_card =
+            settings_card(cx)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .px_4()
+                        .py_3()
+                        .flex_wrap()
+                        .justify_between()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    Button::new("log-filter")
+                                        .label(filter.label())
+                                        .dropdown_caret(true)
+                                        .outline()
+                                        .compact_action()
+                                        .dropdown_menu(move |menu, _, cx| {
+                                            app.update(cx, |_, cx| {
+                                                [
+                                                    LogFilter::All,
+                                                    LogFilter::WarningsAndErrors,
+                                                    LogFilter::Playback,
+                                                ]
+                                                .into_iter()
+                                                .fold(menu, |menu, choice| {
+                                                    menu.item(
+                                                        PopupMenuItem::new(choice.label())
+                                                            .checked(choice == filter)
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    this.logs.filter = choice;
+                                                                    this.logs.dirty = true;
+                                                                    cx.notify();
+                                                                },
+                                                            )),
+                                                    )
+                                                })
+                                            })
+                                            .expect("app owns log filter menu")
+                                        }),
+                                )
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .pl_1()
+                                        .child(
+                                            Switch::new("auto-refresh-logs")
+                                                .checked(self.logs.auto_refresh)
+                                                .accessibility_label(t!("Auto refresh"))
+                                                .on_change(cx.listener(|this, checked, _, cx| {
+                                                    this.logs.auto_refresh = *checked;
+                                                    if *checked {
+                                                        this.logs.refresh();
+                                                    }
+                                                    cx.notify();
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(p.text_secondary)
+                                                .child(t!("Auto refresh")),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    Button::new("refresh-logs")
+                                        .icon(AppIcon::Refresh)
+                                        .label(t!("Refresh logs"))
+                                        .outline()
+                                        .compact_action()
+                                        .disabled(self.logs.pending.is_some())
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.logs.refresh();
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("copy-logs")
+                                        .label(t!("Copy log report"))
+                                        .outline()
+                                        .compact_action()
+                                        .disabled(self.logs.updated_at.is_none() || self.logs.dirty)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.copy_log_report(cx)),
+                                        ),
+                                ),
+                        ),
+                )
+                .child(settings_divider(cx))
+                .child(
+                    v_flex()
+                        .w_full()
+                        .p_3()
+                        .gap_2p5()
+                        .child(Input::new(&self.logs.search).w_full().bg(p.sunken))
+                        .child(
+                            h_flex()
+                                .flex_wrap()
+                                .justify_between()
+                                .px_0p5()
+                                .gap_2()
+                                .child(div().text_xs().text_color(p.text_muted).child(t!(
+                                    "%{count} entries · Newest first",
+                                    count = self.logs.matching
+                                )))
+                                .when_some(self.logs.updated_at, |this, time| {
+                                    this.child(div().text_xs().text_color(p.text_muted).child(t!(
+                                        "Updated %{time}",
+                                        time = time.format("%H:%M:%S")
+                                    )))
+                                }),
+                        )
+                        .when_some(self.logs.error.as_ref(), |this, error| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().danger)
+                                    .child(t!("Could not read logs: %{error}", error = error)),
+                            )
                         })
-                    }).expect("app owns log filter menu")))
-                .child(h_flex().items_center().gap_2()
-                    .child(Switch::new("auto-refresh-logs").checked(self.logs.auto_refresh)
-                        .accessibility_label(t!("Auto refresh"))
-                        .on_change(cx.listener(|this, checked, _, cx| {
-                            this.logs.auto_refresh = *checked;
-                            if *checked { this.logs.refresh(); }
-                            cx.notify();
-                        })))
-                    .child(div().text_sm().child(t!("Auto refresh")))))
-            .child(Input::new(&self.logs.search).w_full())
-            .when(self.logs.updated_at.is_some(), |this| this.child(v_flex().gap_1()
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("Playback snapshot")))
-                .children(self.log_playback_details().into_iter().map(|detail| div().text_xs().text_color(palette(cx).text_secondary).child(detail)))))
-            .child(h_flex().flex_wrap().justify_between().gap_2()
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("%{count} entries · Newest first", count = self.logs.matching)))
-                .when_some(self.logs.updated_at, |this, time| this.child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Updated %{time}", time = time.format("%H:%M:%S"))))))
-            .when_some(self.logs.error.as_ref(), |this, error| this.child(div().text_sm().text_color(cx.theme().danger).child(t!("Could not read logs: %{error}", error = error))))
-            .when_some(self.logs.file_error.as_ref(), |this, error| this.child(div().text_sm().text_color(cx.theme().danger).child(t!("Could not write log file: %{error}", error = error))))
-            .child(Textarea::new(&self.logs.text).readonly(true).w_full().h(px(300.0))
-                .text_xs().font_family(cx.theme().mono_font_family.clone()).aria_label(t!("Logs")))
-            .when(self.logs.updated_at.is_some() && self.logs.matching == 0 && self.logs.error.is_none(), |this| this.child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("No matching log entries."))))
-            .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Recent logs only (up to %{count} entries). Pause auto refresh to select text. File output can be disabled without stopping this viewer.", count = MAX_LOG_ENTRIES)))
+                        .when_some(self.logs.file_error.as_ref(), |this, error| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().danger)
+                                    .child(t!("Could not write log file: %{error}", error = error)),
+                            )
+                        })
+                        .child(
+                            div()
+                                .w_full()
+                                .rounded(px(tokens::radius::CONTROL))
+                                .bg(p.sunken)
+                                .border_1()
+                                .border_color(if dark {
+                                    hsla(0.0, 0.0, 1.0, 0.06)
+                                } else {
+                                    p.border.opacity(0.75)
+                                })
+                                .overflow_hidden()
+                                .child(
+                                    Textarea::new(&self.logs.text)
+                                        .readonly(true)
+                                        .w_full()
+                                        .h(px(280.0))
+                                        .text_xs()
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .aria_label(t!("Logs")),
+                                ),
+                        )
+                        .when(
+                            self.logs.updated_at.is_some()
+                                && self.logs.matching == 0
+                                && self.logs.error.is_none(),
+                            |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(p.text_secondary)
+                                        .child(t!("No matching log entries.")),
+                                )
+                            },
+                        ),
+                );
+
+        v_flex()
+            .w_full()
+            .gap_4()
+            .child(file_logging_card)
+            .children(snapshot_card)
+            .child(viewer_card)
+            .child(div().px_1().text_xs().text_color(p.text_muted).child(t!(
+                "Recent logs only (up to %{count} entries). Pause auto refresh to select text. File output can be disabled without stopping this viewer.",
+                count = MAX_LOG_ENTRIES
+            )))
             .into_any_element()
     }
 }

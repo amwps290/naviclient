@@ -474,7 +474,7 @@ impl NavidromeApp {
                     Button::new("retry-bilibili-history")
                         .label(t!("Retry listening history"))
                         .outline()
-                        .small()
+                        .compact_action()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_bilibili_home();
                             cx.notify();

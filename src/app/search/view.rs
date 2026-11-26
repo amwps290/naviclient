@@ -91,7 +91,7 @@ impl NavidromeApp {
                     )))
                     .label(filter.label())
                     .custom(soft_toggle_style(selected, cx))
-                    .small()
+                    .compact_action()
                     .px_4()
                     .rounded(px(tokens::radius::FULL))
                     .selected(selected)

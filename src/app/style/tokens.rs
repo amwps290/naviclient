@@ -163,9 +163,10 @@ pub(in crate::app) const LYRIC: f32 = 20.0;
 pub(in crate::app) const LYRIC_TIMING_STATUS_WIDTH: f32 = 112.0;
 pub(in crate::app) const LYRIC_TIMING_HINT_HEIGHT: f32 = 20.0;
 
-/// Fixed black dim: darkens the page behind overlays in both modes.
-pub(in crate::app) fn scrim() -> Hsla {
-    gpui_kit::hsla(0.0, 0.0, 0.0, 0.35)
+/// Fixed black dim: darkens the page behind modal overlays in both modes.
+pub(in crate::app) fn scrim(cx: &App) -> Hsla {
+    let alpha = if cx.theme().is_dark() { 0.44 } else { 0.24 };
+    gpui_kit::hsla(0.0, 0.0, 0.0, alpha)
 }
 
 #[cfg(test)]

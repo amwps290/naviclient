@@ -138,7 +138,7 @@ pub(in crate::app) fn render_playlist_status_content(
                 Button::new("retry-playlist")
                     .debug_selector(|| "retry-playlist".into())
                     .label(t!("Retry"))
-                    .small()
+                    .compact_action()
                     .ghost()
                     .disabled(playlists.editing() || playlists.detail_loading())
                     .on_click(on_retry),

@@ -104,7 +104,7 @@ impl NavidromeApp {
             .icon(AppIcon::Globe)
             .dropdown_caret(true)
             .outline()
-            .small()
+            .compact_action()
             .disabled(disabled)
             .dropdown_menu(move |menu, _, cx| {
                 let pick = pick.clone();

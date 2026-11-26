@@ -93,7 +93,7 @@ pub(in crate::app) use crate::app::songs::scope::SongScope;
 pub(in crate::app) use crate::app::sound::equalizer_state::EqualizerState;
 pub(in crate::app) use crate::app::sound::volume_state::VolumeState;
 pub(in crate::app) use crate::app::style::buttons::{
-    capsule_button, round_play_button, soft_toggle_style,
+    capsule_button, round_play_button, soft_toggle_style, ButtonExt,
 };
 pub(in crate::app) use crate::app::style::surface::{
     cover_shadow, raised_surface, translucent_surface,

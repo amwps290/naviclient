@@ -4,6 +4,7 @@ pub(in crate::app) mod appearance_view;
 pub(in crate::app) mod bilibili_login;
 pub(crate) mod bilibili_state;
 pub(in crate::app) mod bilibili_view;
+pub(in crate::app) mod components;
 pub(in crate::app) mod desktop_view;
 pub(in crate::app) mod dialogs;
 pub(in crate::app) mod logs;

@@ -2,6 +2,7 @@
 //! one inline action and a menu for editing, connection and removal.
 
 use super::bilibili_state::AccountStatus;
+use super::components::{settings_card, settings_divider};
 use super::source_row::{Connection, SourceAction, SourceHealth, SourceRow};
 use crate::app::prelude::*;
 use crate::models::network::SourceConnection;
@@ -20,6 +21,39 @@ impl NavidromeApp {
             .iter()
             .filter_map(|profile| self.render_source_row(profile, cx))
             .collect();
+        let empty = rows.is_empty();
+        let mut list_card = settings_card(cx);
+        if empty {
+            list_card = list_card.child(
+                v_flex()
+                    .py_10()
+                    .px_6()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Icon::new(AppIcon::Server)
+                            .with_size(px(26.0))
+                            .text_color(palette(cx).text_muted),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_center()
+                            .text_color(palette(cx).text_secondary)
+                            .child(t!(
+                                "Add a Navidrome server or a Bilibili account to start listening."
+                            )),
+                    ),
+            );
+        } else {
+            for (index, row) in rows.into_iter().enumerate() {
+                if index > 0 {
+                    list_card = list_card.child(settings_divider(cx));
+                }
+                list_card = list_card.child(row);
+            }
+        }
+
         v_flex()
             .w_full()
             .gap_3()
@@ -30,7 +64,8 @@ impl NavidromeApp {
                         .icon(KitIcon::Plus)
                         .dropdown_caret(true)
                         .primary()
-                        .small()
+                        .compact_action()
+                        .rounded(px(tokens::radius::CONTROL))
                         .dropdown_menu(move |menu, _, cx| {
                             app.update(cx, |_, cx| {
                                 menu.item(
@@ -52,19 +87,7 @@ impl NavidromeApp {
                         }),
                 ),
             )
-            .when(rows.is_empty(), |list| {
-                list.child(
-                    div()
-                        .py_8()
-                        .text_sm()
-                        .text_center()
-                        .text_color(palette(cx).text_secondary)
-                        .child(t!(
-                            "Add a Navidrome server or a Bilibili account to start listening."
-                        )),
-                )
-            })
-            .children(rows)
+            .child(list_card)
             .into_any_element()
     }
 
@@ -99,6 +122,7 @@ impl NavidromeApp {
         let key = source.cache_namespace();
         let current = self.config.active_source.as_ref() == Some(&source);
         let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let dot = match row.health {
             SourceHealth::Connected => p.online,
             SourceHealth::Busy => cx.theme().warning,
@@ -121,7 +145,7 @@ impl NavidromeApp {
                 })
                 .when(action == SourceAction::Switch, |button| button.outline())
                 .when(action != SourceAction::Switch, |button| button.primary())
-                .small()
+                .compact_action()
                 .disabled(row.busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.run_source_action(&target, action, window, cx);
@@ -131,29 +155,48 @@ impl NavidromeApp {
         let element = h_flex()
             .id(SharedString::from(format!("source-row-{key}")))
             .w_full()
-            .gap_3()
-            .px_3()
-            .py_3()
+            .gap_3p5()
+            .px_4()
+            .py_3p5()
             .items_center()
-            .rounded(px(tokens::radius::ROW))
-            .when(current, |row| row.bg(p.brand_soft))
-            .when(!current, |row| row.hover(|row| row.bg(p.sunken)))
+            .when(current, |row| {
+                row.bg(p.brand_soft.opacity(if dark { 0.65 } else { 0.72 }))
+            })
+            .when(!current, |row| {
+                row.hover(|row| row.bg(p.sunken.opacity(0.65)))
+            })
             .child(
                 div()
-                    .size(px(36.0))
+                    .size(px(38.0))
                     .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(tokens::radius::FULL))
-                    .bg(p.raised)
+                    .rounded(px(tokens::radius::ROW))
+                    .bg(if current {
+                        p.brand.opacity(0.14)
+                    } else {
+                        p.raised
+                    })
+                    .border_1()
+                    .border_color(if current {
+                        p.brand.opacity(0.28)
+                    } else if dark {
+                        hsla(0.0, 0.0, 1.0, 0.07)
+                    } else {
+                        p.border.opacity(0.75)
+                    })
                     .child(
                         Icon::new(match row.provider {
                             ProviderKind::OpenSubsonic => AppIcon::Server,
                             ProviderKind::Bilibili => AppIcon::Video,
                         })
-                        .with_size(px(18.0))
-                        .text_color(p.text_secondary),
+                        .with_size(px(17.0))
+                        .text_color(if current {
+                            p.brand
+                        } else {
+                            p.text_secondary
+                        }),
                     ),
             )
             .child(
@@ -178,10 +221,12 @@ impl NavidromeApp {
                                     div()
                                         .flex_none()
                                         .px_2()
+                                        .py_0p5()
                                         .rounded(px(tokens::radius::FULL))
-                                        .bg(p.brand)
-                                        .text_color(p.on_brand)
-                                        .text_size(px(tokens::CAPTION))
+                                        .bg(p.brand.opacity(if dark { 0.22 } else { 0.14 }))
+                                        .text_color(p.brand)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_size(px(11.0))
                                         .child(t!("Current")),
                                 )
                             }),

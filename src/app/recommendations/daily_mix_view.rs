@@ -136,7 +136,8 @@ impl NavidromeApp {
                                     })
                                     .primary()
                                     .rounded(px(tokens::radius::FULL))
-                                    .small()
+                                    .compact_action()
+                                    .px_4()
                                     .disabled(loading)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if this.state.daily_mix.error().is_some() {

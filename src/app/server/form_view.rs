@@ -66,6 +66,7 @@ impl NavidromeApp {
                 Button::new("cancel-server-edit")
                     .label(t!("Cancel"))
                     .ghost()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
@@ -78,6 +79,7 @@ impl NavidromeApp {
                         t!("Save")
                     })
                     .primary()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.save_settings(cx);
                         this.sync_settings_dialog(window, cx);

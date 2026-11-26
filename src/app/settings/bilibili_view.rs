@@ -194,6 +194,7 @@ impl NavidromeApp {
                 Button::new("bilibili-cancel-login")
                     .label(t!("Cancel"))
                     .ghost()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
@@ -203,6 +204,7 @@ impl NavidromeApp {
                     Button::new("bilibili-refresh-qr")
                         .label(t!("New QR code"))
                         .outline()
+                        .dialog_action()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.restart_bilibili_login();
                             cx.notify();
@@ -245,6 +247,7 @@ impl NavidromeApp {
             .child(
                 Button::new("cancel-remove-bilibili")
                     .label(t!("Cancel"))
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
@@ -253,6 +256,7 @@ impl NavidromeApp {
                 Button::new("confirm-remove-bilibili")
                     .label(t!("Remove"))
                     .danger()
+                    .dialog_action()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.remove_bilibili_account(remove.clone());
                         this.cancel_settings_dialog(window, cx);

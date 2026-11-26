@@ -115,7 +115,7 @@ impl NavidromeApp {
                                     Button::new("retry-bilibili-search")
                                         .label(t!("Retry"))
                                         .outline()
-                                        .small()
+                                        .compact_action()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.search_bilibili_page(
                                                 this.state.bilibili_discovery.keyword.clone(),
@@ -514,7 +514,7 @@ impl NavidromeApp {
                             Button::new("retry-bilibili-video-preview")
                                 .label(t!("Retry"))
                                 .outline()
-                                .small()
+                                .compact_action()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.open_bilibili_discovery_video(
                                         this.state.bilibili_discovery.video_input.clone(),

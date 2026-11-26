@@ -70,6 +70,7 @@ impl NavidromeApp {
             .child(
                 Button::new("cancel-remove-server")
                     .label(t!("Cancel"))
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_remove_server(cx);
                         window.close_dialog(cx);
@@ -80,6 +81,7 @@ impl NavidromeApp {
                     .label(t!("Remove"))
                     .danger()
                     .outline()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_remove_server(false, window, cx);
                         window.close_dialog(cx);
@@ -89,6 +91,7 @@ impl NavidromeApp {
                 Button::new("confirm-remove-server-data")
                     .label(t!("Remove and clear data"))
                     .danger()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_remove_server(true, window, cx);
                         window.close_dialog(cx);

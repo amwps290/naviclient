@@ -51,7 +51,7 @@ impl NavidromeApp {
                                     Button::new(SharedString::from(format!("eq-popover-{enable}")))
                                         .label(label)
                                         .custom(soft_toggle_style(active, popover_cx))
-                                        .small()
+                                        .compact_action()
                                         .rounded_full()
                                         .selected(active)
                                         .on_click(move |_, _, cx| {
@@ -71,7 +71,7 @@ impl NavidromeApp {
                             Button::new(SharedString::from(format!("eq-popover-preset-{name}")))
                                 .label(EqSettings::preset_label(name))
                                 .custom(soft_toggle_style(active, popover_cx))
-                                .small()
+                                .compact_action()
                                 .rounded_full()
                                 .selected(active)
                                 .on_click(move |_, window, cx| {

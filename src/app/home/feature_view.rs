@@ -229,7 +229,7 @@ impl NavidromeApp {
                                         .label(content.open_label)
                                         .icon(AppIcon::ChevronRight)
                                         .ghost()
-                                        .small()
+                                        .compact_action()
                                         .rounded(px(tokens::radius::CONTROL))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_feature(&target_open);

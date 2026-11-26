@@ -17,7 +17,7 @@ impl NavidromeApp {
             QueueDrawerTab::UpNext => self.state.queue.len(),
             QueueDrawerTab::History => self.state.listening.recent_songs().len(),
         };
-        let dim = if cx.theme().is_dark() { 0.22 } else { 0.08 };
+        let dim = if cx.theme().is_dark() { 0.28 } else { 0.12 };
 
         let drawer = translucent_surface(
             v_flex()
@@ -162,7 +162,7 @@ impl NavidromeApp {
                         })
                         .label(tab.label())
                         .custom(soft_toggle_style(active, cx))
-                        .small()
+                        .compact_action()
                         .flex_1()
                         .rounded_full()
                         .selected(active)
@@ -281,7 +281,7 @@ impl NavidromeApp {
                     .label(t!("Play all"))
                     .tooltip(t!("Play all"))
                     .primary()
-                    .small()
+                    .compact_action()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.state.queue.is_empty() {
                             this.play_song_at_scope(SongScope::Queue, 0);
@@ -298,7 +298,7 @@ impl NavidromeApp {
                     })
                     .tooltip(t!("Clear after current"))
                     .ghost()
-                    .small()
+                    .compact_action()
                     .disabled(self.state.queue_index.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.clear_queue_after_current();

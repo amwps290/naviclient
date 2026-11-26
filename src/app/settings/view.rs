@@ -6,6 +6,8 @@ impl NavidromeApp {
     pub(in crate::app) fn render_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let section = self.state.settings.section;
         let presentation = section.presentation();
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let content = match section {
             SettingsSection::Sources => vec![self.render_source_settings(cx)],
             SettingsSection::Proxies => vec![self.render_proxy_settings(cx)],
@@ -18,16 +20,25 @@ impl NavidromeApp {
         };
         v_flex()
             .w_full()
-            .max_w(px(840.0))
-            .gap_6()
+            .max_w(px(760.0))
+            .gap_5()
+            .pb_4()
             .child(
                 v_flex()
                     .gap_1()
-                    .child(section_title(presentation.title, cx))
+                    .pb_3()
+                    .pr_10()
+                    .border_b_1()
+                    .border_color(if dark {
+                        hsla(0.0, 0.0, 1.0, 0.07)
+                    } else {
+                        p.border.opacity(0.65)
+                    })
+                    .child(serif_heading(presentation.title, 22.0, cx))
                     .child(
                         div()
                             .text_size(px(tokens::META))
-                            .text_color(palette(cx).text_secondary)
+                            .text_color(p.text_secondary)
                             .child(presentation.description),
                     ),
             )

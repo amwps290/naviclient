@@ -231,7 +231,7 @@ impl NavidromeApp {
             .icon(AppIcon::ChevronDown)
             .tooltip(t!("Album sort order"))
             .ghost()
-            .small()
+            .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {
                     let mut menu = menu;
@@ -262,7 +262,7 @@ impl NavidromeApp {
             .icon(AppIcon::ChevronDown)
             .tooltip(t!("Artist sort order"))
             .ghost()
-            .small()
+            .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {
                     let mut menu = menu;

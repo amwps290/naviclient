@@ -2,6 +2,7 @@
 //! persistence that is saved before any live client is replaced.
 
 use super::bilibili_state::AccountStatus;
+use super::components::{settings_card, settings_divider};
 use super::proxy_probe::ProbeState;
 use super::state::{ProxyDialog, SettingsDialog};
 use crate::app::prelude::*;
@@ -207,6 +208,44 @@ impl NavidromeApp {
 
     pub(in crate::app) fn render_proxy_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let proxies = &self.config.network.proxies;
+        let mut list_card = settings_card(cx);
+        if proxies.is_empty() {
+            list_card = list_card.child(
+                v_flex()
+                    .py_10()
+                    .px_6()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Icon::new(AppIcon::Globe)
+                            .with_size(px(26.0))
+                            .text_color(palette(cx).text_muted),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(t!("No saved proxies")),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_center()
+                            .text_color(palette(cx).text_secondary)
+                            .child(t!(
+                                "Add an HTTP, HTTPS or SOCKS5 proxy, such as 127.0.0.1:7890."
+                            )),
+                    ),
+            );
+        } else {
+            for (index, proxy) in proxies.iter().enumerate() {
+                if index > 0 {
+                    list_card = list_card.child(settings_divider(cx));
+                }
+                list_card = list_card.child(self.render_proxy_row(proxy, cx));
+            }
+        }
+
         v_flex()
             .w_full()
             .gap_3()
@@ -228,33 +267,14 @@ impl NavidromeApp {
                             .label(t!("Add proxy"))
                             .icon(KitIcon::Plus)
                             .primary()
-                            .small()
+                            .compact_action()
+                            .rounded(px(tokens::radius::CONTROL))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_proxy_dialog(None, window, cx);
                             })),
                     ),
             )
-            .when(proxies.is_empty(), |list| {
-                list.child(
-                    v_flex()
-                        .py_8()
-                        .gap_2()
-                        .items_center()
-                        .child(
-                            Icon::new(AppIcon::Globe)
-                                .with_size(px(28.0))
-                                .text_color(palette(cx).text_muted),
-                        )
-                        .child(div().text_sm().child(t!("No saved proxies")))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(palette(cx).text_secondary)
-                                .child(t!("Add an HTTP, HTTPS or SOCKS5 proxy, such as 127.0.0.1:7890.")),
-                        ),
-                )
-            })
-            .children(proxies.iter().map(|proxy| self.render_proxy_row(proxy, cx)))
+            .child(list_card)
             .into_any_element()
     }
 
@@ -264,6 +284,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let users = self.config.proxy_users(&proxy.id);
         let probe = self.state.settings.proxy_probes.get(&proxy.id).copied();
         let (dot, result) = match probe {
@@ -297,16 +318,31 @@ impl NavidromeApp {
         let app = cx.entity().downgrade();
         h_flex()
             .w_full()
-            .gap_3()
-            .px_3()
-            .py_3()
+            .gap_3p5()
+            .px_4()
+            .py_3p5()
             .items_center()
-            .rounded(px(tokens::radius::ROW))
-            .hover(|row| row.bg(p.sunken))
+            .hover(|row| row.bg(p.sunken.opacity(0.65)))
             .child(
-                Icon::new(AppIcon::Globe)
-                    .with_size(px(18.0))
-                    .text_color(p.text_secondary),
+                div()
+                    .size(px(36.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(tokens::radius::ROW))
+                    .bg(p.raised)
+                    .border_1()
+                    .border_color(if dark {
+                        hsla(0.0, 0.0, 1.0, 0.07)
+                    } else {
+                        p.border.opacity(0.75)
+                    })
+                    .child(
+                        Icon::new(AppIcon::Globe)
+                            .with_size(px(16.0))
+                            .text_color(p.text_secondary),
+                    ),
             )
             .child(
                 v_flex()
@@ -344,7 +380,7 @@ impl NavidromeApp {
                 Button::new(SharedString::from(format!("test-proxy-{}", proxy.id)))
                     .label(t!("Test"))
                     .outline()
-                    .small()
+                    .compact_action()
                     .loading(probe == Some(ProbeState::Testing))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.test_proxy(&test);
@@ -434,6 +470,7 @@ impl NavidromeApp {
                 Button::new("cancel-proxy-edit")
                     .label(t!("Cancel"))
                     .ghost()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
@@ -442,6 +479,7 @@ impl NavidromeApp {
                 Button::new("save-proxy")
                     .label(t!("Save proxy"))
                     .primary()
+                    .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.save_proxy(cx);
                         this.sync_settings_dialog(window, cx);

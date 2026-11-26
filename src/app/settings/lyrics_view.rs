@@ -1,5 +1,6 @@
 //! Lyrics preferences are persisted before changing live request behavior.
 
+use super::components::{settings_group, settings_row};
 use crate::app::prelude::*;
 use crate::lyrics::provider::ProviderId;
 use crate::lyrics::{LyricsPolicy, LyricsSettings};
@@ -70,51 +71,187 @@ impl NavidromeApp {
         let app = cx.entity().downgrade();
         let policy = self.config.lyrics.policy;
         let (count, bytes) = self.lyrics_cache.stats();
-        v_flex().gap_5()
-            .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
-                .child(div().text_sm().child(t!("Word-by-word lyrics")))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Highlight words when timing is available; otherwise follow whole lines."))))
-                .child(Switch::new("word-lyrics-enabled").checked(self.config.lyrics.word_timing).accessibility_label(t!("Word-by-word lyrics"))
-                    .on_change(cx.listener(|this, checked, _, cx| this.set_word_lyrics(*checked, cx)))))
-            .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
-                .child(div().text_sm().child(t!("Online lyrics")))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("When enabled, song metadata is sent to the selected lyrics services."))))
-                .child(Switch::new("online-lyrics-enabled").checked(self.config.lyrics.enabled).accessibility_label(t!("Online lyrics"))
-                    .on_change(cx.listener(|this,checked,_,cx| this.change_lyrics_settings(|s| s.enabled = *checked,cx)))))
-            .child(v_flex().gap_3()
-                .child(div().text_sm().child(t!("Lyrics sources")))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Automatic lookup tries enabled sources from top to bottom. No account is required.")))
-                .children(ProviderId::ALL.into_iter().map(|id| {
-                    h_flex().justify_between().items_center().gap_3()
-                        .child(div().text_sm().child(id.label()))
-                        .child(Switch::new(SharedString::from(format!("lyrics-source-{}", id.key())))
-                            .checked(self.config.lyrics.sources.contains(&id))
-                            .accessibility_label(id.label())
-                            .on_change(cx.listener(move |this, checked, _, cx| {
-                                this.change_lyrics_settings(|settings| {
-                                    settings.sources.retain(|source| *source != id);
-                                    if *checked { settings.sources.push(id); }
-                                }, cx);
-                            })))
-                })))
-            .child(h_flex().justify_between().gap_3().child(div().text_sm().child(t!("Loading policy")))
-                .child(Button::new("lyrics-policy").label(policy.label()).dropdown_caret(true).outline().small()
-                    .dropdown_menu(move |menu,_,cx| app.update(cx,|_,cx| {
-                        [LyricsPolicy::SourceFirst,LyricsPolicy::OnlineFirst,LyricsPolicy::Manual].into_iter().fold(menu,|menu,choice| menu.item(
-                            PopupMenuItem::new(choice.label()).checked(choice==policy).on_click(cx.listener(move |this,_,_,cx| this.change_lyrics_settings(|s| s.policy=choice,cx)))))
-                    }).expect("app owns lyrics policy menu"))))
-            .child(h_flex().justify_between().gap_3().child(div().text_sm().child(t!("Connection")))
-                .child(self.connection_picker("lyrics-connection",&self.config.lyrics.connection,false,|this,connection,cx| this.change_lyrics_settings(|s| s.connection=connection,cx),cx)))
-            .child(h_flex().justify_between().gap_4().child(v_flex().flex_1().min_w_0().gap_1()
-                .child(div().text_sm().child(t!("Show translation")))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Only translations provided by the lyrics source are displayed."))))
-                .child(Switch::new("lyrics-translation-switch").checked(self.config.show_lyrics_translation).accessibility_label(t!("Show translation"))
-                    .on_change(cx.listener(|this,checked,_,cx| this.set_show_lyrics_translation(*checked,cx)))))
-            .child(v_flex().gap_2().child(div().text_sm().child(t!("Saved lyrics: %{count} · %{size} MB",count=count,size=format!("{:.2}",bytes as f64/1048576.0))))
-                .child(div().text_xs().text_color(palette(cx).text_secondary).child(t!("Clearing online cache keeps remembered choices and timing adjustments.")))
-                .child(Button::new("clear-online-lyrics-cache").label(t!("Clear online cache")).outline().small().on_click(cx.listener(|this,_,_,cx| {
-                    match this.lyrics_cache.clear_automatic() { Ok(()) => this.notify_success(t!("Online lyrics cache cleared.")), Err(error) => this.notify_error(t!("Could not save lyrics: %{error}",error=error)) } cx.notify();
-                }))))
+
+        let display_group = settings_group(
+            None,
+            None,
+            vec![
+                settings_row(
+                    t!("Word-by-word lyrics"),
+                    Some(
+                        t!("Highlight words when timing is available; otherwise follow whole lines.")
+                            .into(),
+                    ),
+                    Switch::new("word-lyrics-enabled")
+                        .checked(self.config.lyrics.word_timing)
+                        .accessibility_label(t!("Word-by-word lyrics"))
+                        .on_change(cx.listener(|this, checked, _, cx| {
+                            this.set_word_lyrics(*checked, cx)
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Show translation"),
+                    Some(t!("Only translations provided by the lyrics source are displayed.").into()),
+                    Switch::new("lyrics-translation-switch")
+                        .checked(self.config.show_lyrics_translation)
+                        .accessibility_label(t!("Show translation"))
+                        .on_change(cx.listener(|this, checked, _, cx| {
+                            this.set_show_lyrics_translation(*checked, cx)
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+            ],
+            cx,
+        );
+
+        let online_group = settings_group(
+            Some(t!("Online lyrics").into()),
+            None,
+            vec![
+                settings_row(
+                    t!("Online lyrics"),
+                    Some(
+                        t!("When enabled, song metadata is sent to the selected lyrics services.")
+                            .into(),
+                    ),
+                    Switch::new("online-lyrics-enabled")
+                        .checked(self.config.lyrics.enabled)
+                        .accessibility_label(t!("Online lyrics"))
+                        .on_change(cx.listener(|this, checked, _, cx| {
+                            this.change_lyrics_settings(|s| s.enabled = *checked, cx)
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Loading policy"),
+                    None,
+                    Button::new("lyrics-policy")
+                        .w(px(220.0))
+                        .justify_between()
+                        .label(policy.label())
+                        .dropdown_caret(true)
+                        .outline()
+                        .compact_action()
+                        .dropdown_menu(move |menu, _, cx| {
+                            app.update(cx, |_, cx| {
+                                [
+                                    LyricsPolicy::SourceFirst,
+                                    LyricsPolicy::OnlineFirst,
+                                    LyricsPolicy::Manual,
+                                ]
+                                .into_iter()
+                                .fold(menu, |menu, choice| {
+                                    menu.item(
+                                        PopupMenuItem::new(choice.label())
+                                            .checked(choice == policy)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.change_lyrics_settings(
+                                                    |s| s.policy = choice,
+                                                    cx,
+                                                )
+                                            })),
+                                    )
+                                })
+                            })
+                            .expect("app owns lyrics policy menu")
+                        })
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Connection"),
+                    None,
+                    self.connection_picker(
+                        "lyrics-connection",
+                        &self.config.lyrics.connection,
+                        false,
+                        |this, connection, cx| {
+                            this.change_lyrics_settings(|s| s.connection = connection, cx)
+                        },
+                        cx,
+                    ),
+                    cx,
+                ),
+            ],
+            cx,
+        );
+
+        let mut source_rows = vec![div()
+            .px_4()
+            .py_2p5()
+            .text_xs()
+            .text_color(palette(cx).text_secondary)
+            .child(t!(
+                "Automatic lookup tries enabled sources from top to bottom. No account is required."
+            ))
+            .into_any_element()];
+        source_rows.extend(ProviderId::ALL.into_iter().map(|id| {
+            settings_row(
+                id.label(),
+                None,
+                Switch::new(SharedString::from(format!("lyrics-source-{}", id.key())))
+                    .checked(self.config.lyrics.sources.contains(&id))
+                    .accessibility_label(id.label())
+                    .on_change(cx.listener(move |this, checked, _, cx| {
+                        this.change_lyrics_settings(
+                            |settings| {
+                                settings.sources.retain(|source| *source != id);
+                                if *checked {
+                                    settings.sources.push(id);
+                                }
+                            },
+                            cx,
+                        );
+                    }))
+                    .into_any_element(),
+                cx,
+            )
+        }));
+        let sources_group =
+            settings_group(Some(t!("Lyrics sources").into()), None, source_rows, cx);
+
+        let cache_group = settings_group(
+            None,
+            None,
+            vec![settings_row(
+                t!(
+                    "Saved lyrics: %{count} · %{size} MB",
+                    count = count,
+                    size = format!("{:.2}", bytes as f64 / 1048576.0)
+                ),
+                Some(
+                    t!("Clearing online cache keeps remembered choices and timing adjustments.")
+                        .into(),
+                ),
+                Button::new("clear-online-lyrics-cache")
+                    .label(t!("Clear online cache"))
+                    .outline()
+                    .compact_action()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        match this.lyrics_cache.clear_automatic() {
+                            Ok(()) => this.notify_success(t!("Online lyrics cache cleared.")),
+                            Err(error) => this
+                                .notify_error(t!("Could not save lyrics: %{error}", error = error)),
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+                cx,
+            )],
+            cx,
+        );
+
+        v_flex()
+            .w_full()
+            .gap_5()
+            .child(display_group)
+            .child(online_group)
+            .child(sources_group)
+            .child(cache_group)
             .into_any_element()
     }
 }

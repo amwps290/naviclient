@@ -115,7 +115,7 @@ impl NavidromeApp {
                                 Button::new("change-lyrics")
                                     .label(t!("Change lyrics"))
                                     .ghost()
-                                    .small()
+                                    .compact_action()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_lyrics_dialog(LyricsDialog::Search, window, cx)
                                     })),

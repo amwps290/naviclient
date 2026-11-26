@@ -29,6 +29,26 @@ pub(in crate::app) fn soft_toggle_style(active: bool, cx: &App) -> ButtonCustomV
     }
 }
 
+/// Comfortable proportions for labelled buttons (`gpui_kit`'s `.small()` uses
+/// 24px height + 8px horizontal padding with 14px text, which crowds labels
+/// against the border, especially for CJK glyphs).
+pub(in crate::app) trait ButtonExt {
+    /// Inline / toolbar labelled button: 32px height, 14px horizontal padding.
+    fn compact_action(self) -> Self;
+    /// Dialog footer / primary form button: 36px height, 16px horizontal padding.
+    fn dialog_action(self) -> Self;
+}
+
+impl ButtonExt for Button {
+    fn compact_action(self) -> Self {
+        self.h(px(32.0)).px_3p5()
+    }
+
+    fn dialog_action(self) -> Self {
+        self.h(px(36.0)).px_4()
+    }
+}
+
 pub(in crate::app) fn round_play_button(
     id: impl Into<ElementId>,
     icon: PlayerIcon,
@@ -47,5 +67,9 @@ pub(in crate::app) fn round_play_button(
 }
 
 pub(in crate::app) fn capsule_button(id: impl Into<ElementId>) -> Button {
-    Button::new(id).secondary().rounded(px(radius::FULL))
+    Button::new(id)
+        .secondary()
+        .rounded(px(radius::FULL))
+        .h(px(36.0))
+        .px_4()
 }

@@ -193,7 +193,7 @@ impl NavidromeApp {
                     Button::new("empty-lyrics-search")
                         .label(t!("Search lyrics"))
                         .ghost()
-                        .small()
+                        .compact_action()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_lyrics_dialog(
                                 super::lyrics_search::LyricsDialog::Search,

@@ -102,7 +102,7 @@ impl NavidromeApp {
                                 Button::new("new-playlist")
                                     .label(t!("New playlist"))
                                     .primary()
-                                    .small()
+                                    .compact_action()
                                     .disabled(self.state.playlists.editing() || self.api.is_none())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.name_playlist(None, vec![], window, cx)
@@ -112,7 +112,7 @@ impl NavidromeApp {
                                 Button::new("import-playlist")
                                     .label(t!("Import playlist"))
                                     .outline()
-                                    .small()
+                                    .compact_action()
                                     .disabled(self.api.is_none() || self.state.playlists.editing())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_import_dialog(window, cx);

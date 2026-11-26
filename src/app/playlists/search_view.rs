@@ -237,7 +237,7 @@ pub(in crate::app) fn render_playlist_search_feedback(
                         .label(t!("Retry"))
                         .debug_selector(|| "retry-playlist-search".into())
                         .ghost()
-                        .small()
+                        .compact_action()
                         .on_click(on_retry),
                 )
             },

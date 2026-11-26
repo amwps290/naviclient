@@ -108,7 +108,7 @@ impl NavidromeApp {
                     Button::new("retry-artist-popular")
                         .icon(AppIcon::Refresh)
                         .label(t!("Retry"))
-                        .small()
+                        .compact_action()
                         .outline()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_artist_top_songs();

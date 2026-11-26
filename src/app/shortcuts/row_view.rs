@@ -2,6 +2,7 @@
 
 use super::bindings::{shortcut_display, shortcut_label};
 use crate::app::prelude::*;
+use crate::app::settings::components::{settings_card, settings_divider};
 
 impl NavidromeApp {
     pub(in crate::app) fn render_shortcut_rows(
@@ -10,13 +11,14 @@ impl NavidromeApp {
         global: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        v_flex()
-            .children(
-                actions
-                    .iter()
-                    .map(|action| self.render_shortcut_row(*action, global, cx)),
-            )
-            .into_any_element()
+        let mut card = settings_card(cx);
+        for (index, action) in actions.iter().enumerate() {
+            if index > 0 {
+                card = card.child(settings_divider(cx));
+            }
+            card = card.child(self.render_shortcut_row(*action, global, cx));
+        }
+        card.into_any_element()
     }
 
     fn render_shortcut_row(
@@ -25,6 +27,8 @@ impl NavidromeApp {
         global: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let recording = self.state.settings.is_recording(action, global);
         let (binding, default, conflict) = if global {
             (
@@ -61,8 +65,16 @@ impl NavidromeApp {
         let unsupported = global && !cfg!(target_os = "windows");
 
         v_flex()
-            .py_3()
+            .w_full()
+            .px_4()
+            .py_2p5()
             .gap_1()
+            .when(recording, |row| {
+                row.bg(p.brand_soft.opacity(if dark { 0.65 } else { 0.72 }))
+            })
+            .when(!recording && !unsupported, |row| {
+                row.hover(|row| row.bg(p.sunken.opacity(0.55)))
+            })
             .child(
                 h_flex()
                     .justify_between()
@@ -73,17 +85,20 @@ impl NavidromeApp {
                             .flex_1()
                             .min_w_0()
                             .text_sm()
+                            .text_color(if unsupported { p.text_muted } else { p.text })
                             .child(shortcut_label(action)),
                     )
                     .child(
                         h_flex()
-                            .gap_1()
+                            .gap_1p5()
                             .items_center()
                             .child(
                                 Button::new(SharedString::from(format!(
                                     "{prefix}shortcut-binding-{action:?}"
                                 )))
-                                .w(px(190.0))
+                                .w(px(184.0))
+                                .compact_action()
+                                .font_family(cx.theme().mono_font_family.clone())
                                 .label(if recording {
                                     t!("Press shortcut…").to_string()
                                 } else {

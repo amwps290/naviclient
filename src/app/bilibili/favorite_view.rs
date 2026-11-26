@@ -136,7 +136,7 @@ impl NavidromeApp {
                                         .label(t!("Save here"))
                                         .primary()
                                         .rounded_full()
-                                        .small()
+                                        .compact_action()
                                         .disabled(disabled)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.submit_bilibili_favorite(

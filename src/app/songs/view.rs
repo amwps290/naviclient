@@ -235,7 +235,7 @@ impl NavidromeApp {
                     .label(t!("Add to playlist…"))
                     .disabled(add_disabled)
                     .ghost()
-                    .small()
+                    .compact_action()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this
                             .state

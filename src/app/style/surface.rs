@@ -57,7 +57,7 @@ pub(in crate::app) fn translucent_surface<E: Styled>(
         None => p.raised,
     };
     let element = element
-        .bg(base.opacity(if dark { 0.82 } else { 0.86 }))
+        .bg(base.opacity(if dark { 0.93 } else { 0.95 }))
         .rounded(px(radius))
         .border_1();
     if dark {

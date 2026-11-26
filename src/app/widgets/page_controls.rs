@@ -58,7 +58,7 @@ impl NavidromeApp {
                 Button::new(id)
                     .label(t!("Loading failed — try again"))
                     .outline()
-                    .small()
+                    .compact_action()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         action(this, cx);
                         cx.notify();
