@@ -6,9 +6,9 @@ use super::mini_surface::MiniSurface;
 use crate::app::desktop::mini_frame::MiniWindowFrame;
 
 // WindowBorder adds client-side shadow padding on Linux. Adding those edges
-// keeps the mini player's drawable content at 272x96 on every platform.
-const MINI_CONTENT_WIDTH: Pixels = px(272.0);
-const MINI_CONTENT_HEIGHT: Pixels = px(96.0);
+// keeps the mini player's drawable content at 256x58 on every platform.
+const MINI_CONTENT_WIDTH: Pixels = px(256.0);
+const MINI_CONTENT_HEIGHT: Pixels = px(58.0);
 const RESIZE_TOLERANCE: Pixels = px(1.0);
 
 #[derive(Clone, Copy, Debug, PartialEq)]

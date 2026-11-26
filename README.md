@@ -293,10 +293,10 @@ JavaScript runtime.
   artwork, and explicitly evicts decoded GPUI textures with a 96-item LRU to
   bound the largest cover-related GPU/system-memory allocation.
 - Mini-player mode that shrinks the main window into a compact, always-on-top
-  widget (272x96) with a rotating circular cover on the left and the song title,
-  artist, elapsed time and evenly spaced prev/play/next controls on the right.
-  It uses a rounded surface with transparent corners, a soft cover-colored
-  gradient and a thin, draggable seek bar. The background and border share
+  capsule (256x58) with a rotating circular cover on the left, song title,
+  artist and elapsed time in the center, and inline prev/play/next controls on
+  the right. It uses a full-pill surface with transparent corners, a soft
+  cover-colored gradient and a thin, draggable seek bar along the bottom edge. The background and border share
   a cached device-pixel texture with supersampled corner coverage. Clicking
   the cover returns to the lyrics page; dragging the background moves the window.
   Scrolling the wheel adjusts volume and briefly shows it in the time label

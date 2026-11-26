@@ -1,15 +1,21 @@
-//! Compact cover, metadata, transport and seek controls for the mini window.
+//! Compact capsule cover, metadata, inline transport and seek controls for the mini window.
 
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderTrack};
 
 use crate::app::prelude::*;
 use crate::app::style::cover_tint::{cover_tint, TintSurface};
 
-const COVER_SIZE: f32 = 64.0;
-const COVER_INSET: f32 = 2.0;
-const CONTENT_PADDING: f32 = 12.0;
-const COVER_GAP: f32 = 10.0;
-const META_GAP: f32 = 8.0;
+const COVER_SIZE: f32 = 44.0;
+const COVER_INSET: f32 = 1.5;
+const CONTENT_LEFT: f32 = 6.0;
+const CONTENT_RIGHT: f32 = 10.0;
+const COVER_GAP: f32 = 9.0;
+const CONTROLS_GAP: f32 = 6.0;
+const META_GAP: f32 = 5.0;
+const SKIP_BUTTON_SIZE: f32 = 22.0;
+const PLAY_BUTTON_SIZE: f32 = 28.0;
+const CONTROLS_INNER_GAP: f32 = 2.0;
+const CONTROLS_WIDTH: f32 = SKIP_BUTTON_SIZE * 2.0 + PLAY_BUTTON_SIZE + CONTROLS_INNER_GAP * 2.0;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_mini(
@@ -46,7 +52,7 @@ impl NavidromeApp {
         let border = if theme.is_dark() {
             colors.border
         } else {
-            hsla(0.0, 0.0, 1.0, 0.22)
+            hsla(0.0, 0.0, 1.0, 0.42)
         };
         let surface_cache = self.mini_window.surface.clone();
         let surface = gpui_kit::canvas(
@@ -133,13 +139,20 @@ impl NavidromeApp {
         } else {
             format_playback(playback.position)
         };
-        // Hour-long tracks need more space than an ordinary m:ss label.
-        let time_width = (time.len() as f32 * 6.0).max(31.0);
+        let time_width = (time.len() as f32 * 5.6).max(26.0);
         let paddings = window_paddings(window);
         let content_width = window.viewport_size().width - paddings.left - paddings.right;
-        let info_width =
-            f32::from(content_width - px(2.0 + CONTENT_PADDING * 2.0 + COVER_SIZE + COVER_GAP))
-                .max(1.0);
+        let info_width = f32::from(
+            content_width
+                - px(2.0
+                    + CONTENT_LEFT
+                    + COVER_SIZE
+                    + COVER_GAP
+                    + CONTROLS_GAP
+                    + CONTROLS_WIDTH
+                    + CONTENT_RIGHT),
+        )
+        .max(1.0);
         let artist_width = (info_width - time_width - META_GAP).max(1.0);
         let track_id = song
             .as_ref()
@@ -151,20 +164,20 @@ impl NavidromeApp {
         let artist_tooltip = artist.clone();
 
         let controls = h_flex()
-            .w_full()
-            .h(px(30.0))
-            .mt(px(4.0))
+            .flex_none()
+            .pb(px(3.0))
+            .gap(px(CONTROLS_INNER_GAP))
             .items_center()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .occlude()
-            .child(mini_control_slot(
+            .child(
                 Button::new("mini-previous")
-                    .child(Icon::new(PlayerIcon::Previous).with_size(px(14.0)))
+                    .child(Icon::new(PlayerIcon::Previous).with_size(px(12.0)))
                     .accessibility_label(t!("Previous track"))
                     .tooltip(t!("Previous track"))
                     .ghost()
-                    .with_size(px(27.0))
-                    .size(px(27.0))
+                    .with_size(px(SKIP_BUTTON_SIZE))
+                    .size(px(SKIP_BUTTON_SIZE))
                     .p_0()
                     .rounded_full()
                     .text_color(colors.text_secondary)
@@ -173,23 +186,23 @@ impl NavidromeApp {
                         this.skip(-1);
                         cx.notify();
                     })),
-            ))
-            .child(mini_control_slot(
+            )
+            .child(
                 mini_play_button(is_playing, has_track, cx).on_click(cx.listener(
                     |this, _, _, cx| {
                         this.toggle_playback();
                         cx.notify();
                     },
                 )),
-            ))
-            .child(mini_control_slot(
+            )
+            .child(
                 Button::new("mini-next")
-                    .child(Icon::new(PlayerIcon::Next).with_size(px(14.0)))
+                    .child(Icon::new(PlayerIcon::Next).with_size(px(12.0)))
                     .accessibility_label(t!("Next track"))
                     .tooltip(t!("Next track"))
                     .ghost()
-                    .with_size(px(27.0))
-                    .size(px(27.0))
+                    .with_size(px(SKIP_BUTTON_SIZE))
+                    .size(px(SKIP_BUTTON_SIZE))
                     .p_0()
                     .rounded_full()
                     .text_color(colors.text_secondary)
@@ -198,23 +211,24 @@ impl NavidromeApp {
                         this.skip(1);
                         cx.notify();
                     })),
-            ));
+            );
 
         let info = v_flex()
             .flex_1()
             .min_w_0()
+            .pb(px(3.0))
             .child(
                 div()
                     .id("mini-title")
-                    .h(px(18.0))
-                    .line_height(px(18.0))
+                    .h(px(16.0))
+                    .line_height(px(16.0))
                     .tooltip(move |window, cx| {
                         Tooltip::new(title_tooltip.clone()).build(window, cx)
                     })
                     .child(self.render_scrolling_text(
                         title.into(),
                         info_width,
-                        px(14.0),
+                        px(12.5),
                         FontWeight::SEMIBOLD,
                         title_id,
                         window,
@@ -222,7 +236,7 @@ impl NavidromeApp {
             )
             .child(
                 h_flex()
-                    .h(px(15.0))
+                    .h(px(14.0))
                     .mt(px(1.0))
                     .gap(px(META_GAP))
                     .items_center()
@@ -232,7 +246,7 @@ impl NavidromeApp {
                             .id("mini-artist")
                             .flex_1()
                             .min_w_0()
-                            .line_height(px(15.0))
+                            .line_height(px(14.0))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(artist_tooltip.clone()).build(window, cx)
                             })
@@ -250,15 +264,15 @@ impl NavidromeApp {
                             .flex_none()
                             .w(px(time_width))
                             .text_size(px(9.0))
-                            .line_height(px(15.0))
+                            .line_height(px(14.0))
                             .text_right()
                             .child(time),
                     ),
-            )
-            .child(controls);
+            );
 
-        // The shared slider's transport subscription handles seeking. A 16px
-        // track around its 2px indicator owns clicks/drags instead of window moves.
+        // The shared slider's transport subscription handles seeking. A 14px
+        // hit track tucked along the capsule's flat bottom owns clicks/drags
+        // without overlapping the disc or inline transport buttons.
         let seek_disabled = !has_track || duration.is_zero();
         let bar_fraction = if volume_flash { volume } else { progress };
         let progress_line = mini_seek_control(
@@ -267,7 +281,7 @@ impl NavidromeApp {
             bar_fraction,
             colors.brand,
             if is_playing || volume_flash {
-                0.62
+                0.68
             } else {
                 0.35
             },
@@ -297,13 +311,14 @@ impl NavidromeApp {
             .child(
                 h_flex()
                     .size_full()
-                    .px(px(CONTENT_PADDING))
-                    .pt(px(7.0))
-                    .pb(px(17.0))
-                    .gap(px(COVER_GAP))
+                    .pl(px(CONTENT_LEFT))
+                    .pr(px(CONTENT_RIGHT))
                     .items_center()
                     .child(cover_button)
-                    .child(info),
+                    .child(div().w(px(COVER_GAP)).flex_none())
+                    .child(info)
+                    .child(div().w(px(CONTROLS_GAP)).flex_none())
+                    .child(controls),
             )
             .child(progress_line)
             .into_any_element()
@@ -335,13 +350,13 @@ fn mini_play_button(playing: bool, has_track: bool, cx: &App) -> Button {
             } else {
                 PlayerIcon::Play
             })
-            .with_size(px(13.0)),
+            .with_size(px(11.5)),
         )
         .accessibility_label(label.clone())
         .tooltip(label)
         .custom(style)
-        .with_size(px(30.0))
-        .size(px(30.0))
+        .with_size(px(PLAY_BUTTON_SIZE))
+        .size(px(PLAY_BUTTON_SIZE))
         .p_0()
         .rounded_full()
         .bg(background)
@@ -350,6 +365,7 @@ fn mini_play_button(playing: bool, has_track: bool, cx: &App) -> Button {
         .when(!has_track, |this| this.opacity(0.45))
 }
 
+#[cfg(test)]
 fn mini_control_slot(button: Button) -> gpui_kit::Div {
     h_flex()
         .flex_1()
@@ -369,7 +385,7 @@ fn mini_cover_frame(artwork: gpui_kit::AnyElement, cx: &App) -> gpui_kit::Div {
         .bg(linear_gradient(
             135.0,
             linear_color_stop(colors.text_muted.opacity(0.35), 0.0),
-            linear_color_stop(colors.raised.opacity(0.45), 1.0),
+            linear_color_stop(colors.raised.opacity(0.55), 1.0),
         ))
         .child(
             div()
@@ -381,9 +397,9 @@ fn mini_cover_frame(artwork: gpui_kit::AnyElement, cx: &App) -> gpui_kit::Div {
         .child(
             div()
                 .absolute()
-                .left(px((COVER_SIZE - 5.0) / 2.0))
-                .top(px((COVER_SIZE - 5.0) / 2.0))
-                .size(px(5.0))
+                .left(px((COVER_SIZE - 4.0) / 2.0))
+                .top(px((COVER_SIZE - 4.0) / 2.0))
+                .size(px(4.0))
                 .rounded_full()
                 .border_1()
                 .border_color(hsla(0.0, 0.0, 0.85, 1.0))
@@ -400,11 +416,10 @@ fn mini_seek_control(
 ) -> gpui_kit::Div {
     div()
         .absolute()
-        // Include the former 1px border inset in absolute coordinates.
-        .left(px(17.0))
-        .right(px(17.0))
-        .bottom(px(3.0))
-        .h(px(16.0))
+        .left(px(58.0))
+        .right(px(28.0))
+        .bottom(px(0.0))
+        .h(px(14.0))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .occlude()
         .child(
@@ -417,7 +432,8 @@ fn mini_seek_control(
                         .relative()
                         .size_full()
                         .flex()
-                        .items_center()
+                        .items_end()
+                        .pb(px(3.5))
                         .when(!disabled, |this| this.cursor_pointer())
                         .child(
                             SliderIndicator::new(slider)
@@ -425,7 +441,7 @@ fn mini_seek_control(
                                 .w_full()
                                 .h(px(2.0))
                                 .rounded_full()
-                                .bg(accent.opacity(0.12))
+                                .bg(accent.opacity(0.14))
                                 .child(
                                     div()
                                         .h_full()

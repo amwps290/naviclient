@@ -13,8 +13,8 @@ impl Render for SeekProbe {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .relative()
-            .w(px(272.0))
-            .h(px(96.0))
+            .w(px(256.0))
+            .h(px(58.0))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| this.window_moves += 1),

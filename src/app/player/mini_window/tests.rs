@@ -39,7 +39,7 @@ fn mini_corners_have_no_square_background_and_exit_restores_the_current_theme(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(gpui_pre::Bounds::new(
                     point(px(0.0), px(0.0)),
-                    size(px(272.0), px(96.0)),
+                    size(px(256.0), px(58.0)),
                 ))),
                 ..Default::default()
             },

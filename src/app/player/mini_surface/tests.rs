@@ -2,8 +2,8 @@ use super::*;
 
 fn key(scale: f32) -> Key {
     Key {
-        width: (272.0 * scale).round() as u32,
-        height: (96.0 * scale).round() as u32,
+        width: (256.0 * scale).round() as u32,
+        height: (58.0 * scale).round() as u32,
         scale,
         tint: (
             gpui_kit::rgb(0xE4DDD1).into(),
@@ -20,7 +20,15 @@ fn all_four_corners_have_symmetric_transparent_coverage_at_each_dpi() {
         let pixels = rasterize(key);
         assert_eq!(pixels[(0, 0)][3], 0);
         assert_eq!(pixels[(key.width / 2, 0)][3], 255);
-        assert_eq!(pixels[(0, key.height / 2)][3], 255);
+        assert!(
+            pixels[(0, key.height / 2)][3] >= 200,
+            "capsule apex should stay well-covered while anti-aliased"
+        );
+        assert_eq!(
+            pixels[(0, key.height / 2)][3],
+            pixels[(key.width - 1, key.height / 2)][3]
+        );
+        assert_eq!(pixels[(2, key.height / 2)][3], 255);
         let mut fractional = 0;
         for y in 0..(RADIUS * scale).ceil() as u32 {
             for x in 0..(RADIUS * scale).ceil() as u32 {

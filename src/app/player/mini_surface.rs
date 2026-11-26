@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gpui_kit::{Hsla, RenderImage, Rgba, Window};
 use image::{Frame, RgbaImage};
 
-pub(super) const RADIUS: f32 = 14.0;
+pub(super) const RADIUS: f32 = 29.0;
 const SAMPLES: u32 = 8;
 // A slightly wider reconstruction filter softens the visible staircase at 96
 // DPI. Its width is in device pixels, so high-DPI edges stay equally precise.
