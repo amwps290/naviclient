@@ -160,8 +160,8 @@ impl TurntableMotion {
     }
 }
 
-/// With the current SVG and pivot, 14° places the stylus on the outer groove
-/// (radius ~0.44 diameters); 37° reaches the inner groove (~0.28), outside the label.
+/// With the current J-arm SVG and pivot, 10.5° places the stylus on the outer groove
+/// (radius ~0.43 diameters); 26.5° reaches the inner groove (~0.27), outside the label.
 pub(crate) fn tonearm_target(playing: bool, position: Duration, duration: Option<Duration>) -> f32 {
     if !playing {
         return 0.0;
@@ -171,7 +171,7 @@ pub(crate) fn tonearm_target(playing: bool, position: Duration, duration: Option
         .map_or(0.0, |duration| {
             (position.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0) as f32
         });
-    14.0 + 23.0 * progress
+    10.5 + 16.0 * progress
 }
 
 fn fraction(elapsed: Duration, duration: Duration) -> f32 {

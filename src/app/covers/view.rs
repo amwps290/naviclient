@@ -129,17 +129,35 @@ impl NavidromeApp {
         let inner_cover_size = label_size - size * 0.018;
         let hole_size = size * 0.032;
         // Each tonearm layer uses (110, 110) in a 220px viewBox as its pivot.
-        let tonearm_size = size * 0.94;
-        let tonearm_pivot_x = size * 0.91;
-        let tonearm_pivot_y = size * 0.015;
+        let tonearm_size = size * 1.42;
+        let tonearm_pivot_x = size * 0.97;
+        let tonearm_pivot_y = size * 0.065;
         let tonearm_left = tonearm_pivot_x - tonearm_size * 0.5;
         let tonearm_top = tonearm_pivot_y - tonearm_size * 0.5;
-        let tonearm_base_size = size * 0.105;
+        let tonearm_base_size = size * 0.145;
         let metal_tint = tint.unwrap_or_else(|| {
             self.now_playing_cover_palette()
                 .map_or(palette(cx).text_muted, |(_, accent)| accent)
         });
-        let metal_body = hsla(0.1, 0.025, 0.78, 1.0).blend(metal_tint.opacity(0.06));
+        let metal_body = if tint.is_some() {
+            hsla(0.10, 0.14, 0.78, 1.0).blend(metal_tint.opacity(0.24))
+        } else {
+            hsla(0.09, 0.04, 0.80, 1.0).blend(metal_tint.opacity(0.05))
+        };
+        let metal_shade = if tint.is_some() {
+            hsla(0.09, 0.14, 0.09, 0.58)
+        } else {
+            hsla(0.08, 0.04, 0.12, 0.52)
+        };
+        let metal_highlight = if tint.is_some() {
+            hsla(0.10, 0.35, 0.96, 0.65)
+        } else {
+            hsla(0.0, 0.0, 1.0, 0.72)
+        };
+        let stylus_accent = tint.unwrap_or_else(|| palette(cx).brand);
+        let shadow_offset_x = size * if tonearm_engaged { 0.009 } else { 0.014 };
+        let shadow_offset_y = size * if tonearm_engaged { 0.015 } else { 0.022 };
+        let shadow_opacity = if tonearm_engaged { 0.24 } else { 0.17 };
         let tonearm_layer = |icon: AppIcon, offset_x: f32, offset_y: f32, color: Hsla| {
             Icon::new(icon)
                 .absolute()
@@ -161,47 +179,91 @@ impl NavidromeApp {
             .justify_center()
             .rounded_full()
             .border_1()
-            .border_color(hsla(0.1, 0.025, 0.42, 0.5))
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
             .bg(linear_gradient(
-                132.0,
-                linear_color_stop(hsla(0.1, 0.025, 0.86, 1.0), 0.0),
-                linear_color_stop(
-                    hsla(0.1, 0.025, 0.48, 1.0).blend(metal_tint.opacity(0.06)),
-                    1.0,
-                ),
+                140.0,
+                linear_color_stop(hsla(0.08, 0.04, 0.22, 1.0), 0.0),
+                linear_color_stop(hsla(0.08, 0.04, 0.11, 1.0), 1.0),
             ))
-            .shadow(vec![box_shadow(
-                px(0.0),
-                px(size * 0.006),
-                px(size * 0.018),
-                px(-1.0),
-                hsla(0.0, 0.0, 0.0, 0.24),
-            )])
+            .shadow(vec![
+                box_shadow(
+                    px(0.0),
+                    px(size * 0.008),
+                    px(size * 0.024),
+                    px(0.0),
+                    hsla(0.0, 0.0, 0.0, 0.26),
+                ),
+                box_shadow(
+                    px(0.0),
+                    px(size * 0.002),
+                    px(size * 0.006),
+                    px(0.0),
+                    hsla(0.0, 0.0, 0.0, 0.22),
+                ),
+            ])
             .child(
                 div()
-                    .size(px(tonearm_base_size * 0.72))
+                    .size(px(tonearm_base_size * 0.80))
                     .flex()
                     .items_center()
                     .justify_center()
                     .rounded_full()
                     .border_1()
-                    .border_color(hsla(0.0, 0.0, 1.0, 0.24))
+                    .border_color(hsla(0.0, 0.0, 0.0, 0.28))
                     .bg(linear_gradient(
-                        145.0,
-                        linear_color_stop(hsla(0.1, 0.025, 0.42, 1.0), 0.0),
-                        linear_color_stop(hsla(0.1, 0.025, 0.22, 1.0), 1.0),
+                        132.0,
+                        linear_color_stop(
+                            hsla(0.10, 0.05, 0.88, 1.0).blend(metal_tint.opacity(0.08)),
+                            0.0,
+                        ),
+                        linear_color_stop(
+                            hsla(0.10, 0.05, 0.54, 1.0).blend(metal_tint.opacity(0.14)),
+                            1.0,
+                        ),
                     ))
                     .child(
                         div()
-                            .size(px(tonearm_base_size * 0.28))
+                            .size(px(tonearm_base_size * 0.56))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .rounded_full()
                             .border_1()
-                            .border_color(hsla(0.0, 0.0, 1.0, 0.2))
+                            .border_color(hsla(0.0, 0.0, 1.0, 0.22))
                             .bg(linear_gradient(
-                                135.0,
-                                linear_color_stop(hsla(0.1, 0.025, 0.82, 1.0), 0.0),
-                                linear_color_stop(hsla(0.1, 0.025, 0.56, 1.0), 1.0),
-                            )),
+                                145.0,
+                                linear_color_stop(hsla(0.08, 0.04, 0.20, 1.0), 0.0),
+                                linear_color_stop(hsla(0.08, 0.04, 0.10, 1.0), 1.0),
+                            ))
+                            .child(
+                                div()
+                                    .size(px(tonearm_base_size * 0.30))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(hsla(0.0, 0.0, 0.0, 0.32))
+                                    .bg(linear_gradient(
+                                        135.0,
+                                        linear_color_stop(
+                                            hsla(0.10, 0.05, 0.86, 1.0)
+                                                .blend(metal_tint.opacity(0.08)),
+                                            0.0,
+                                        ),
+                                        linear_color_stop(
+                                            hsla(0.10, 0.05, 0.58, 1.0)
+                                                .blend(metal_tint.opacity(0.12)),
+                                            1.0,
+                                        ),
+                                    ))
+                                    .child(
+                                        div()
+                                            .size(px(tonearm_base_size * 0.09))
+                                            .rounded_full()
+                                            .bg(hsla(0.08, 0.04, 0.14, 1.0)),
+                                    ),
+                            ),
                     ),
             );
         let highlight = Icon::new(AppIcon::VinylHighlight)
@@ -356,34 +418,23 @@ impl NavidromeApp {
             .child(record)
             .child(tonearm_layer(
                 AppIcon::Tonearm,
-                size * 0.005,
-                size * 0.008,
-                hsla(0.0, 0.0, 0.0, 0.24),
+                shadow_offset_x,
+                shadow_offset_y,
+                hsla(0.0, 0.0, 0.0, shadow_opacity),
             ))
             .child(tonearm_layer(AppIcon::Tonearm, 0.0, 0.0, metal_body))
-            .child(tonearm_layer(
-                AppIcon::TonearmShade,
-                0.0,
-                0.0,
-                hsla(0.1, 0.025, 0.12, 0.94),
-            ))
+            .child(tonearm_layer(AppIcon::TonearmShade, 0.0, 0.0, metal_shade))
             .child(tonearm_layer(
                 AppIcon::TonearmHighlight,
                 0.0,
                 0.0,
-                hsla(0.0, 0.0, 1.0, 0.5),
-            ))
-            .child(tonearm_layer(
-                AppIcon::TonearmStylus,
-                size * 0.005,
-                size * 0.008,
-                hsla(0.0, 0.0, 0.0, 0.24),
+                metal_highlight,
             ))
             .child(tonearm_layer(
                 AppIcon::TonearmStylus,
                 0.0,
                 0.0,
-                hsla(0.0, 0.0, 1.0, 0.65),
+                stylus_accent,
             ))
             .child(tonearm_base)
             .into_any_element()

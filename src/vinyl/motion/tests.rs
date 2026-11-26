@@ -119,20 +119,20 @@ fn seeks_and_reversed_seeks_move_from_the_current_angle_then_settle() {
 #[test]
 fn progress_is_bounded_and_unknown_duration_stays_at_the_outer_groove() {
     let duration = Some(Duration::from_secs(100));
-    assert_eq!(tonearm_target(true, Duration::ZERO, duration), 14.0);
+    assert_eq!(tonearm_target(true, Duration::ZERO, duration), 10.5);
     assert_eq!(
         tonearm_target(true, Duration::from_secs(50), duration),
-        25.5
+        18.5
     );
     assert_eq!(
         tonearm_target(true, Duration::from_secs(100), duration),
-        37.0
+        26.5
     );
-    assert_eq!(tonearm_target(true, Duration::MAX, duration), 37.0);
-    assert_eq!(tonearm_target(true, Duration::MAX, None), 14.0);
+    assert_eq!(tonearm_target(true, Duration::MAX, duration), 26.5);
+    assert_eq!(tonearm_target(true, Duration::MAX, None), 10.5);
     assert_eq!(
         tonearm_target(true, Duration::MAX, Some(Duration::ZERO)),
-        14.0
+        10.5
     );
     assert_eq!(
         tonearm_target(false, Duration::from_secs(50), duration),
@@ -143,11 +143,11 @@ fn progress_is_bounded_and_unknown_duration_stays_at_the_outer_groove() {
 #[test]
 fn stylus_travels_inward_and_remains_on_the_grooves_outside_the_cover_label() {
     let mut previous_radius = f32::MAX;
-    // Stylus tip after the SVG's local -28° headshell transform, relative to
-    // its (110, 110) pivot. The rendered arm is 0.94 record diameters wide.
+    // Stylus tip after the SVG's local +12° headshell transform around (120, 185),
+    // relative to its (110, 110) pivot. The rendered arm is 1.42 record diameters wide.
     let tip = (
-        0.94 * (140.516 - 110.0) / 220.0,
-        0.94 * (206.777 - 110.0) / 220.0,
+        1.42 * (116.777 - 110.0) / 220.0,
+        1.42 * (200.161 - 110.0) / 220.0,
     );
     for position in 0..=100 {
         let angle = tonearm_target(
@@ -156,8 +156,8 @@ fn stylus_travels_inward_and_remains_on_the_grooves_outside_the_cover_label() {
             Some(Duration::from_secs(100)),
         )
         .to_radians();
-        let x = 0.91 + tip.0 * angle.cos() - tip.1 * angle.sin() - 0.5;
-        let y = 0.015 + tip.0 * angle.sin() + tip.1 * angle.cos() - 0.5;
+        let x = 0.97 + tip.0 * angle.cos() - tip.1 * angle.sin() - 0.5;
+        let y = 0.065 + tip.0 * angle.sin() + tip.1 * angle.cos() - 0.5;
         let radius = x.hypot(y);
         assert!(radius < previous_radius);
         assert!(radius > 0.25 && radius < 0.48);

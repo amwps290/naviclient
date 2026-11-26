@@ -1,13 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="currentColor">
-  <!-- Counterweight stub and weight (opposite the arm, above the pivot). -->
-  <path d="M110 110L108.1 96.4" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
-  <g transform="rotate(-7.5 107.5 91.2)">
-    <rect x="101.3" y="82.7" width="12.4" height="17" rx="5"/>
+  <!-- Counterweight stub and machined cylindrical counterweight -->
+  <path d="M110 110L106.0 89.4" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>
+  <g transform="rotate(-11 106.8 93.4)">
+    <rect x="102.2" y="87.6" width="9.2" height="11.6" rx="1.8"/>
+    <rect x="103.4" y="99.6" width="6.8" height="2.2" rx="0.7"/>
   </g>
-  <!-- Arm tube with a gentle bend toward the headshell. -->
-  <path d="M110 110C112.5 129 120 148 127.2 165.5Q129.8 172 130 178L130 185" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
-  <!-- Headshell: tapered cartridge with rounded nose. -->
-  <g transform="rotate(-28 130 187)">
-    <path d="M125 184H135L135.9 190.5L134.5 201Q134.4 203 132.4 203H127.6Q125.6 203 125.5 201L124.1 190.5Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/>
+  <!-- Slender J-shaped arm tube curving inward toward the groove tangent -->
+  <path d="M110 110L120.7 165.0C122.2 172.8 121.6 177.2 120.0 185.0" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Bayonet locking collar, tapered headshell, and curved finger lift -->
+  <g transform="rotate(12 120.0 185.0)">
+    <rect x="117.6" y="182.8" width="4.8" height="4.0" rx="0.9"/>
+    <path d="M123.3 190.8Q127.6 191.2 128.4 195.4" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+    <path d="M117.0 186.6H123.0L123.7 191.2L122.9 201.0Q122.8 202.8 121.1 202.8H118.9Q117.2 202.8 117.1 201.0L116.3 191.2Z"/>
   </g>
 </svg>

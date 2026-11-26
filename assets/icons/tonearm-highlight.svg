@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Specular edge on the lit left side of the stub and tube. -->
-  <path d="M108.6 110.3L106.7 96.9" stroke-width="1.1"/>
-  <path d="M108.7 110.3C111.2 129.3 118.7 148.3 125.9 165.8Q128.5 172.3 128.7 177.3L128.7 182.6" stroke-width="1.1"/>
-  <!-- Glint across the counterweight. -->
-  <g transform="rotate(-7.5 107.5 91.2)">
-    <path d="M102.8 86.2Q107.5 84.2 112.2 86.2" stroke-width="0.8" opacity="0.65"/>
+  <!-- Specular highlight on the lit left edge of the stub and arm tube -->
+  <path d="M109.2 110.2L105.2 89.6" stroke-width="0.7" opacity="0.75"/>
+  <path d="M109.1 110.2L119.8 165.2C121.3 173.0 120.7 177.3 119.1 185.0" stroke-width="0.75" opacity="0.88"/>
+  <!-- Brushed gleam on the counterweight -->
+  <g transform="rotate(-11 106.8 93.4)">
+    <path d="M103.6 88.6V98.2" stroke-width="1.0" opacity="0.55"/>
   </g>
-  <!-- Headshell top-left edge and cartridge bolts. -->
-  <g transform="rotate(-28 130 187)">
-    <path d="M125.1 202.4V186.2Q125.1 184.2 127 184.2H133.4" stroke-width="0.7" opacity="0.65"/>
-    <circle cx="127.4" cy="188.6" r="0.8" fill="currentColor" stroke="none"/>
-    <circle cx="132.6" cy="188.6" r="0.8" fill="currentColor" stroke="none"/>
+  <!-- Headshell chamfer highlight and twin cartridge mounting bolts -->
+  <g transform="rotate(12 120.0 185.0)">
+    <path d="M117.2 200.8L116.6 191.3L117.4 187.1H122.6" stroke-width="0.6" opacity="0.75"/>
+    <circle cx="118.6" cy="191.0" r="0.58" fill="currentColor" stroke="none"/>
+    <circle cx="121.4" cy="191.0" r="0.58" fill="currentColor" stroke="none"/>
   </g>
 </svg>
