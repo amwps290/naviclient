@@ -3,10 +3,7 @@
 # 新增文案：先在原始碼寫 t!("...")，再在三個語言檔各補一條。
 
 "Word-by-word lyrics": "逐字歌詞"
-"Audio waveform": "音訊波形"
-"Auto-follow": "自動跟隨"
 "Click a lyric to seek": "點選歌詞，回到那一句"
-"Esc to exit · H controls · T translation · V waveform": "Esc 離開 · H 控制項 · T 譯文 · V 波形"
 "Exit fullscreen (Esc)": "離開全螢幕（Esc）"
 "Fullscreen player": "全螢幕播放器"
 "Fullscreen player (%{shortcut})": "全螢幕播放器（%{shortcut}）"
@@ -15,7 +12,6 @@
 "Playback error": "播放發生錯誤"
 "Ready to play": "等待播放"
 "Refresh lyrics": "重新取得歌詞"
-"Sound in motion": "聲音的形狀"
 "Toggle translation (T)": "顯示或隱藏譯文（T）"
 "Toggle waveform (V)": "顯示或隱藏波形（V）"
 "Vinyl Salon": "黑膠沙龍"

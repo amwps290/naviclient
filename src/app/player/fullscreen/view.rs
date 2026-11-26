@@ -1,4 +1,4 @@
-//! Vinyl Salon: a quiet record deck, large lyrics and restrained gold controls.
+//! Vinyl Salon: cover-reactive ambience, spacious turntable stage, luminous lyrics, and glass dock.
 
 use super::layout::FullscreenLayout;
 use crate::app::prelude::*;
@@ -6,21 +6,29 @@ use crate::app::prelude::*;
 #[derive(Clone, Copy)]
 pub(super) struct SalonPalette {
     pub(super) page: Hsla,
+    pub(super) dock_top: Hsla,
+    pub(super) dock_bottom: Hsla,
+    pub(super) glass: Hsla,
     pub(super) text: Hsla,
     pub(super) secondary: Hsla,
     pub(super) muted: Hsla,
     pub(super) accent: Hsla,
+    pub(super) active_lyric: Hsla,
     pub(super) border: Hsla,
 }
 
 pub(super) fn salon_palette() -> SalonPalette {
     SalonPalette {
-        page: gpui_kit::rgb(0x1c1a18).into(),
-        text: gpui_kit::rgb(0xeee6d7).into(),
-        secondary: gpui_kit::rgb(0xbdb2a0).into(),
-        muted: gpui_kit::rgb(0x938776).into(),
-        accent: gpui_kit::rgb(0xd3b987).into(),
-        border: hsla(0.11, 0.30, 0.78, 0.12),
+        page: gpui_kit::rgb(0x12100f).into(),
+        dock_top: hsla(0.08, 0.08, 0.14, 0.80),
+        dock_bottom: hsla(0.08, 0.08, 0.09, 0.90),
+        glass: hsla(0.10, 0.20, 0.92, 0.05),
+        text: gpui_kit::rgb(0xf2ebe0).into(),
+        secondary: gpui_kit::rgb(0xc7baa6).into(),
+        muted: gpui_kit::rgb(0x958977).into(),
+        accent: gpui_kit::rgb(0xd7bd8c).into(),
+        active_lyric: gpui_kit::rgb(0xf9efd9).into(),
+        border: hsla(0.11, 0.30, 0.78, 0.14),
     }
 }
 
@@ -36,7 +44,7 @@ pub(super) fn salon_button(
         .custom(salon_toggle_style(false, cx))
         .accessibility_label(label.clone())
         .tooltip(label)
-        .with_size(px(36.0))
+        .with_size(px(34.0))
         .rounded_full()
 }
 
@@ -44,13 +52,17 @@ pub(super) fn salon_toggle_style(active: bool, cx: &App) -> ButtonCustomVariant 
     let p = salon_palette();
     ButtonCustomVariant::new(cx)
         .color(if active {
-            p.accent.opacity(0.12)
+            p.accent.opacity(0.16)
         } else {
             p.page.opacity(0.0)
         })
         .foreground(if active { p.accent } else { p.secondary })
-        .hover(p.accent.opacity(0.10))
-        .active(p.accent.opacity(0.16))
+        .hover(p.accent.opacity(0.12))
+        .active(p.accent.opacity(0.20))
+}
+
+fn ambient_glow(color: Hsla, strength: f32) -> Hsla {
+    hsla(color.h, color.s.min(0.55), 0.36, strength)
 }
 
 impl NavidromeApp {
@@ -64,6 +76,11 @@ impl NavidromeApp {
         let layout = FullscreenLayout::new(width, height);
         let p = salon_palette();
         let opacity = self.fullscreen.state.opacity();
+        let cover_colors = self.now_playing_cover_palette();
+        let (left_glow, right_glow) = match cover_colors {
+            Some((base, accent)) => (ambient_glow(base, 0.34), ambient_glow(accent, 0.18)),
+            None => (hsla(0.09, 0.30, 0.24, 0.32), hsla(0.11, 0.24, 0.20, 0.16)),
+        };
 
         v_flex()
             .id("fullscreen-player")
@@ -99,21 +116,26 @@ impl NavidromeApp {
                     this.wake_fullscreen_controls(cx);
                 }),
             )
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .w(relative(0.52))
-                    .bg(linear_gradient(
-                        90.0,
-                        linear_color_stop(gpui_kit::rgb(0x2c251c), 0.0),
-                        linear_color_stop(p.page.opacity(0.0), 1.0),
-                    )),
-            )
+            // Cover-reactive layered diagonal salon ambience.
+            .child(div().absolute().inset_0().bg(linear_gradient(
+                128.0,
+                linear_color_stop(p.page.blend(left_glow), 0.0),
+                linear_color_stop(p.page, 0.68),
+            )))
+            .child(div().absolute().inset_0().bg(linear_gradient(
+                302.0,
+                linear_color_stop(right_glow, 0.0),
+                linear_color_stop(p.page.opacity(0.0), 0.56),
+            )))
+            .child(div().absolute().inset_0().bg(linear_gradient(
+                0.0,
+                linear_color_stop(hsla(0.0, 0.0, 0.0, 0.32), 0.0),
+                linear_color_stop(p.page.opacity(0.0), 0.34),
+            )))
             .child(div().h(px(layout.header_height)).w_full().flex_none().when(
                 opacity > 0.0,
                 |this| {
-                    this.child(self.render_fullscreen_header(&layout, cx))
+                    this.child(self.render_fullscreen_header(cx))
                         .opacity(opacity)
                 },
             ))
@@ -140,12 +162,9 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    fn render_fullscreen_header(
-        &self,
-        layout: &FullscreenLayout,
-        cx: &Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_fullscreen_header(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let p = salon_palette();
+        let translated = self.fullscreen.translated;
         h_flex()
             .h_full()
             .w_full()
@@ -156,45 +175,49 @@ impl NavidromeApp {
                 h_flex()
                     .gap_3()
                     .items_center()
+                    .child(div().size(px(7.0)).rounded_full().bg(p.accent).shadow(vec![
+                        box_shadow(px(0.0), px(0.0), px(12.0), px(0.0), p.accent.opacity(0.55)),
+                    ]))
                     .child(
-                        Icon::new(AppIcon::Waveform)
-                            .with_size(px(25.0))
-                            .text_color(p.accent),
+                        div()
+                            .text_size(px(15.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.text)
+                            .child("NAVI"),
                     )
+                    .child(div().w(px(1.0)).h(px(13.0)).bg(p.border))
                     .child(
-                        v_flex()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(px(22.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("NAVI"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(9.0))
-                                    .text_color(p.muted)
-                                    .child(t!("Vinyl Salon")),
-                            ),
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(p.muted)
+                            .child(t!("Vinyl Salon")),
                     ),
             )
-            .when(!layout.compact, |this| {
-                this.child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(p.border)
-                        .text_size(px(10.0))
-                        .text_color(p.secondary)
-                        .child(t!("Fullscreen player")),
-                )
-            })
             .child(
                 h_flex()
-                    .gap_2()
+                    .px_1p5()
+                    .py_1()
+                    .gap_1()
                     .items_center()
+                    .rounded_full()
+                    .bg(p.glass)
+                    .border_1()
+                    .border_color(p.border)
+                    .child(
+                        salon_button(
+                            "fullscreen-translation",
+                            AppIcon::Translation,
+                            t!("Toggle translation (T)"),
+                            cx,
+                        )
+                        .custom(salon_toggle_style(translated, cx))
+                        .selected(translated)
+                        .toggled(translated)
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.toggle_fullscreen_translation(cx)),
+                        ),
+                    )
+                    .child(div().w(px(1.0)).h(px(14.0)).bg(p.border))
                     .child(
                         salon_button(
                             "fullscreen-hide-controls",
@@ -206,6 +229,7 @@ impl NavidromeApp {
                             this.toggle_fullscreen_controls(window, cx)
                         })),
                     )
+                    .child(div().w(px(1.0)).h(px(14.0)).bg(p.border))
                     .child(
                         salon_button(
                             "fullscreen-exit",
@@ -244,6 +268,11 @@ impl NavidromeApp {
                         .is_some_and(|source| source.id() == api.id())
             })
         });
+        let halo_color = self
+            .now_playing_cover_palette()
+            .map(|(_, accent)| hsla(accent.h, accent.s.min(0.45), 0.55, 0.16))
+            .unwrap_or_else(|| p.accent.opacity(0.14));
+
         v_flex()
             .w(px(layout.art_width))
             .flex_none()
@@ -254,33 +283,63 @@ impl NavidromeApp {
                     .min_w_0()
                     .items_center()
                     .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .mb(px(20.0))
-                            .child(div().w(px(20.0)).h(px(1.0)).bg(p.accent.opacity(0.65)))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_size(px(9.0))
-                                    .text_color(p.muted)
-                                    .truncate()
-                                    .child(album.clone()),
-                            ),
+                        div()
+                            .relative()
+                            .size(px(layout.cover_size))
+                            .flex_none()
+                            .rounded_full()
+                            .shadow(vec![
+                                box_shadow(
+                                    px(0.0),
+                                    px(0.0),
+                                    px(layout.cover_size * 0.24),
+                                    px(layout.cover_size * 0.02),
+                                    halo_color,
+                                ),
+                                box_shadow(
+                                    px(0.0),
+                                    px(24.0),
+                                    px(64.0),
+                                    px(-8.0),
+                                    hsla(0.0, 0.0, 0.0, 0.58),
+                                ),
+                            ])
+                            .child(self.render_vinyl_record_styled(
+                                layout.cover_size,
+                                0.40,
+                                Some(p.accent),
+                                cx,
+                            )),
                     )
-                    .child(self.render_vinyl_record_styled(
-                        layout.cover_size,
-                        0.36,
-                        Some(p.accent),
-                        cx,
-                    ))
                     .child(
                         v_flex()
                             .w_full()
-                            .mt(px(if layout.compact { 18.0 } else { 25.0 }))
-                            .gap_1()
+                            .mt(px(if layout.compact { 22.0 } else { 28.0 }))
+                            .gap_1p5()
+                            .when(!album.trim().is_empty(), |this| {
+                                this.child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .w(px(18.0))
+                                                .h(px(1.0))
+                                                .flex_none()
+                                                .bg(p.accent.opacity(0.70)),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .text_size(px(12.0))
+                                                .text_color(p.muted)
+                                                .truncate()
+                                                .child(album.clone()),
+                                        ),
+                                )
+                            })
                             .child(
                                 h_flex()
                                     .w_full()
@@ -292,8 +351,10 @@ impl NavidromeApp {
                                             .flex_1()
                                             .min_w_0()
                                             .font_family(serif)
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_size(px(if layout.compact { 29.0 } else { 38.0 }))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_size(px(if layout.compact { 28.0 } else { 36.0 }))
+                                            .line_height(relative(1.25))
+                                            .text_color(p.text)
                                             .truncate()
                                             .tooltip({
                                                 let title = title.clone();
@@ -308,7 +369,7 @@ impl NavidromeApp {
                                         let starred = self.state.favorites.is_starred(
                                             &FavoriteKey::new(FavoriteKind::Song, &song.id),
                                         );
-                                        this.child(div().size(px(36.0)).flex_none().when(
+                                        this.child(div().size(px(34.0)).flex_none().when(
                                             self.fullscreen.state.opacity() > 0.0,
                                             |this| {
                                                 this.child(
@@ -331,7 +392,7 @@ impl NavidromeApp {
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.0))
+                                    .text_size(px(14.0))
                                     .text_color(p.secondary)
                                     .truncate()
                                     .child(artist),
@@ -339,7 +400,7 @@ impl NavidromeApp {
                             .when_some(song.and_then(Song::bilibili_subtitle), |this, subtitle| {
                                 this.child(
                                     div()
-                                        .text_size(px(10.0))
+                                        .text_size(px(12.0))
                                         .text_color(p.muted)
                                         .truncate()
                                         .child(subtitle),
@@ -348,38 +409,16 @@ impl NavidromeApp {
                     )
                     .when(!layout.stacked, |this| {
                         this.child(
-                            v_flex()
+                            div()
                                 .w_full()
-                                .h(px(58.0))
+                                .h(px(38.0))
                                 .flex_none()
-                                .mt(px(if layout.compact { 15.0 } else { 23.0 }))
-                                .gap_2()
+                                .mt(px(if layout.compact { 14.0 } else { 20.0 }))
                                 .when(self.fullscreen.state.visualizer_enabled, |this| {
-                                    this.child(
-                                        h_flex()
-                                            .h(px(14.0))
-                                            .w_full()
-                                            .justify_between()
-                                            .items_center()
-                                            .child(
-                                                div()
-                                                    .text_size(px(9.0))
-                                                    .text_color(p.muted)
-                                                    .child(t!("Audio waveform")),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(8.0))
-                                                    .text_color(p.muted.opacity(0.55))
-                                                    .child(t!("Sound in motion")),
-                                            ),
-                                    )
-                                    .child(
-                                        super::visualizer::waveform_view(
-                                            self.fullscreen.waveform,
-                                            p.accent,
-                                        ),
-                                    )
+                                    this.child(super::visualizer::waveform_view(
+                                        self.fullscreen.waveform,
+                                        p.accent,
+                                    ))
                                 }),
                         )
                     }),

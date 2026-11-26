@@ -3,10 +3,7 @@
 # `src/i18n_tests.rs` fails the build if a t!() key is missing here.
 
 "Word-by-word lyrics": "Word-by-word lyrics"
-"Audio waveform": "Audio waveform"
-"Auto-follow": "Auto-follow"
 "Click a lyric to seek": "Click a lyric to seek"
-"Esc to exit · H controls · T translation · V waveform": "Esc to exit · H controls · T translation · V waveform"
 "Exit fullscreen (Esc)": "Exit fullscreen (Esc)"
 "Fullscreen player": "Fullscreen player"
 "Fullscreen player (%{shortcut})": "Fullscreen player (%{shortcut})"
@@ -15,7 +12,6 @@
 "Playback error": "Playback error"
 "Ready to play": "Ready to play"
 "Refresh lyrics": "Refresh lyrics"
-"Sound in motion": "Sound in motion"
 "Toggle translation (T)": "Toggle translation (T)"
 "Toggle waveform (V)": "Toggle waveform (V)"
 "Vinyl Salon": "Vinyl Salon"

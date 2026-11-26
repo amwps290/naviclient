@@ -1,7 +1,7 @@
-//! Real timed and plain lyrics, including adjusted cues and per-word highlighting.
+//! Real timed and plain lyrics with luminous active focus, accent anchor, and depth fade.
 
 use super::layout::FullscreenLayout;
-use super::view::{salon_button, salon_palette, salon_toggle_style};
+use super::view::{salon_button, salon_palette};
 use crate::app::prelude::*;
 
 impl NavidromeApp {
@@ -33,7 +33,7 @@ impl NavidromeApp {
                 .overflow_y_scroll()
                 .track_scroll(&self.fullscreen.scroll)
                 // The spacers let the first and last cue reach the viewport center.
-                .child(div().h(px(layout.body_height * 0.5)).flex_none())
+                .child(div().h(px(layout.body_height * 0.48)).flex_none())
                 .children(lyrics.lines.iter().enumerate().map(|(index, line)| {
                     let current = synced && active == Some(index);
                     let distance = active.map_or(usize::MAX, |active| active.abs_diff(index));
@@ -49,8 +49,8 @@ impl NavidromeApp {
                                     words.clone(),
                                     u64::try_from(playback.position.as_millis())
                                         .unwrap_or(u64::MAX),
-                                    p.muted.opacity(0.80),
-                                    p.accent,
+                                    p.muted.opacity(0.75),
+                                    p.active_lyric,
                                 )
                                 .into_any_element()
                             })
@@ -62,40 +62,16 @@ impl NavidromeApp {
                         .translation
                         .clone()
                         .filter(|text| translated && !text.is_empty() && (current || !synced));
-                    v_flex()
+
+                    h_flex()
                         .id(SharedString::from(format!(
                             "fullscreen-lyric-{song_id}-{index}"
                         )))
                         .w_full()
                         .flex_none()
-                        .min_h(px(58.0))
-                        .py(px(if layout.compact { 10.0 } else { 13.0 }))
-                        .gap(px(10.0))
-                        .font_family(serif.clone())
-                        .line_height(relative(1.48))
-                        .text_size(px(if current {
-                            layout.active_lyric_size
-                        } else {
-                            layout.lyric_size
-                        }))
-                        .font_weight(if current {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::MEDIUM
-                        })
-                        .text_color(if current {
-                            p.accent
-                        } else {
-                            p.text.opacity(if !synced {
-                                0.68
-                            } else if distance <= 1 {
-                                0.63
-                            } else if distance == 2 {
-                                0.45
-                            } else {
-                                0.32
-                            })
-                        })
+                        .items_start()
+                        .gap_4()
+                        .py(px(if layout.compact { 10.0 } else { 14.0 }))
                         .when_some(line.start_ms, |this, start| {
                             this.cursor_pointer()
                                 .hover(|this| this.text_color(p.text))
@@ -103,20 +79,77 @@ impl NavidromeApp {
                                     this.click_lyric_line(index, start, cx)
                                 }))
                         })
-                        .child(primary)
-                        .when_some(translation, |this, translation| {
-                            this.child(
-                                div()
-                                    .font_family("Georgia")
-                                    .text_size(px(if layout.compact { 13.0 } else { 16.0 }))
-                                    .font_weight(FontWeight::NORMAL)
-                                    .text_color(p.muted)
-                                    .child(translation),
-                            )
-                        })
+                        .child(
+                            div()
+                                .w(px(3.0))
+                                .h(px(if current {
+                                    layout.active_lyric_size * 0.85
+                                } else {
+                                    0.0
+                                }))
+                                .mt(px(if current {
+                                    layout.active_lyric_size * 0.24
+                                } else {
+                                    0.0
+                                }))
+                                .flex_none()
+                                .rounded_full()
+                                .when(current, |this| {
+                                    this.bg(p.accent).shadow(vec![box_shadow(
+                                        px(0.0),
+                                        px(0.0),
+                                        px(10.0),
+                                        px(0.0),
+                                        p.accent.opacity(0.45),
+                                    )])
+                                }),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(8.0))
+                                .font_family(serif.clone())
+                                .line_height(relative(if current { 1.38 } else { 1.46 }))
+                                .text_size(px(if current {
+                                    layout.active_lyric_size
+                                } else {
+                                    layout.lyric_size
+                                }))
+                                .font_weight(if current {
+                                    FontWeight::SEMIBOLD
+                                } else {
+                                    FontWeight::MEDIUM
+                                })
+                                .text_color(if current {
+                                    p.active_lyric
+                                } else {
+                                    p.text.opacity(if !synced {
+                                        0.68
+                                    } else if distance <= 1 {
+                                        0.52
+                                    } else if distance == 2 {
+                                        0.28
+                                    } else {
+                                        0.15
+                                    })
+                                })
+                                .child(primary)
+                                .when_some(translation, |this, translation| {
+                                    this.child(
+                                        div()
+                                            .font_family(cx.theme().font_family.clone())
+                                            .text_size(px(if layout.compact { 13.0 } else { 16.0 }))
+                                            .line_height(relative(1.45))
+                                            .font_weight(FontWeight::NORMAL)
+                                            .text_color(p.secondary.opacity(0.85))
+                                            .child(translation),
+                                    )
+                                }),
+                        )
                         .into_any_element()
                 }))
-                .child(div().h(px(layout.body_height * 0.5)).flex_none())
+                .child(div().h(px(layout.body_height * 0.48)).flex_none())
                 .into_any_element()
         } else {
             v_flex()
@@ -132,7 +165,7 @@ impl NavidromeApp {
                         div()
                             .max_w(px(480.0))
                             .text_center()
-                            .text_size(px(11.0))
+                            .text_size(px(12.0))
                             .text_color(p.muted)
                             .child(error.to_string()),
                     )
@@ -140,7 +173,7 @@ impl NavidromeApp {
                 .when(
                     self.state.now_playing.is_some() && !self.state.lyrics.loading(),
                     |this| {
-                        this.child(div().h(px(36.0)).when(chrome_opacity > 0.0, |this| {
+                        this.child(div().h(px(34.0)).when(chrome_opacity > 0.0, |this| {
                             this.opacity(chrome_opacity).child(
                                 salon_button(
                                     "fullscreen-refresh-lyrics",
@@ -169,48 +202,51 @@ impl NavidromeApp {
             .when(layout.stacked, |this| this.w_full())
             .child(
                 div()
-                    .h(px(32.0))
+                    .h(px(26.0))
                     .w_full()
                     .flex_none()
                     .when(chrome_opacity > 0.0, |this| {
                         this.opacity(chrome_opacity).child(
                             h_flex()
                                 .size_full()
+                                .pl(px(19.0))
                                 .items_center()
                                 .justify_between()
                                 .child(
                                     h_flex()
-                                        .gap_3()
+                                        .gap_2()
                                         .items_center()
+                                        .child(div().size(px(5.0)).rounded_full().bg(if synced {
+                                            p.accent
+                                        } else {
+                                            p.muted
+                                        }))
                                         .child(
                                             div()
-                                                .text_size(px(11.0))
+                                                .text_size(px(12.0))
                                                 .text_color(p.secondary)
                                                 .child(t!("Lyrics")),
                                         )
-                                        .when(synced, |this| {
+                                        .when(count > 0, |this| {
                                             this.child(
                                                 div()
-                                                    .text_size(px(10.0))
+                                                    .text_size(px(12.0))
                                                     .text_color(p.muted)
-                                                    .child(t!("Auto-follow")),
+                                                    .child(format!(
+                                                        "·  {:02} / {count}",
+                                                        active.map_or(0, |index| index + 1)
+                                                    )),
                                             )
                                         }),
                                 )
-                                .child(
-                                    salon_button(
-                                        "fullscreen-translation",
-                                        AppIcon::Translation,
-                                        t!("Toggle translation (T)"),
-                                        cx,
+                                .when(synced, |this| {
+                                    this.child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .text_color(p.muted.opacity(0.75))
+                                            .child(t!("Click a lyric to seek")),
                                     )
-                                    .custom(salon_toggle_style(translated, cx))
-                                    .selected(translated)
-                                    .toggled(translated)
-                                    .on_click(cx.listener(
-                                        |this, _, _, cx| this.toggle_fullscreen_translation(cx),
-                                    )),
-                                ),
+                                }),
                         )
                     }),
             )
@@ -221,45 +257,8 @@ impl NavidromeApp {
                     .min_h_0()
                     .w_full()
                     .overflow_hidden()
-                    .my_2()
-                    .child(body)
-                    .child(div().absolute().top_0().left_0().right_0().h(px(50.0)).bg(
-                        linear_gradient(
-                            180.0,
-                            linear_color_stop(p.page, 0.0),
-                            linear_color_stop(p.page.opacity(0.0), 1.0),
-                        ),
-                    ))
-                    .child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left_0()
-                            .right_0()
-                            .h(px(50.0))
-                            .bg(linear_gradient(
-                                0.0,
-                                linear_color_stop(p.page, 0.0),
-                                linear_color_stop(p.page.opacity(0.0), 1.0),
-                            )),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .h(px(20.0))
-                    .w_full()
-                    .flex_none()
-                    .opacity(chrome_opacity)
-                    .items_center()
-                    .justify_between()
-                    .text_size(px(9.0))
-                    .text_color(p.muted.opacity(0.70))
-                    .child(if count == 0 {
-                        String::new()
-                    } else {
-                        format!("{:02} / {count}", active.map_or(0, |index| index + 1))
-                    })
-                    .when(synced, |this| this.child(t!("Click a lyric to seek"))),
+                    .mt_2()
+                    .child(body),
             )
             .into_any_element()
     }

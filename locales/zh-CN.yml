@@ -3,10 +3,7 @@
 # 新增文案：先在源码写 t!("...")，再在三个语言文件里各补一条。
 
 "Word-by-word lyrics": "逐字歌词"
-"Audio waveform": "音频波形"
-"Auto-follow": "自动跟随"
 "Click a lyric to seek": "点击歌词，回到那一句"
-"Esc to exit · H controls · T translation · V waveform": "Esc 退出 · H 控件 · T 译文 · V 波形"
 "Exit fullscreen (Esc)": "退出全屏（Esc）"
 "Fullscreen player": "全屏播放器"
 "Fullscreen player (%{shortcut})": "全屏播放器（%{shortcut}）"
@@ -15,7 +12,6 @@
 "Playback error": "播放出错"
 "Ready to play": "等待播放"
 "Refresh lyrics": "重新获取歌词"
-"Sound in motion": "声音的形状"
 "Toggle translation (T)": "显示或隐藏译文（T）"
 "Toggle waveform (V)": "显示或隐藏波形（V）"
 "Vinyl Salon": "黑胶沙龙"
