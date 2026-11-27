@@ -5,11 +5,12 @@ use crate::app::prelude::*;
 #[cfg(target_os = "linux")]
 mod linux;
 
-pub(crate) fn init_window_frame(cx: &mut App) {
+pub(crate) fn init_ui(cx: &mut App) {
     #[cfg(target_os = "linux")]
-    linux::init(cx);
-    #[cfg(not(target_os = "linux"))]
-    let _ = cx;
+    linux::register_before_kit(cx);
+    gpui_kit::init(cx);
+    #[cfg(target_os = "linux")]
+    linux::register_after_kit(cx);
 }
 
 #[derive(Default)]

@@ -30,10 +30,7 @@ fn square_backgrounds(window: &Window) -> Vec<Hsla> {
 fn mini_corners_have_no_square_background_and_exit_restores_the_current_theme(
     cx: &mut TestAppContext,
 ) {
-    cx.update(|cx| {
-        gpui_kit::init(cx);
-        crate::app::init_window_frame(cx);
-    });
+    cx.update(crate::app::init_ui);
     let (window, _) = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {

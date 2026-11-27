@@ -27,7 +27,7 @@ mod style;
 mod widgets;
 
 pub(crate) use covers::state::CoverRequest;
-pub(crate) use desktop::mini_frame::init_window_frame;
+pub(crate) use desktop::mini_frame::init_ui;
 pub(crate) use home::albums::HomeAlbumSection;
 pub(crate) use library::favorites::FavoriteChange;
 pub(crate) use library::paged_collection::PageRequest;
