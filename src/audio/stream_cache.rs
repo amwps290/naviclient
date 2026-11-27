@@ -5,12 +5,13 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use md5::{Digest, Md5};
 
 use super::stream_control::StreamControl;
+use crate::config::{is_cache_digest, prune_cache_files};
 use crate::source::CachePolicy;
 
 const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -22,35 +23,33 @@ pub(super) fn prepare_cache_dir(cache_dir: &Path) -> Result<()> {
 fn prune_to(cache_dir: &Path, limit: u64) -> Result<()> {
     fs::create_dir_all(cache_dir).context("failed to create audio cache directory")?;
 
-    let mut entries = fs::read_dir(cache_dir)
-        .context("failed to read audio cache directory")?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
-            let metadata = entry.metadata().ok()?;
-            metadata.is_file().then(|| {
-                (
-                    entry.path(),
-                    metadata.len(),
-                    metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut total = entries.iter().map(|(_, len, _)| len).sum::<u64>();
-    if total <= limit {
-        return Ok(());
-    }
-
-    entries.sort_by_key(|(_, _, modified)| *modified);
-    for (path, len, _) in entries {
-        if total <= limit {
-            break;
-        }
-        if fs::remove_file(&path).is_ok() {
-            total = total.saturating_sub(len);
-        }
-    }
+    prune_cache_files(cache_dir, limit, is_audio_cache_name)
+        .context("failed to prune audio cache directory")?;
     Ok(())
+}
+
+fn is_audio_cache_name(name: &str) -> bool {
+    let Some((digest, suffix)) = name.split_once('.') else {
+        return false;
+    };
+    if !is_cache_digest(digest) {
+        return false;
+    }
+    if matches!(suffix, "audio" | "part") {
+        return true;
+    }
+    let Some((pid, serial)) = suffix
+        .strip_prefix("preload-")
+        .and_then(|suffix| suffix.strip_suffix(".part"))
+        .and_then(|suffix| suffix.split_once('-'))
+    else {
+        return false;
+    };
+    pid.parse::<u32>()
+        .is_ok_and(|value| value.to_string() == pid)
+        && serial
+            .parse::<u64>()
+            .is_ok_and(|value| value.to_string() == serial)
 }
 
 pub(super) fn cache_paths(cache_dir: &Path, cache_key: &str) -> (PathBuf, PathBuf) {

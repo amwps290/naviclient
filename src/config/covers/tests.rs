@@ -81,28 +81,59 @@ fn cover_cache_round_trips_and_missing_files_miss() {
 }
 
 #[test]
-fn cover_cache_prune_removes_oldest_files_beyond_limit() {
-    let dir =
-        std::env::temp_dir().join(format!("navidrome-cover-prune-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+fn cover_cache_prune_evicts_recognized_names_only() {
+    use std::time::{Duration, SystemTime};
 
-    // 三个文件共 300 字节；上限 200：最旧的 two.bin 应被删到回到限额内。
-    std::fs::write(dir.join("oldest.cover"), vec![0u8; 150]).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    std::fs::write(dir.join("middle.cover"), vec![0u8; 100]).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    std::fs::write(dir.join("newest.cover"), vec![0u8; 50]).unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: Some(parent.path().into()),
+        ..Config::default()
+    };
+    let legacy_covers = parent.path().join("covers");
+    fs::create_dir(&legacy_covers).unwrap();
+    let legacy = legacy_covers.join(cover_cache_file_name(None, "legacy"));
+    fs::write(&legacy, b"leave legacy files untouched").unwrap();
+    assert_eq!(
+        prune_cover_cache_at(&config, 0).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
 
-    let removed = prune_cover_cache_at(&dir, 200);
-    assert_eq!(removed, 150);
-    assert!(!dir.join("oldest.cover").exists());
-    assert!(dir.join("middle.cover").exists());
-    assert!(dir.join("newest.cover").exists());
+    let subsonic = SourceId::new(ProviderKind::OpenSubsonic, "srv");
+    let bilibili = SourceId::new(ProviderKind::Bilibili, "bili");
+    for (index, source) in [&subsonic, &bilibili].into_iter().enumerate() {
+        write_source_cover_cache(&config, source, "cover", b"cover");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(source_cover_cache_path(&config, source, "cover"))
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(index as u64 + 1))
+            .unwrap();
+    }
+    let user_file = cover_cache_dir(&config).join("my-artwork.cover");
+    fs::write(&user_file, b"not app-owned artwork").unwrap();
 
-    // 限额内不删除。
-    assert_eq!(prune_cover_cache_at(&dir, 200), 0);
-    // 目录不存在时静默返回 0。
-    std::fs::remove_dir_all(&dir).unwrap();
-    assert_eq!(prune_cover_cache_at(&dir, 200), 0);
+    assert_eq!(prune_cover_cache_at(&config, 5).unwrap(), 5);
+    assert!(!source_cover_cache_path(&config, &subsonic, "cover").exists());
+    assert!(source_cover_cache_path(&config, &bilibili, "cover").exists());
+    assert_eq!(prune_cover_cache_at(&config, 5).unwrap(), 0);
+    assert_eq!(fs::read(user_file).unwrap(), b"not app-owned artwork");
+    assert_eq!(fs::read(legacy).unwrap(), b"leave legacy files untouched");
+}
+
+#[cfg(unix)]
+#[test]
+fn cover_cleanup_does_not_follow_a_redirected_cover_directory() {
+    let parent = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: Some(parent.path().into()),
+        ..Config::default()
+    };
+    prepare_audio_cache_dir(&config).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let personal = other.path().join(cover_cache_file_name(None, "outside"));
+    fs::write(&personal, b"personal cover").unwrap();
+    std::os::unix::fs::symlink(other.path(), cover_cache_dir(&config)).unwrap();
+
+    assert!(prune_cover_cache_at(&config, 0).is_err());
+    assert_eq!(fs::read(personal).unwrap(), b"personal cover");
 }

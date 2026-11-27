@@ -1,6 +1,10 @@
 //! Platform storage directories and stable server namespace keys.
 
-use std::path::PathBuf;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+
+use super::cache_files::require_cache_directory;
 
 use crate::models::Config;
 use crate::source::{ProviderKind, SourceId};
@@ -50,7 +54,7 @@ pub fn source_scope(source: &SourceId) -> String {
     }
 }
 
-pub fn default_audio_cache_dir() -> PathBuf {
+fn default_audio_cache_dir() -> PathBuf {
     if let Some(project_dirs) =
         directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")
     {
@@ -60,11 +64,64 @@ pub fn default_audio_cache_dir() -> PathBuf {
     }
 }
 
+const CUSTOM_CACHE_DIRECTORY: &str = "navidrome-client-cache";
+const CACHE_OWNER_FILE: &str = ".navidrome-client-owner";
+const CACHE_OWNER: &[u8] = b"navidrome-client cache v1\n";
+
 pub fn audio_cache_dir(config: &Config) -> PathBuf {
     config
         .cache_dir
-        .clone()
+        .as_ref()
+        .map(|parent| parent.join(CUSTOM_CACHE_DIRECTORY))
         .unwrap_or_else(default_audio_cache_dir)
+}
+
+/// Claim a new child directory, but never adopt a pre-existing unmarked one.
+/// Legacy files directly in the selected parent are not moved or removed.
+pub fn prepare_audio_cache_dir(config: &Config) -> io::Result<PathBuf> {
+    let directory = audio_cache_dir(config);
+    if let Some(parent) = &config.cache_dir {
+        fs::create_dir_all(parent)?;
+        match fs::create_dir(&directory) {
+            Ok(()) => fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(directory.join(CACHE_OWNER_FILE))?
+                .write_all(CACHE_OWNER)?,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    } else {
+        fs::create_dir_all(&directory)?;
+    }
+    verify_audio_cache_dir(config, &directory)?;
+    Ok(directory)
+}
+
+pub(super) fn verify_audio_cache_dir(config: &Config, directory: &Path) -> io::Result<()> {
+    require_cache_directory(directory)?;
+    if config.cache_dir.is_none() {
+        return Ok(());
+    }
+    let marker = directory.join(CACHE_OWNER_FILE);
+    if fs::symlink_metadata(&marker).is_ok_and(|metadata| {
+        metadata.file_type().is_file() && metadata.len() == CACHE_OWNER.len() as u64
+    }) {
+        let mut contents = Vec::new();
+        fs::File::open(marker)?
+            .take(CACHE_OWNER.len() as u64 + 1)
+            .read_to_end(&mut contents)?;
+        if contents == CACHE_OWNER {
+            return Ok(());
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "refusing to use an unmanaged cache directory: {}",
+            directory.display()
+        ),
+    ))
 }
 
 /// 封面磁盘缓存目录（与音频缓存同体系，切换缓存目录即切换命名空间）。

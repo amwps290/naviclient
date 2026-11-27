@@ -423,12 +423,15 @@ document. Listening history is isolated per server, bounded to the latest 1000
 attempts, and measures actual playback progress without counting seek jumps.
 
 OpenSubsonic audio is cached separately in the configured audio cache directory.
-The folder can be changed from Settings, completed tracks are reused without
-another download, partial original tracks resume through HTTP range requests
-when supported, and the oldest cache files are removed at startup when the
-cache exceeds 4 GiB. Album cover art bytes are also cached to disk under the
-same directory (`covers/`), capped at 256 MiB with oldest-first pruning, so
-restarts render grids instantly without re-downloading every cover.
+When you choose a folder in Settings, the app creates a managed
+`navidrome-client-cache` subfolder. Files written directly into a previously
+configured folder by an older version are left in place and aren't reused.
+The default cache location is unchanged. Completed tracks are reused without
+another download; partial original tracks resume through HTTP Range when
+supported. Audio cleanup evicts only recognized cache files when their total
+exceeds 4 GiB. Album cover art is stored in `covers/` inside the managed cache,
+with a separate 256 MiB limit. Unrelated files, subdirectories, and symbolic
+links aren't counted or removed by either cleanup.
 Bilibili uses a private temporary audio cache capped at 32 MiB per reader;
 larger audio continues through HTTP Range requests, and the temporary file
 is released with its reader, so replaying a track downloads its audio again.

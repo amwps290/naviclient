@@ -4,26 +4,28 @@ use crate::app::prelude::*;
 
 impl NavidromeApp {
     pub(in crate::app) fn apply_cache_directory(&mut self, cache_dir: Option<PathBuf>) {
-        let effective_dir = cache_dir
-            .clone()
-            .unwrap_or_else(config::default_audio_cache_dir);
-        if let Err(error) = fs::create_dir_all(&effective_dir) {
-            self.notify_error(t!(
-                "Unable to use cache directory %{dir}: %{error}",
-                dir = effective_dir.display(),
-                error = error
-            ));
-            return;
-        }
+        let mut next = self.config.clone();
+        next.cache_dir = cache_dir;
+        let effective_dir = match config::prepare_audio_cache_dir(&next) {
+            Ok(directory) => directory,
+            Err(error) => {
+                self.notify_error(t!(
+                    "Unable to use cache directory %{dir}: %{error}",
+                    dir = config::audio_cache_dir(&next).display(),
+                    error = error
+                ));
+                return;
+            }
+        };
 
-        self.config.cache_dir = cache_dir;
-        if let Err(error) = config::save(&self.config) {
+        if let Err(error) = config::save(&next) {
             self.notify_error(t!(
                 "Cache directory save failed: %{error}",
                 error = format!("{error:#}")
             ));
             return;
         }
+        self.config = next;
         self.cancel_next_preload();
         self.audio.set_cache_directory(effective_dir.clone());
         self.state.status = t!("Audio cache: %{dir}", dir = effective_dir.display()).to_string();

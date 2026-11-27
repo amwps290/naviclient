@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::preload::tests::TestCache;
+use std::time::SystemTime;
 
 #[test]
 fn temporary_cache_is_bounded_ignores_persistent_files_and_never_publishes() {
@@ -282,34 +283,104 @@ fn truncated_completed_cache_returns_an_error_instead_of_a_false_end() {
 }
 
 #[test]
-fn pruning_removes_oldest_files_to_the_limit_and_preserves_directories() {
+fn pruning_removes_oldest_cache_files_but_ignores_unrelated_entries() {
     let cache = TestCache::new();
-    let oldest = cache.0.join("old.part");
-    let newest = cache.0.join("new.audio");
-    fs::write(&oldest, b"older").unwrap();
-    fs::write(&newest, b"newer").unwrap();
-    OpenOptions::new()
-        .write(true)
-        .open(&oldest)
-        .unwrap()
-        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
-        .unwrap();
-    OpenOptions::new()
-        .write(true)
-        .open(&newest)
-        .unwrap()
-        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(2))
-        .unwrap();
-    let directory = cache.0.join("covers");
+    let (_, oldest) = cache_paths(&cache.0, "old stream");
+    let (newest, _) = cache_paths(&cache.0, "completed stream");
+    let (_, mut speculative) = cache_paths(&cache.0, "preloaded stream");
+    speculative.set_extension("preload-42-0.part");
+    for (index, path) in [&oldest, &speculative, &newest].into_iter().enumerate() {
+        let mut file = File::create(path).unwrap();
+        file.write_all(b"audio").unwrap();
+        file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(index as u64 + 10))
+            .unwrap();
+    }
+    let unrelated = [
+        "personal-backup.bin",
+        "my-recording.audio",
+        "unfinished-download.part",
+        "0123456789abcdef0123456789abcdef.preload-latest-0.part",
+        "0123456789abcdef0123456789abcdef.audio.bak",
+    ];
+    for name in unrelated {
+        let file = File::create(cache.0.join(name)).unwrap();
+        file.set_len(1024).unwrap();
+        file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
+            .unwrap();
+    }
+    let (directory, _) = cache_paths(&cache.0, "cache-looking directory");
     fs::create_dir(&directory).unwrap();
-    fs::write(directory.join("cover"), b"preserve nested files").unwrap();
+    fs::write(directory.join("nested"), b"preserve nested files").unwrap();
+
     prune_to(&cache.0, 5).unwrap();
+
     assert!(!oldest.exists());
-    assert_eq!(fs::read(newest).unwrap(), b"newer");
+    assert!(!speculative.exists());
+    assert_eq!(fs::read(newest).unwrap(), b"audio");
+    for name in unrelated {
+        assert_eq!(fs::metadata(cache.0.join(name)).unwrap().len(), 1024);
+    }
     assert_eq!(
-        fs::read(directory.join("cover")).unwrap(),
+        fs::read(directory.join("nested")).unwrap(),
         b"preserve nested files"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn pruning_ignores_cache_named_symlinks_and_refuses_symlink_directories() {
+    use std::os::unix::fs::symlink;
+
+    let cache = TestCache::new();
+    let other = TestCache::new();
+    let (personal, _) = cache_paths(&other.0, "outside cache");
+    fs::write(&personal, b"private file").unwrap();
+    let (link, _) = cache_paths(&cache.0, "symlink");
+    symlink(&personal, &link).unwrap();
+    let directory_link = cache.0.join("symlink-directory");
+    symlink(&other.0, &directory_link).unwrap();
+    let (audio, _) = cache_paths(&cache.0, "complete");
+    fs::write(&audio, b"audio").unwrap();
+
+    prune_to(&cache.0, 5).unwrap();
+    assert!(prune_to(&directory_link, 0).is_err());
+    assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(audio).unwrap(), b"audio");
+    assert_eq!(fs::read(personal).unwrap(), b"private file");
+}
+
+// File::set_len creates a sparse file on the Linux test filesystem.
+#[cfg(target_os = "linux")]
+#[test]
+fn preparing_a_custom_cache_leaves_a_backup_larger_than_the_audio_limit_alone() {
+    let parent = TestCache::new();
+    let config = crate::models::Config {
+        cache_dir: Some(parent.0.clone()),
+        ..Default::default()
+    };
+    let backup = parent.0.join("personal-backup.bin");
+    File::create(&backup)
+        .unwrap()
+        .set_len(MAX_AUDIO_CACHE_BYTES + 1)
+        .unwrap();
+    let managed = crate::config::prepare_audio_cache_dir(&config).unwrap();
+    // Even a large unrelated file put inside the managed directory must not
+    // count toward the eviction quota.
+    let (audio, _) = cache_paths(&managed, "small audio");
+    fs::write(&audio, b"audio").unwrap();
+    let unmanaged = managed.join("personal-recording.audio");
+    fs::hard_link(&backup, &unmanaged).unwrap();
+
+    prepare_cache_dir(&managed).unwrap();
+    assert_eq!(
+        fs::metadata(backup).unwrap().len(),
+        MAX_AUDIO_CACHE_BYTES + 1
+    );
+    assert_eq!(
+        fs::metadata(unmanaged).unwrap().len(),
+        MAX_AUDIO_CACHE_BYTES + 1
+    );
+    assert_eq!(fs::read(audio).unwrap(), b"audio");
 }
 
 #[test]
@@ -317,7 +388,7 @@ fn preparing_an_absent_directory_creates_it_and_retains_files_below_limit() {
     let cache = TestCache::new();
     let nested = cache.0.join("audio");
     prepare_cache_dir(&nested).unwrap();
-    let path = nested.join("song.part");
+    let (_, path) = cache_paths(&nested, "song");
     fs::write(&path, b"audio").unwrap();
     prune_to(&nested, 5).unwrap();
     assert_eq!(fs::read(path).unwrap(), b"audio");

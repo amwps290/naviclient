@@ -81,6 +81,16 @@ impl NavidromeApp {
         let runtime = Runtime::new().expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
         let global_shortcuts = GlobalShortcutManager::new(&config.global_shortcuts);
+        let requested_cache_dir = config::audio_cache_dir(&config);
+        let cache_directory_error = if config.cache_dir.is_some() {
+            config::prepare_audio_cache_dir(&config).err()
+        } else {
+            None
+        };
+        if let Some(error) = &cache_directory_error {
+            log::warn!("using the default audio cache directory: {error}");
+            config.cache_dir = None;
+        }
         let audio_cache_dir = config::audio_cache_dir(&config);
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
@@ -238,6 +248,13 @@ impl NavidromeApp {
             library_requests: LibraryRequests::default(),
             server_removal: ServerRemovalState::default(),
         };
+        if let Some(error) = cache_directory_error {
+            app.notify_error(t!(
+                "Unable to use cache directory %{dir}: %{error}",
+                dir = requested_cache_dir.display(),
+                error = error
+            ));
+        }
         app.state.playback_modes = app.config.playback_modes;
         app.subscribe_lyrics_inputs(cx);
         app.subscribe_log_search(cx);

@@ -1,11 +1,16 @@
 //! Server-specific cover keys, raw response caching, and bounded disk retention.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
-use super::{cover_cache_dir, server_scope};
+use super::cache_files::{is_cache_digest, prune_cache_files, require_cache_directory};
+use super::paths::{
+    audio_cache_dir, cover_cache_dir, prepare_audio_cache_dir, verify_audio_cache_dir,
+};
+use super::server_scope;
 use crate::models::Config;
 use crate::source::{ProviderKind, SourceId};
 
@@ -43,69 +48,58 @@ pub fn read_source_cover_cache(
     source: &SourceId,
     cover_id: &str,
 ) -> Option<Vec<u8>> {
-    read_cover_at(&source_cover_cache_path(config, source, cover_id))
+    read_cover_at(config, &source_cover_cache_path(config, source, cover_id))
 }
 
 pub fn write_source_cover_cache(config: &Config, source: &SourceId, cover_id: &str, bytes: &[u8]) {
-    write_cover_at(&source_cover_cache_path(config, source, cover_id), bytes);
+    write_cover_at(
+        config,
+        &source_cover_cache_path(config, source, cover_id),
+        bytes,
+    );
 }
 
 /// 读取缓存的原封字节；文件缺失或读取失败按未命中处理。
-fn read_cover_at(path: &Path) -> Option<Vec<u8>> {
+fn read_cover_at(config: &Config, path: &Path) -> Option<Vec<u8>> {
+    verify_audio_cache_dir(config, &audio_cache_dir(config)).ok()?;
+    require_cache_directory(&cover_cache_dir(config)).ok()?;
     fs::read(path).ok()
 }
 
 /// 写入原封字节；失败只记日志不影响播放。
-fn write_cover_at(path: &Path, bytes: &[u8]) {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Err(error) = fs::write(path, bytes) {
-        log::warn!("failed to write cover cache {:?}: {error}", path);
+fn write_cover_at(config: &Config, path: &Path, bytes: &[u8]) {
+    let result = (|| -> io::Result<()> {
+        prepare_audio_cache_dir(config)?;
+        let directory = cover_cache_dir(config);
+        fs::create_dir_all(&directory)?;
+        require_cache_directory(&directory)?;
+        fs::write(path, bytes)
+    })();
+    if let Err(error) = result {
+        log::warn!("failed to write cover cache {path:?}: {error}");
     }
 }
 
 /// 缓存总量上限；超出时从最旧开始删除。
 const COVER_CACHE_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
-/// 清理封面缓存：总量超过上限时按修改时间从最旧开始删除，
-/// 返回删除的字节数供日志记录。目录不存在时静默返回 0。
-fn prune_cover_cache_at(dir: &Path, max_bytes: u64) -> u64 {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return 0;
+fn is_cover_cache_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".cover") else {
+        return false;
     };
-    let mut files = Vec::new();
-    let mut total: u64 = 0;
-    for entry in entries.flatten() {
-        let Ok(meta) = entry.metadata() else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let size = meta.len();
-        let Ok(modified) = meta.modified() else {
-            continue;
-        };
-        total += size;
-        files.push((modified, size, entry.path()));
+    if let Some((source, cover)) = stem
+        .strip_prefix("source-")
+        .and_then(|stem| stem.split_once('-'))
+    {
+        is_cache_digest(source) && is_cache_digest(cover)
+    } else {
+        is_cache_digest(stem)
     }
-    if total <= max_bytes {
-        return 0;
-    }
-    // 最旧的在前；逐个删除直到回到限额内。
-    files.sort_by_key(|(modified, _, _)| *modified);
-    let mut removed = 0;
-    for (_, size, path) in files {
-        if total <= max_bytes {
-            break;
-        }
-        if fs::remove_file(&path).is_ok() {
-            total = total.saturating_sub(size);
-            removed += size;
-        }
-    }
-    removed
+}
+
+fn prune_cover_cache_at(config: &Config, max_bytes: u64) -> io::Result<u64> {
+    verify_audio_cache_dir(config, &audio_cache_dir(config))?;
+    prune_cache_files(&cover_cache_dir(config), max_bytes, is_cover_cache_name)
 }
 
 /// 读取封面磁盘缓存；未命中返回 None。
@@ -116,23 +110,35 @@ pub fn read_cover_cache(
     server_id: Option<&str>,
     cover_id: &str,
 ) -> Option<Vec<u8>> {
-    read_cover_at(&cover_cache_path(config, server_id, cover_id))
+    read_cover_at(config, &cover_cache_path(config, server_id, cover_id))
 }
 
 /// 下载成功后写入封面磁盘缓存。
 #[cfg(test)]
 pub fn write_cover_cache(config: &Config, server_id: Option<&str>, cover_id: &str, bytes: &[u8]) {
-    write_cover_at(&cover_cache_path(config, server_id, cover_id), bytes);
+    write_cover_at(
+        config,
+        &cover_cache_path(config, server_id, cover_id),
+        bytes,
+    );
 }
 
 /// 启动时清理超限的封面缓存；返回删除的字节数。
 pub fn prune_cover_cache(config: &Config) -> u64 {
     let dir = cover_cache_dir(config);
-    let removed = prune_cover_cache_at(&dir, COVER_CACHE_MAX_BYTES);
-    if removed > 0 {
-        log::info!("pruned {removed} bytes of cover cache under {dir:?}");
+    match prune_cover_cache_at(config, COVER_CACHE_MAX_BYTES) {
+        Ok(removed) => {
+            if removed > 0 {
+                log::info!("pruned {removed} bytes of cover cache under {dir:?}");
+            }
+            removed
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => {
+            log::warn!("skipped cover cache cleanup under {dir:?}: {error}");
+            0
+        }
     }
-    removed
 }
 
 #[cfg(test)]
