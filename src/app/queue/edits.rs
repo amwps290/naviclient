@@ -106,6 +106,54 @@ impl QueueEdits<'_> {
         }
     }
 
+    /// Remove multiple indices in one pass, remapping shuffle history and selection once.
+    pub(in crate::app) fn remove_many(&mut self, indices: &[usize]) -> QueueRemoval {
+        let old_len = self.queue.len();
+        let mut removed = vec![false; old_len];
+        let mut removed_count = 0usize;
+        for &index in indices {
+            if index < old_len && !removed[index] {
+                removed[index] = true;
+                removed_count += 1;
+            }
+        }
+        if removed_count == 0 {
+            return QueueRemoval::Missing;
+        }
+        let mut old_to_new = vec![None; old_len];
+        let mut next_new = 0usize;
+        for index in 0..old_len {
+            if !removed[index] {
+                old_to_new[index] = Some(next_new);
+                next_new += 1;
+            }
+        }
+        let new_len = next_new;
+        self.queue.retain_indexed(|index| !removed[index]);
+        self.remap(old_len, |index| old_to_new[index]);
+
+        let Some(current) = *self.index else {
+            return QueueRemoval::KeptCurrent;
+        };
+        if current >= old_len {
+            *self.index = None;
+            return QueueRemoval::KeptCurrent;
+        }
+        if !removed[current] {
+            *self.index = old_to_new[current];
+            return QueueRemoval::KeptCurrent;
+        }
+        if new_len == 0 {
+            *self.index = None;
+            return QueueRemoval::Stop;
+        }
+        let replacement = (current + 1..old_len)
+            .find_map(|index| old_to_new[index])
+            .unwrap_or(new_len - 1);
+        *self.index = Some(replacement);
+        QueueRemoval::PlayReplacement(replacement)
+    }
+
     pub(in crate::app) fn move_entry(&mut self, from: usize, to: usize) -> bool {
         let old_len = self.queue.len();
         if !self.queue.move_entry(from, to) {

@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
-use super::cache_files::{is_cache_digest, prune_cache_files, require_cache_directory};
+use super::cache_files::{
+    is_audio_cache_name, is_cache_digest, measure_cache_files, prune_cache_files,
+    require_cache_directory,
+};
 use super::paths::{
     audio_cache_dir, cover_cache_dir, prepare_audio_cache_dir, verify_audio_cache_dir,
 };
@@ -121,6 +124,60 @@ pub fn write_cover_cache(config: &Config, server_id: Option<&str>, cover_id: &st
         &cover_cache_path(config, server_id, cover_id),
         bytes,
     );
+}
+
+/// Disk usage summary for application-owned audio and cover caches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheUsage {
+    pub audio_bytes: u64,
+    pub audio_files: usize,
+    pub cover_bytes: u64,
+    pub cover_files: usize,
+}
+
+#[cfg(test)]
+impl CacheUsage {
+    pub fn total_bytes(&self) -> u64 {
+        self.audio_bytes.saturating_add(self.cover_bytes)
+    }
+}
+
+/// Measure owned audio and cover cache files without following symlinks or
+/// counting unrelated user files.
+pub fn cache_usage(config: &Config) -> CacheUsage {
+    let audio_dir = audio_cache_dir(config);
+    if verify_audio_cache_dir(config, &audio_dir).is_err() {
+        return CacheUsage::default();
+    }
+    let (audio_bytes, audio_files) =
+        measure_cache_files(&audio_dir, is_audio_cache_name).unwrap_or((0, 0));
+    let (cover_bytes, cover_files) =
+        measure_cache_files(&cover_cache_dir(config), is_cover_cache_name).unwrap_or((0, 0));
+    CacheUsage {
+        audio_bytes,
+        audio_files,
+        cover_bytes,
+        cover_files,
+    }
+}
+
+/// Delete all removable application-owned audio cache files; returns freed bytes.
+pub fn clear_audio_cache(config: &Config) -> io::Result<u64> {
+    let audio_dir = audio_cache_dir(config);
+    match verify_audio_cache_dir(config, &audio_dir) {
+        Ok(()) => prune_cache_files(&audio_dir, 0, is_audio_cache_name),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error),
+    }
+}
+
+/// Delete all removable application-owned cover cache files; returns freed bytes.
+pub fn clear_cover_cache(config: &Config) -> io::Result<u64> {
+    match prune_cover_cache_at(config, 0) {
+        Ok(removed) => Ok(removed),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error),
+    }
 }
 
 /// 启动时清理超限的封面缓存；返回删除的字节数。

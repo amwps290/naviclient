@@ -150,6 +150,14 @@ impl NavidromeApp {
                 .default_value(config.volume * 100.0)
         });
         let initial_volume = config.volume;
+        let eq_preamp = config.equalizer.preamp_db;
+        let eq_preamp_slider = cx.new(move |_| {
+            SliderState::new()
+                .min(EqSettings::MIN_GAIN_DB)
+                .max(EqSettings::MAX_GAIN_DB)
+                .step(1.0)
+                .default_value(eq_preamp)
+        });
         let eq_sliders: Vec<Entity<SliderState>> = (0..EqSettings::BANDS.len())
             .map(|band| {
                 let gain = config.equalizer.gains_db[band];
@@ -162,6 +170,8 @@ impl NavidromeApp {
                 })
             })
             .collect();
+        let eq_preset_name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Preset name")));
 
         let mut app = Self {
             logs: crate::app::settings::logs::LogViewer::new(window, cx),
@@ -242,8 +252,11 @@ impl NavidromeApp {
             _subscriptions: Vec::new(),
             mini_window: MiniWindowState::default(),
             fullscreen: crate::app::player::fullscreen::window::FullscreenUi::new(cx),
+            eq_preamp_slider,
             eq_sliders,
+            eq_preset_name_input,
             equalizer: EqualizerState::default(),
+            consecutive_missing_skips: 0,
             album_page_requests: PageRequests::default(),
             library_requests: LibraryRequests::default(),
             server_removal: ServerRemovalState::default(),
@@ -271,6 +284,10 @@ impl NavidromeApp {
         app.state.albums_sort = app.config.albums_sort;
         app.state.artists.set_sort(app.config.artists_sort);
         app.audio.set_volume(initial_volume);
+        app.audio
+            .set_cache_limit_mb(app.config.audio_cache_limit_mb);
+        app.audio
+            .set_pause_on_output_disconnect(app.config.pause_on_output_disconnect);
         // 响度/流派/播放会话都按服务器隔离，统一在切换与启动时加载。
         app.load_active_server_cache();
 
@@ -357,6 +374,16 @@ impl NavidromeApp {
                     return;
                 };
                 this.set_volume(*value / 100.0, cx);
+            },
+        ));
+        let eq_preamp_slider = app.eq_preamp_slider.clone();
+        app._subscriptions.push(cx.subscribe(
+            &eq_preamp_slider,
+            |this, _, event: &SliderEvent, cx| {
+                let SliderEvent::Change(SliderValue::Single(value)) = event else {
+                    return;
+                };
+                this.set_eq_preamp(*value, cx);
             },
         ));
         let eq_sliders = app.eq_sliders.clone();

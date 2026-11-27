@@ -4,6 +4,8 @@ use super::reconnect::{ReconnectDecision, ReconnectPoll, RetryKind};
 use super::start::StartIntent;
 use crate::app::prelude::*;
 
+const MAX_CONSECUTIVE_MISSING_SKIPS: u8 = 10;
+
 impl NavidromeApp {
     pub(in crate::app) fn handle_playback_end(&mut self) {
         self.sync_gapless_transition();
@@ -15,8 +17,12 @@ impl NavidromeApp {
         if self.state.now_playing.is_none() {
             return;
         }
+        if playback.active && playback.output_connected && playback.error.is_none() {
+            self.consecutive_missing_skips = 0;
+        }
         let occurrence = self.state.occurrence.id();
         if playback.ended && playback.error.is_none() {
+            self.consecutive_missing_skips = 0;
             if self.state.occurrence.claim_terminal(occurrence, true) {
                 self.freeze_next_preload();
                 self.ensure_scrobble_on_end();
@@ -41,6 +47,28 @@ impl NavidromeApp {
             if self.schedule_reconnect(playback.failure, playback.position) {
                 return;
             }
+            // Deleted or unavailable track (HTTP 404/410) in a restored or long
+            // queue: skip forward with a bounded counter so playback does not stall.
+            if matches!(playback.failure, Some(StreamFailure::Http(404 | 410)))
+                && self.consecutive_missing_skips < MAX_CONSECUTIVE_MISSING_SKIPS
+                && self.state.queue.len() > 1
+            {
+                self.consecutive_missing_skips += 1;
+                let skipped_title = self
+                    .state
+                    .now_playing
+                    .as_ref()
+                    .map(|song| song.title.clone())
+                    .unwrap_or_default();
+                if self.play_next(true) {
+                    self.notify_warning(t!(
+                        "Skipped unavailable track: %{title}",
+                        title = skipped_title
+                    ));
+                    return;
+                }
+            }
+            self.consecutive_missing_skips = 0;
             // Opus 源解码失败时给出可操作的提示（而不是误导性的
             // “格式未识别”）：说明需要服务器转码，并指向两案。
             let undecodable_source = self.state.now_playing.as_ref().is_some_and(|song| {

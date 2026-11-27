@@ -1,8 +1,10 @@
 //! Player bar layout, current-track information and accessory controls.
 
+use crate::app::library::navigation::{album_for_song, artist_for_song};
 use crate::app::playback::display::playback_technical_info;
 use crate::app::prelude::*;
 use crate::app::shortcuts::bindings::shortcut_display;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 
 impl NavidromeApp {
     pub(in crate::app) fn render_player(
@@ -138,6 +140,13 @@ impl NavidromeApp {
                     this.open_now_playing();
                     cx.notify();
                 }))
+                .context_menu({
+                    let app = cx.entity().downgrade();
+                    move |menu, _, cx| {
+                        app.update(cx, |this, cx| this.now_playing_context_menu(menu, cx))
+                            .expect("app owns now playing menu")
+                    }
+                })
                 .into_any_element()
         } else {
             h_flex()
@@ -256,6 +265,127 @@ impl NavidromeApp {
             )
             .child(self.render_volume_control(accent, cx))
             .into_any_element()
+    }
+
+    pub(in crate::app) fn now_playing_context_menu(
+        &self,
+        mut menu: PopupMenu,
+        cx: &Context<Self>,
+    ) -> PopupMenu {
+        let Some(song) = self.state.now_playing.clone() else {
+            return menu;
+        };
+        let is_bilibili = song
+            .source
+            .as_ref()
+            .is_some_and(|source| source.provider == crate::source::ProviderKind::Bilibili);
+        let browsing_owner = self.browsing_owns_song(&song);
+        let capabilities = self
+            .api
+            .as_ref()
+            .map(MusicSource::capabilities)
+            .unwrap_or_default();
+
+        if !is_bilibili {
+            let radio_seed = song.clone();
+            let radio_loading = self.song_radio_loading(&song.id);
+            menu = menu.item(
+                PopupMenuItem::new(if radio_loading {
+                    t!("Building song radio…")
+                } else {
+                    t!("Start song radio")
+                })
+                .disabled(
+                    self.source_for_song(&song)
+                        .is_none_or(|api| !api.capabilities().recommendations)
+                        || radio_loading,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_song_radio(radio_seed.clone());
+                    cx.notify();
+                })),
+            );
+            let add_song = song.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Add to playlist…"))
+                    .disabled(
+                        self.state.playlists.editing()
+                            || !browsing_owner
+                            || !capabilities.playlist_write,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.browsing_owns_song(&add_song) {
+                            this.choose_playlist(vec![add_song.id.clone()], window, cx);
+                        }
+                    })),
+            );
+            let key = FavoriteKey::new(FavoriteKind::Song, &song.id);
+            let fav_label = if self.state.favorites.is_starred(&key) {
+                t!("Remove from favorites")
+            } else {
+                t!("Add to favorites")
+            };
+            let fav_song = song.clone();
+            menu = menu.item(
+                PopupMenuItem::new(fav_label)
+                    .disabled(
+                        self.state.favorites.is_pending(&key)
+                            || !browsing_owner
+                            || !capabilities.favorite_write,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.browsing_owns_song(&fav_song) {
+                            this.toggle_favorite(FavoriteKey::new(
+                                FavoriteKind::Song,
+                                &fav_song.id,
+                            ));
+                        }
+                        cx.notify();
+                    })),
+            );
+            let song_for_artist = song.clone();
+            let artist_available =
+                browsing_owner && capabilities.library && artist_for_song(&song).is_some();
+            menu = menu.separator().item(
+                PopupMenuItem::new(t!("Go to artist"))
+                    .disabled(!artist_available)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_song_artist(&song_for_artist);
+                        cx.notify();
+                    })),
+            );
+            let song_for_album = song.clone();
+            let album_available =
+                browsing_owner && capabilities.library && album_for_song(&song).is_some();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Go to album"))
+                    .disabled(!album_available)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_song_album(&song_for_album);
+                        cx.notify();
+                    })),
+            );
+        }
+
+        let copy_summary = if song.artist.trim().is_empty() {
+            song.title.clone()
+        } else {
+            format!("{} - {}", song.title, song.artist)
+        };
+        let song_for_info = song;
+        menu.separator()
+            .item(
+                PopupMenuItem::new(t!("Copy title & artist")).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.copy_text_to_clipboard(copy_summary.clone(), cx);
+                    },
+                )),
+            )
+            .item(PopupMenuItem::new(t!("Song info…")).on_click(cx.listener(
+                move |this, _, window, cx| {
+                    this.open_song_info(song_for_info.clone(), window, cx);
+                },
+            )))
     }
 }
 

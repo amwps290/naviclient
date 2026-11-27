@@ -11,6 +11,13 @@ fn tray_identity_menu_order_and_playback_labels_remain_stable() {
     let (mut tray, rx) = tray();
     assert_eq!(tray.id(), "navidrome-client");
     assert_eq!(tray.title(), "Navidrome Client");
+    assert_eq!(tray.tool_tip().title, "Navidrome Client");
+    tray.set_track(Some(("Blue in Green".into(), "Miles Davis".into())));
+    assert_eq!(tray.title(), "Blue in Green — Miles Davis");
+    assert_eq!(tray.tool_tip().title, "Blue in Green");
+    assert_eq!(tray.tool_tip().description, "Miles Davis");
+    tray.set_track(None);
+    assert_eq!(tray.title(), "Navidrome Client");
     for (paused, label, icon) in [
         (false, "Pause", "media-playback-pause"),
         (true, "Play", "media-playback-start"),

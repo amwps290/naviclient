@@ -50,6 +50,14 @@ pub fn set_tray_paused(paused: bool) {
     let _ = paused;
 }
 
+/// Sync the current track tooltip shown when hovering the system tray icon.
+pub fn set_tray_track(track: Option<(String, String)>) {
+    #[cfg(target_os = "linux")]
+    linux::set_track(track);
+    #[cfg(not(target_os = "linux"))]
+    let _ = track;
+}
+
 /// Linux rebuilds its menu using the current locale; Windows' labels are fixed
 /// when the tray starts and change on the next launch.
 pub fn refresh_labels() {

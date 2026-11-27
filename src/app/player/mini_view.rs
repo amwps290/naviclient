@@ -1,6 +1,7 @@
 //! Compact capsule cover, metadata, inline transport and seek controls for the mini window.
 
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderTrack};
+use gpui_kit::component::menu::PopupMenuItem;
 
 use crate::app::prelude::*;
 use crate::app::style::cover_tint::{cover_tint, TintSurface};
@@ -114,10 +115,25 @@ impl NavidromeApp {
             .as_ref()
             .map(|song| song.title.clone())
             .unwrap_or_else(|| t!("No track playing").to_string());
+        let active_lyric = (self.config.mini_show_lyrics && is_playing)
+            .then(|| {
+                self.state
+                    .lyrics
+                    .lyrics()
+                    .filter(|lyrics| lyrics.is_synced())
+                    .and_then(|lyrics| {
+                        let index = lyrics.display_line_index(playback.position)?;
+                        let text = lyrics.lines.get(index)?.text.trim();
+                        (!text.is_empty()).then(|| text.to_string())
+                    })
+            })
+            .flatten();
         let artist = if let Some(stall) = playback.stall {
             t!("Buffering… %{seconds}s", seconds = stall.as_secs()).to_string()
         } else if playback.error.is_some() {
             t!("Playback failed — open for details").to_string()
+        } else if let Some(lyric) = active_lyric {
+            lyric
         } else {
             song.as_ref()
                 .map(|song| {
@@ -290,7 +306,9 @@ impl NavidromeApp {
             },
         );
 
+        let mini_menu_app = cx.entity().downgrade();
         v_flex()
+            .id("mini-player-root")
             .relative()
             .size_full()
             .rounded(px(super::mini_surface::RADIUS))
@@ -324,6 +342,68 @@ impl NavidromeApp {
                     .child(controls),
             )
             .child(progress_line)
+            .context_menu(move |menu, _, cx| {
+                mini_menu_app
+                    .update(cx, |this, cx| {
+                        let show_lyrics = this.config.mini_show_lyrics;
+                        let shuffle = this.state.playback_modes.shuffle;
+                        let repeat = this.state.playback_modes.repeat;
+                        let mut menu = menu
+                            .item(
+                                PopupMenuItem::new(t!("Show synced lyric line"))
+                                    .checked(show_lyrics)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_mini_show_lyrics(!show_lyrics, cx);
+                                    })),
+                            )
+                            .separator()
+                            .item(PopupMenuItem::new(t!("Shuffle")).checked(shuffle).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.toggle_shuffle(cx);
+                                }),
+                            ))
+                            .item(PopupMenuItem::new(repeat.tooltip()).on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.cycle_repeat(cx);
+                                },
+                            )));
+                        if let Some(song) = this.state.now_playing.clone() {
+                            let can_fav = this.browsing_owns_song(&song)
+                                && this
+                                    .api
+                                    .as_ref()
+                                    .is_some_and(|api| api.capabilities().favorite_write);
+                            if can_fav {
+                                let key = FavoriteKey::new(FavoriteKind::Song, &song.id);
+                                let label = if this.state.favorites.is_starred(&key) {
+                                    t!("Remove from favorites")
+                                } else {
+                                    t!("Add to favorites")
+                                };
+                                menu = menu.separator().item(
+                                    PopupMenuItem::new(label)
+                                        .disabled(this.state.favorites.is_pending(&key))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.toggle_favorite(FavoriteKey::new(
+                                                FavoriteKind::Song,
+                                                &song.id,
+                                            ));
+                                            cx.notify();
+                                        })),
+                                );
+                            }
+                        }
+                        menu.separator()
+                            .item(
+                                PopupMenuItem::new(t!("Exit mini player")).on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.exit_mini_mode(window, cx);
+                                    },
+                                )),
+                            )
+                    })
+                    .expect("app owns mini menu")
+            })
             .into_any_element()
     }
 }

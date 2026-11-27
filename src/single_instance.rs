@@ -80,7 +80,70 @@ mod imp {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::io::Write;
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::OnceLock;
+    use std::time::Duration;
+
+    struct Guard {
+        socket_path: PathBuf,
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+    }
+
+    static ACTIVATED: AtomicBool = AtomicBool::new(false);
+    static INSTANCE: OnceLock<Guard> = OnceLock::new();
+
+    fn socket_path() -> PathBuf {
+        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+            let trimmed = runtime.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed).join("navidrome-client.sock");
+            }
+        }
+        let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+        std::env::temp_dir().join(format!("navidrome-client-{user}.sock"))
+    }
+
+    pub fn acquire() -> bool {
+        let path = socket_path();
+        if let Ok(mut stream) = UnixStream::connect(&path) {
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+            let _ = stream.write_all(b"activate\n");
+            return true;
+        }
+        // Clean up a stale socket left behind after a crash.
+        let _ = std::fs::remove_file(&path);
+        let Ok(listener) = UnixListener::bind(&path) else {
+            return false;
+        };
+        let _ = INSTANCE.set(Guard { socket_path: path });
+        let _ = std::thread::Builder::new()
+            .name("single-instance-listener".into())
+            .spawn(move || {
+                for incoming in listener.incoming() {
+                    if incoming.is_ok() {
+                        ACTIVATED.store(true, Ordering::Release);
+                    }
+                }
+            });
+        false
+    }
+
+    pub fn poll_activation() -> bool {
+        ACTIVATED.swap(false, Ordering::AcqRel)
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod imp {
     pub fn acquire() -> bool {
         false

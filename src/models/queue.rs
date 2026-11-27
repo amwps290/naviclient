@@ -46,6 +46,15 @@ impl QueueEntry {
     pub fn id(&self) -> QueueEntryId {
         self.id
     }
+
+    /// Preserve the exact runtime occurrence identity for short-lived undo snapshots.
+    pub(crate) fn clone_with_id(&self) -> Self {
+        Self {
+            id: self.id,
+            song: self.song.clone(),
+            origin: self.origin,
+        }
+    }
 }
 
 impl Clone for QueueEntry {
@@ -127,6 +136,37 @@ impl PlaybackQueue {
 
     pub fn song_ids(&self) -> Vec<String> {
         self.songs().map(|song| song.id.clone()).collect()
+    }
+
+    pub fn song_ids_from(&self, start: usize) -> Vec<String> {
+        self.entries
+            .get(start..)
+            .unwrap_or(&[])
+            .iter()
+            .map(|entry| entry.song.id.clone())
+            .collect()
+    }
+
+    pub fn total_duration_secs(&self) -> u64 {
+        self.songs()
+            .filter_map(|song| song.duration.filter(|duration| *duration > 0))
+            .map(|duration| duration as u64)
+            .sum()
+    }
+
+    pub(crate) fn clone_with_identities(&self) -> Self {
+        Self {
+            entries: self.entries.iter().map(QueueEntry::clone_with_id).collect(),
+        }
+    }
+
+    pub(crate) fn retain_indexed(&mut self, mut keep: impl FnMut(usize) -> bool) {
+        let mut index = 0;
+        self.entries.retain(|_| {
+            let kept = keep(index);
+            index += 1;
+            kept
+        });
     }
 
     pub fn snapshot(&self) -> (Vec<Song>, Vec<QueueOrigin>) {

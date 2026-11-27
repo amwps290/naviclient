@@ -11,13 +11,18 @@ use anyhow::{Context, Result};
 use md5::{Digest, Md5};
 
 use super::stream_control::StreamControl;
-use crate::config::{is_cache_digest, prune_cache_files};
+use crate::config::{is_audio_cache_name, prune_cache_files};
 use crate::source::CachePolicy;
 
-const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub(super) const MAX_AUDIO_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+#[cfg(test)]
 pub(super) fn prepare_cache_dir(cache_dir: &Path) -> Result<()> {
-    prune_to(cache_dir, MAX_AUDIO_CACHE_BYTES)
+    prepare_cache_dir_with_limit(cache_dir, MAX_AUDIO_CACHE_BYTES)
+}
+
+pub(super) fn prepare_cache_dir_with_limit(cache_dir: &Path, limit: u64) -> Result<()> {
+    prune_to(cache_dir, limit)
 }
 
 fn prune_to(cache_dir: &Path, limit: u64) -> Result<()> {
@@ -26,30 +31,6 @@ fn prune_to(cache_dir: &Path, limit: u64) -> Result<()> {
     prune_cache_files(cache_dir, limit, is_audio_cache_name)
         .context("failed to prune audio cache directory")?;
     Ok(())
-}
-
-fn is_audio_cache_name(name: &str) -> bool {
-    let Some((digest, suffix)) = name.split_once('.') else {
-        return false;
-    };
-    if !is_cache_digest(digest) {
-        return false;
-    }
-    if matches!(suffix, "audio" | "part") {
-        return true;
-    }
-    let Some((pid, serial)) = suffix
-        .strip_prefix("preload-")
-        .and_then(|suffix| suffix.strip_suffix(".part"))
-        .and_then(|suffix| suffix.split_once('-'))
-    else {
-        return false;
-    };
-    pid.parse::<u32>()
-        .is_ok_and(|value| value.to_string() == pid)
-        && serial
-            .parse::<u64>()
-            .is_ok_and(|value| value.to_string() == serial)
 }
 
 pub(super) fn cache_paths(cache_dir: &Path, cache_key: &str) -> (PathBuf, PathBuf) {

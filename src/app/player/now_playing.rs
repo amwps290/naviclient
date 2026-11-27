@@ -1,6 +1,7 @@
 //! 当前播放页渲染。
 
 use crate::app::prelude::*;
+use gpui_kit::component::menu::PopupMenuItem;
 
 impl NavidromeApp {
     /// 渲染当前播放页，包括黑胶封面、歌词和歌曲操作。
@@ -73,113 +74,187 @@ impl NavidromeApp {
             let synced = lyrics.is_synced();
             let show_translation = self.config.show_lyrics_translation;
             let aligning = self.lyrics_ui.timing.is_aligning();
-            v_flex()
-                .id("lyrics-scroll")
+            let manual_scroll_paused = synced
+                && self
+                    .state
+                    .lyrics
+                    .is_manual_scroll_paused(std::time::Instant::now());
+            let app_for_line_menu = cx.entity().downgrade();
+            div()
+                .relative()
                 .flex_1()
                 .min_h_0()
-                .px_6()
-                .overflow_y_scroll()
-                .track_scroll(&self.lyrics_scroll_handle)
-                .child(div().h(px(240.0)).flex_none())
-                .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
-                    let current = synced && display_line == Some(index);
-                    let distance = display_line
-                        .map(|active| active.abs_diff(index))
-                        .unwrap_or(usize::MAX);
-                    let word_timing = lyric_line
-                        .word_timing
-                        .as_ref()
-                        .filter(|_| self.config.lyrics.word_timing);
-                    let text = word_timing
-                        .map_or(&lyric_line.text, |words| &words.text)
-                        .clone();
-                    let primary = if current {
-                        word_timing
-                            .map(|words| {
-                                super::word_lyrics::WordLyrics::new(
-                                    words.clone(),
-                                    u64::try_from(playback.position.as_millis())
-                                        .unwrap_or(u64::MAX),
-                                    p.text.opacity(0.55),
-                                    p.brand,
-                                )
-                                .into_any_element()
-                            })
-                            .unwrap_or_else(|| div().child(text.clone()).into_any_element())
-                    } else {
-                        div().child(text).into_any_element()
-                    };
-                    let start_ms = lyric_line.start_ms;
-                    let translation = lyric_line
-                        .translation
-                        .clone()
-                        .filter(|text| show_translation && !text.is_empty());
-                    let line = div()
-                        .id(SharedString::from(format!(
-                            "lyric-line-{}-{index}",
-                            song.id
-                        )))
-                        .w_full()
-                        .max_w(px(760.0))
-                        .min_h(px(64.0))
-                        .mx_auto()
-                        .px_4()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_center()
-                        .line_height(relative(1.45))
-                        .when_some(start_ms, |this, start_ms| {
-                            this.cursor_pointer()
-                                // Mark the line that a click is about to align.
-                                .when(aligning, |this| {
-                                    this.rounded(px(tokens::radius::ROW))
-                                        .hover(|style| style.bg(p.brand_soft))
+                .w_full()
+                .child(
+                    v_flex()
+                        .id("lyrics-scroll")
+                        .size_full()
+                        .px_6()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.lyrics_scroll_handle)
+                        .on_scroll_wheel(cx.listener(move |this, _, _, cx| {
+                            if synced {
+                                this.state
+                                    .lyrics
+                                    .pause_follow_for_scroll(std::time::Instant::now());
+                                cx.notify();
+                            }
+                        }))
+                        .child(div().h(px(240.0)).flex_none())
+                        .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
+                            let current = synced && display_line == Some(index);
+                            let distance = display_line
+                                .map(|active| active.abs_diff(index))
+                                .unwrap_or(usize::MAX);
+                            let word_timing = lyric_line
+                                .word_timing
+                                .as_ref()
+                                .filter(|_| self.config.lyrics.word_timing);
+                            let text = word_timing
+                                .map_or(&lyric_line.text, |words| &words.text)
+                                .clone();
+                            let copy_main = text.clone();
+                            let primary = if current {
+                                word_timing
+                                    .map(|words| {
+                                        super::word_lyrics::WordLyrics::new(
+                                            words.clone(),
+                                            u64::try_from(playback.position.as_millis())
+                                                .unwrap_or(u64::MAX),
+                                            p.text.opacity(0.55),
+                                            p.brand,
+                                        )
+                                        .into_any_element()
+                                    })
+                                    .unwrap_or_else(|| div().child(text.clone()).into_any_element())
+                            } else {
+                                div().child(text).into_any_element()
+                            };
+                            let start_ms = lyric_line.start_ms;
+                            let translation = lyric_line
+                                .translation
+                                .clone()
+                                .filter(|text| show_translation && !text.is_empty());
+                            let copy_translation = translation.clone();
+                            let line_menu_app = app_for_line_menu.clone();
+                            let line = div()
+                                .id(SharedString::from(format!(
+                                    "lyric-line-{}-{index}",
+                                    song.id
+                                )))
+                                .w_full()
+                                .max_w(px(760.0))
+                                .min_h(px(64.0))
+                                .mx_auto()
+                                .px_4()
+                                .py_2()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_center()
+                                .line_height(relative(1.45))
+                                .when_some(start_ms, |this, start_ms| {
+                                    this.cursor_pointer()
+                                        // Mark the line that a click is about to align.
+                                        .when(aligning, |this| {
+                                            this.rounded(px(tokens::radius::ROW))
+                                                .hover(|style| style.bg(p.brand_soft))
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.click_lyric_line(index, start_ms, cx)
+                                        }))
                                 })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.click_lyric_line(index, start_ms, cx)
-                                }))
-                        })
-                        // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。
-                        .child(v_flex().w_full().gap_1().child(primary).when_some(
-                            translation,
-                            |this, translation| {
-                                this.child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(p.text_secondary)
-                                        .child(translation),
-                                )
-                            },
-                        ));
+                                .context_menu(move |menu, _, cx| {
+                                    let main = copy_main.clone();
+                                    let trans = copy_translation.clone();
+                                    line_menu_app
+                                        .update(cx, |_, cx| {
+                                            let main_for_copy = main.clone();
+                                            let mut menu = menu.item(
+                                                PopupMenuItem::new(t!("Copy line"))
+                                                    .disabled(main.trim().is_empty())
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.copy_text_to_clipboard(
+                                                                main_for_copy.clone(),
+                                                                cx,
+                                                            );
+                                                        },
+                                                    )),
+                                            );
+                                            if let Some(trans) = trans {
+                                                let combined = format!("{main}\n{trans}");
+                                                menu = menu.item(
+                                                    PopupMenuItem::new(t!(
+                                                        "Copy line with translation"
+                                                    ))
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.copy_text_to_clipboard(
+                                                            combined.clone(),
+                                                            cx,
+                                                        );
+                                                    })),
+                                                );
+                                            }
+                                            menu
+                                        })
+                                        .expect("app owns lyric line menu")
+                                })
+                                // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。
+                                .child(v_flex().w_full().gap_1().child(primary).when_some(
+                                    translation,
+                                    |this, translation| {
+                                        this.child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(p.text_secondary)
+                                                .child(translation),
+                                        )
+                                    },
+                                ));
 
-                    let line = line.font_family(serif.clone());
-                    if current {
-                        line.text_size(px(tokens::LYRIC_ACTIVE))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(p.brand)
-                            .px_6()
-                            .py_3()
-                            .with_animation(
-                                SharedString::from(format!("active-lyric-{}-{index}", song.id)),
-                                Animation::new(Duration::from_millis(280))
-                                    .with_easing(ease_out_quint()),
-                                |this, delta| this.opacity(0.70 + delta * 0.30),
-                            )
-                            .into_any_element()
-                    } else if synced {
-                        line.text_size(px(tokens::LYRIC))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(p.text.opacity(lyric_opacity(distance)))
-                            .into_any_element()
-                    } else {
-                        line.text_size(px(tokens::LYRIC))
-                            .text_color(p.text.opacity(0.72))
-                            .into_any_element()
-                    }
-                }))
-                .child(div().h(px(280.0)).flex_none())
+                            let line = line.font_family(serif.clone());
+                            if current {
+                                line.text_size(px(tokens::LYRIC_ACTIVE))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(p.brand)
+                                    .px_6()
+                                    .py_3()
+                                    .with_animation(
+                                        SharedString::from(format!(
+                                            "active-lyric-{}-{index}",
+                                            song.id
+                                        )),
+                                        Animation::new(Duration::from_millis(280))
+                                            .with_easing(ease_out_quint()),
+                                        |this, delta| this.opacity(0.70 + delta * 0.30),
+                                    )
+                                    .into_any_element()
+                            } else if synced {
+                                line.text_size(px(tokens::LYRIC))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(p.text.opacity(lyric_opacity(distance)))
+                                    .into_any_element()
+                            } else {
+                                line.text_size(px(tokens::LYRIC))
+                                    .text_color(p.text.opacity(0.72))
+                                    .into_any_element()
+                            }
+                        }))
+                        .child(div().h(px(280.0)).flex_none()),
+                )
+                .when(manual_scroll_paused, |this| {
+                    this.child(
+                        div().absolute().right_4().bottom_4().child(
+                            capsule_button_sm("lyrics-return-current")
+                                .label(t!("Back to current line"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.state.lyrics.resume_follow_now();
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                })
                 .into_any_element()
         } else {
             div()

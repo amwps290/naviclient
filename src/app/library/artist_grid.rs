@@ -3,6 +3,7 @@
 use crate::app::prelude::*;
 use crate::app::shell::view_helpers::item_instance_key;
 use crate::app::widgets::shelf::cover_grid;
+use gpui_kit::component::menu::PopupMenuItem;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_artist_grid(
@@ -28,7 +29,9 @@ impl NavidromeApp {
                     let artist_for_click = artist.clone();
                     let artist_for_play = artist.clone();
                     let artist_for_cover = artist.clone();
+                    let artist_for_menu = artist.clone();
                     let artist_id_for_hover = key.clone();
+                    let menu_app = cx.entity().downgrade();
                     v_flex()
                         .id(SharedString::from(key))
                         .min_w_0()
@@ -128,6 +131,46 @@ impl NavidromeApp {
                                         .unwrap_or_else(|| t!("Artist")),
                                 ),
                         )
+                        .context_menu(move |menu, _, cx| {
+                            let artist = artist_for_menu.clone();
+                            menu_app
+                                .update(cx, |this, cx| {
+                                    let play = artist.clone();
+                                    let open = artist.clone();
+                                    let key = FavoriteKey::new(FavoriteKind::Artist, &artist.id);
+                                    let fav_label = if this.state.favorites.is_starred(&key) {
+                                        t!("Remove from favorites")
+                                    } else {
+                                        t!("Add to favorites")
+                                    };
+                                    let fav_id = artist.id.clone();
+                                    menu.item(PopupMenuItem::new(t!("Play all")).on_click(
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.play_artist(play.clone());
+                                            cx.notify();
+                                        }),
+                                    ))
+                                    .item(PopupMenuItem::new(t!("Go to artist")).on_click(
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.open_artist(open.clone());
+                                            cx.notify();
+                                        }),
+                                    ))
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new(fav_label)
+                                            .disabled(this.state.favorites.is_pending(&key))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.toggle_favorite(FavoriteKey::new(
+                                                    FavoriteKind::Artist,
+                                                    &fav_id,
+                                                ));
+                                                cx.notify();
+                                            })),
+                                    )
+                                })
+                                .expect("app owns artist menu")
+                        })
                         .into_any_element()
                 })
                 .collect::<Vec<_>>();

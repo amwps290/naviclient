@@ -103,6 +103,19 @@ impl NavidromeApp {
                 )
             })
             .cursor_pointer();
+        let position_text = if scope == SongScope::AlbumDetail {
+            let track = song
+                .track
+                .filter(|t| *t > 0)
+                .map(|t| t as usize)
+                .unwrap_or(original_index + 1);
+            match song.disc.filter(|d| *d > 1) {
+                Some(disc) => format!("{disc}-{track}"),
+                None => track.to_string(),
+            }
+        } else {
+            (original_index + 1).to_string()
+        };
         let position_indicator = if multi_selected {
             div()
                 .size(px(22.0))
@@ -134,7 +147,7 @@ impl NavidromeApp {
                 } else {
                     p.text_muted
                 })
-                .child((original_index + 1).to_string())
+                .child(position_text)
                 .into_any_element()
         };
         row.child(

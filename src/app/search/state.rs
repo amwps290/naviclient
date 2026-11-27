@@ -32,9 +32,30 @@ pub(in crate::app) struct SearchState {
     load: LibraryLoad,
     results: Option<SearchResults>,
     filter: SearchFilter,
+    recent_queries: Vec<String>,
 }
 
+const MAX_RECENT_QUERIES: usize = 8;
+
 impl SearchState {
+    pub(in crate::app) fn recent_queries(&self) -> &[String] {
+        &self.recent_queries
+    }
+
+    pub(in crate::app) fn record_query(&mut self, query: &str) {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.recent_queries
+            .retain(|item| !item.eq_ignore_ascii_case(trimmed));
+        self.recent_queries.insert(0, trimmed.to_string());
+        self.recent_queries.truncate(MAX_RECENT_QUERIES);
+    }
+
+    pub(in crate::app) fn clear_recent_queries(&mut self) {
+        self.recent_queries.clear();
+    }
     pub(in crate::app) fn results(&self) -> Option<&SearchResults> {
         self.results.as_ref()
     }

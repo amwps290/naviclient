@@ -1,6 +1,10 @@
 //! Current-song lyrics, request identity, and scrolling follow state.
 
+use std::time::{Duration, Instant};
+
 use gpui_kit::Pixels;
+
+pub(in crate::app) const MANUAL_SCROLL_PAUSE: Duration = Duration::from_secs(4);
 
 use crate::app::library::requests::{LibraryLoad, LibraryRequest, LibraryRequests};
 use crate::lyrics::{
@@ -24,6 +28,7 @@ pub(in crate::app) struct LyricsState {
     pub(in crate::app) scroll_target: Option<Pixels>,
     pub(in crate::app) follow_reset: bool,
     pub(in crate::app) follow_resume: bool,
+    pub(in crate::app) manual_scroll_until: Option<Instant>,
 }
 
 impl LyricsState {
@@ -52,6 +57,22 @@ impl LyricsState {
         self.scroll_target = None;
         self.follow_reset = true;
         self.follow_resume = false;
+        self.manual_scroll_until = None;
+    }
+
+    pub(in crate::app) fn pause_follow_for_scroll(&mut self, now: Instant) {
+        self.scroll_target = None;
+        self.manual_scroll_until = Some(now + MANUAL_SCROLL_PAUSE);
+    }
+
+    pub(in crate::app) fn resume_follow_now(&mut self) {
+        self.manual_scroll_until = None;
+        self.scroll_target = None;
+        self.follow_resume = true;
+    }
+
+    pub(in crate::app) fn is_manual_scroll_paused(&self, now: Instant) -> bool {
+        self.manual_scroll_until.is_some_and(|until| now < until)
     }
 
     /// Keep cached lyrics and coalesce in-flight loads for the same song. A

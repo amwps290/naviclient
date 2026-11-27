@@ -60,10 +60,17 @@ impl AlbumDetails {
 
 impl NavidromeApp {
     pub(in crate::app) fn open_album(&mut self, album: Album) {
+        self.record_nav_location(crate::app::shell::history::NavLocation::album(
+            album.clone(),
+        ));
+        self.open_album_without_history(album);
+    }
+
+    pub(in crate::app) fn open_album_without_history(&mut self, album: Album) {
         self.clear_song_multi();
         self.ensure_cover(album.cover_art.as_deref(), true);
         self.state.album_details.select(album);
-        self.state.view = View::AlbumDetail;
+        self.state.navigate_to(View::AlbumDetail);
         self.load_album_details();
     }
 

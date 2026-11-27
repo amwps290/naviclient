@@ -5,4 +5,5 @@ pub(in crate::app) mod edits;
 pub(in crate::app) mod logic;
 pub(in crate::app) mod navigation;
 pub(in crate::app) mod source_queue;
+pub(in crate::app) mod undo;
 pub(in crate::app) mod view;

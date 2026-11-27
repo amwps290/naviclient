@@ -36,9 +36,12 @@ impl NavidromeApp {
         if single_instance::poll_activation() {
             if let Some(hwnd) = self.main_hwnd {
                 show_main_window(hwnd);
+            } else {
+                window.activate_window();
             }
         }
         self.maybe_save_session();
+        changed |= self.state.queue_undo.prune(std::time::Instant::now());
         changed |= self.poll_messages(window, cx);
         changed |= self.poll_playlist_detail();
         changed |= self.poll_playlist_search(window, cx);

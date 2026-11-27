@@ -90,6 +90,48 @@ impl NavidromeApp {
         if self.handle_fullscreen_key(keystroke, window, cx) {
             return;
         }
+        if !self.state.settings.open
+            && self.state.queue_drawer_open
+            && self.state.queue_drawer_tab == QueueDrawerTab::UpNext
+        {
+            if keystroke.key == "z"
+                && (keystroke.modifiers.control || keystroke.modifiers.platform)
+                && !keystroke.modifiers.shift
+                && !keystroke.modifiers.alt
+                && self.undo_queue_edit()
+            {
+                cx.notify();
+                return;
+            }
+            if matches!(keystroke.key.as_str(), "delete" | "backspace")
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && !keystroke.modifiers.platform
+                && !keystroke.modifiers.shift
+                && self.remove_selected_from_queue()
+            {
+                cx.notify();
+                return;
+            }
+        }
+        if !self.state.settings.open
+            && keystroke.modifiers.alt
+            && !keystroke.modifiers.control
+            && !keystroke.modifiers.shift
+            && !keystroke.modifiers.platform
+        {
+            match keystroke.key.as_str() {
+                "left" if self.navigate_back() => {
+                    cx.notify();
+                    return;
+                }
+                "right" if self.navigate_forward() => {
+                    cx.notify();
+                    return;
+                }
+                _ => {}
+            }
+        }
         let Some(shortcut) = match_shortcut(&self.config.shortcuts, keystroke) else {
             return;
         };
@@ -133,6 +175,20 @@ impl NavidromeApp {
             | ShortcutAction::ToggleMute => {
                 self.execute_playback_shortcut(shortcut, window, cx);
             }
+            ShortcutAction::ToggleFavorite => {
+                if let Some(song) = self.state.now_playing.clone() {
+                    if song.bilibili_part.is_none() {
+                        self.toggle_favorite(FavoriteKey::new(FavoriteKind::Song, song.id));
+                        cx.notify();
+                    }
+                }
+            }
+            ShortcutAction::ToggleShuffle => {
+                self.toggle_shuffle(cx);
+            }
+            ShortcutAction::CycleRepeat => {
+                self.cycle_repeat(cx);
+            }
             ShortcutAction::ToggleNowPlaying => {
                 if self.fullscreen.is_active() {
                     self.exit_fullscreen_player(window, cx);
@@ -145,9 +201,22 @@ impl NavidromeApp {
                 cx.notify();
             }
             ShortcutAction::ToggleFullscreen => self.toggle_fullscreen_player(window, cx),
+            ShortcutAction::ToggleMiniPlayer => {
+                self.exit_fullscreen_player(window, cx);
+                self.toggle_mini_mode(window, cx);
+            }
             ShortcutAction::ToggleQueue => {
                 self.exit_fullscreen_player(window, cx);
                 self.state.queue_drawer_open = !self.state.queue_drawer_open;
+                cx.notify();
+            }
+            ShortcutAction::OpenSettings => {
+                self.exit_fullscreen_player(window, cx);
+                if self.state.settings.open {
+                    self.state.settings.close();
+                } else {
+                    self.state.settings.open = true;
+                }
                 cx.notify();
             }
             ShortcutAction::CloseOverlays => {

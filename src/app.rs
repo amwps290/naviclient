@@ -123,10 +123,14 @@ pub struct NavidromeApp {
     _subscriptions: Vec<Subscription>,
     mini_window: MiniWindowState,
     fullscreen: player::fullscreen::window::FullscreenUi,
-    /// 均衡器 10 段滑杆状态（设置页）。
+    /// 均衡器前级增益与 10 段滑杆状态。
+    eq_preamp_slider: Entity<SliderState>,
     eq_sliders: Vec<Entity<SliderState>>,
+    eq_preset_name_input: Entity<InputState>,
     /// Equalizer edits and persistence survive library/server state resets.
     equalizer: EqualizerState,
+    /// Consecutive 404/not-found skips in the current queue pass.
+    consecutive_missing_skips: u8,
     /// 专辑与流派分页请求编号；切服务器时保留以隔离迟到响应。
     album_page_requests: PageRequests,
     /// 媒体库请求编号；切服务器时保留以隔离迟到响应。

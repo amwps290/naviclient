@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 struct LinuxTray {
     tx: std::sync::mpsc::Sender<TrayCommand>,
     paused: bool,
+    track: Option<(String, String)>,
     /// 播放/暂停双态图标（与应用主图标共用黑胶 + 唱针标记，唱片
     /// 中心以播放/暂停符号区分状态），各预置多个尺寸供 SNI 宿主
     /// 挑选，避免宿主用低质量缩放。
@@ -23,6 +24,7 @@ impl LinuxTray {
         Self {
             tx,
             paused: false,
+            track: None,
             icon_playing: Self::tray_icon(include_bytes!("../../assets/tray-playing.png")),
             icon_paused: Self::tray_icon(include_bytes!("../../assets/tray-paused.png")),
         }
@@ -31,6 +33,10 @@ impl LinuxTray {
     /// 应用同步播放/暂停状态（菜单文案与图标一起切换）。
     fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
+    }
+
+    fn set_track(&mut self, track: Option<(String, String)>) {
+        self.track = track;
     }
 
     fn menu_item(label: String, icon_name: &str, command: TrayCommand) -> MenuItem<Self> {
@@ -75,7 +81,25 @@ impl Tray for LinuxTray {
     }
 
     fn title(&self) -> String {
-        "Navidrome Client".into()
+        match &self.track {
+            Some((title, artist)) if !artist.trim().is_empty() => {
+                format!("{title} — {artist}")
+            }
+            Some((title, _)) if !title.trim().is_empty() => title.clone(),
+            _ => "Navidrome Client".into(),
+        }
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        let (title, description) = match &self.track {
+            Some((title, artist)) if !title.trim().is_empty() => (title.clone(), artist.clone()),
+            _ => ("Navidrome Client".into(), String::new()),
+        };
+        ksni::ToolTip {
+            title,
+            description,
+            ..Default::default()
+        }
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
@@ -129,6 +153,12 @@ static HANDLE: OnceLock<ksni::blocking::Handle<LinuxTray>> = OnceLock::new();
 pub(super) fn set_paused(paused: bool) {
     if let Some(handle) = HANDLE.get() {
         handle.update(|tray| tray.set_paused(paused));
+    }
+}
+
+pub(super) fn set_track(track: Option<(String, String)>) {
+    if let Some(handle) = HANDLE.get() {
+        handle.update(|tray| tray.set_track(track));
     }
 }
 

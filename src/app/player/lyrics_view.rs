@@ -61,6 +61,12 @@ impl NavidromeApp {
         let plain = document.is_some_and(|d| d.plain);
         let personal = document.is_some_and(|d| d.manual || d.offset_ms != 0 || d.plain);
         let word_timing = self.config.lyrics.word_timing;
+        let show_translation = self.config.show_lyrics_translation;
+        let has_lyrics_text = self
+            .state
+            .lyrics
+            .lyrics()
+            .is_some_and(|l| l.lines.iter().any(|line| !line.text.trim().is_empty()));
         let timing_open = self.lyrics_ui.timing.is_open();
         // A closed bar still tells the listener that this song is shifted.
         let shift = document
@@ -144,6 +150,18 @@ impl NavidromeApp {
                                                         )),
                                                 )
                                                 .item(
+                                                    PopupMenuItem::new(t!("Show translation"))
+                                                        .checked(show_translation)
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.set_show_lyrics_translation(
+                                                                    !show_translation,
+                                                                    cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                )
+                                                .item(
                                                     PopupMenuItem::new(t!(
                                                         "Search / change lyrics"
                                                     ))
@@ -175,6 +193,13 @@ impl NavidromeApp {
                                                                 )
                                                             },
                                                         )),
+                                                )
+                                                .item(
+                                                    PopupMenuItem::new(t!("Copy lyrics"))
+                                                        .disabled(!has_lyrics_text)
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.copy_all_lyrics(cx)
+                                                        })),
                                                 )
                                                 .item(
                                                     PopupMenuItem::new(t!("Retry lyrics lookup"))

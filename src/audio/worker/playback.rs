@@ -80,9 +80,17 @@ impl PlaybackWorker {
             Ok(()) => {
                 self.next_output_recovery = None;
                 if rebuild_track {
+                    // When the user prefers pausing after an unexpected output
+                    // disconnect (e.g. unplugged headphones), keep the recovered
+                    // track paused at its last position instead of blasting the
+                    // fallback speaker.
+                    if self.pause_on_output_disconnect && !self.preparation.paused() {
+                        self.preparation.set_paused(true);
+                        set_state(&self.state, |s| s.paused = true);
+                    }
                     // The old source belongs to the dead device mixer. Reuse
                     // the normal seek path to attach a fresh source while
-                    // preserving the user's pause intent.
+                    // preserving the pause intent.
                     self.pending_commands
                         .push_front(Command::Seek(position).into());
                     return true;

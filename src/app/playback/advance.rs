@@ -160,6 +160,7 @@ impl NavidromeApp {
             }
         }
         if changing_source {
+            self.state.queue_undo.clear();
             self.load_playback_source_cache();
             self.prune_source_covers();
         }

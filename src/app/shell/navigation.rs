@@ -1,5 +1,6 @@
 //! Navigation state transitions, overlay priority, and library-loading dispatch.
 
+use super::history::{NavEntry, NavLocation};
 use crate::app::prelude::*;
 
 impl AppState {
@@ -41,6 +42,15 @@ impl AppState {
 }
 
 impl NavidromeApp {
+    fn current_scroll_y(&self) -> f32 {
+        f32::from(self.content_scroll_handle.offset().y)
+    }
+
+    pub(in crate::app) fn record_nav_location(&mut self, location: NavLocation) {
+        let scroll_y = self.current_scroll_y();
+        self.state.nav_history.push(location, scroll_y);
+    }
+
     pub(in crate::app) fn navigate_to(&mut self, view: View) {
         let view = if self.browsing_bilibili()
             && !matches!(
@@ -55,6 +65,13 @@ impl NavidromeApp {
         } else {
             view
         };
+        if let Some(location) = top_level_nav_location(view) {
+            self.record_nav_location(location);
+        }
+        self.enter_top_level_view(view);
+    }
+
+    fn enter_top_level_view(&mut self, view: View) {
         if self.browsing_bilibili() && view == View::Search {
             self.state.queue_drawer_open = false;
         }
@@ -69,6 +86,86 @@ impl NavidromeApp {
         }
     }
 
+    pub(in crate::app) fn navigate_back(&mut self) -> bool {
+        let scroll_y = self.current_scroll_y();
+        let Some(entry) = self.state.nav_history.go_back(scroll_y) else {
+            return false;
+        };
+        self.restore_nav_entry(entry);
+        true
+    }
+
+    pub(in crate::app) fn navigate_forward(&mut self) -> bool {
+        let scroll_y = self.current_scroll_y();
+        let Some(entry) = self.state.nav_history.go_forward(scroll_y) else {
+            return false;
+        };
+        self.restore_nav_entry(entry);
+        true
+    }
+
+    fn restore_nav_entry(&mut self, entry: NavEntry) {
+        match entry.location {
+            NavLocation::Home => self.enter_top_level_view(View::Home),
+            NavLocation::Favorites => self.enter_top_level_view(View::Favorites),
+            NavLocation::Artists => self.enter_top_level_view(View::Artists),
+            NavLocation::Albums => self.enter_top_level_view(View::Albums),
+            NavLocation::Genres => self.enter_top_level_view(View::Genres),
+            NavLocation::Playlists => self.enter_top_level_view(View::Playlists),
+            NavLocation::Search => self.enter_top_level_view(View::Search),
+            NavLocation::ArtistDetail { artist, .. } => {
+                if self
+                    .state
+                    .artist_details
+                    .artist()
+                    .is_some_and(|current| current.id == artist.id)
+                {
+                    self.state.navigate_to(View::ArtistDetail);
+                } else {
+                    self.open_artist_without_history(artist);
+                }
+            }
+            NavLocation::AlbumDetail { album, .. } => {
+                if self
+                    .state
+                    .album_details
+                    .album()
+                    .is_some_and(|current| current.id == album.id)
+                {
+                    self.state.navigate_to(View::AlbumDetail);
+                } else {
+                    self.open_album_without_history(album);
+                }
+            }
+            NavLocation::GenreDetail(genre) => {
+                if self
+                    .state
+                    .genres
+                    .detail()
+                    .is_some_and(|detail| detail.name() == genre)
+                {
+                    self.state.navigate_to(View::GenreDetail);
+                } else {
+                    self.open_genre_without_history(genre);
+                }
+            }
+            NavLocation::PlaylistDetail { playlist, .. } => {
+                if self
+                    .state
+                    .playlists
+                    .playlist()
+                    .is_some_and(|current| current.id == playlist.id)
+                {
+                    self.state.navigate_to(View::PlaylistDetail);
+                } else {
+                    self.open_playlist_without_history(playlist);
+                }
+            }
+        }
+        self.content_scroll_handle
+            .set_offset(point(px(0.0), px(entry.scroll_y)));
+    }
+
     pub(in crate::app) fn open_now_playing(&mut self) {
         self.state.open_now_playing();
     }
@@ -76,6 +173,19 @@ impl NavidromeApp {
     pub(in crate::app) fn leave_now_playing(&mut self) {
         self.state.leave_now_playing();
     }
+}
+
+fn top_level_nav_location(view: View) -> Option<NavLocation> {
+    Some(match view {
+        View::Home => NavLocation::Home,
+        View::Favorites => NavLocation::Favorites,
+        View::Artists => NavLocation::Artists,
+        View::Albums => NavLocation::Albums,
+        View::Genres => NavLocation::Genres,
+        View::Playlists => NavLocation::Playlists,
+        View::Search => NavLocation::Search,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

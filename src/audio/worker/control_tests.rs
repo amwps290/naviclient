@@ -269,6 +269,7 @@ fn preference_commands_keep_transport_acknowledgements_and_share_the_existing_eq
     let settings = EqSettings {
         enabled: true,
         gains_db: [3.0; 10],
+        ..Default::default()
     };
     worker.handle_command(Command::SetEqualizer(settings.clone()).into());
     assert!(worker.output.eq.shares_state(&eq));

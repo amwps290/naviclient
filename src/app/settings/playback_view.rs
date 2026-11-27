@@ -1,8 +1,19 @@
 //! Streaming, audio output, normalization and lyrics preferences.
 
 use super::components::{settings_group, settings_row};
+use crate::app::playback::display::format_file_size;
 use crate::app::prelude::*;
 use gpui_kit::component::menu::PopupMenuItem;
+
+const AUDIO_CACHE_LIMIT_OPTIONS_MB: [u64; 5] = [512, 1024, 2048, 4096, 8192];
+
+fn format_cache_limit_label(mb: u64) -> String {
+    if mb >= 1024 && mb.is_multiple_of(1024) {
+        format!("{} GB", mb / 1024)
+    } else {
+        format!("{mb} MB")
+    }
+}
 
 impl NavidromeApp {
     pub(in crate::app) fn render_playback_settings(
@@ -60,6 +71,23 @@ impl NavidromeApp {
                             .child(cache_dir.display().to_string()),
                     )
                     .child(
+                        surface_button("open-cache-directory")
+                            .label(t!("Open folder"))
+                            .compact_action()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let dir = config::audio_cache_dir(&this.config);
+                                if let Err(error) = config::prepare_audio_cache_dir(&this.config) {
+                                    this.notify_error(t!(
+                                        "Unable to use cache directory %{dir}: %{error}",
+                                        dir = dir.display(),
+                                        error = error
+                                    ));
+                                    return;
+                                }
+                                cx.open_with_system(&dir);
+                            })),
+                    )
+                    .child(
                         surface_button("choose-cache-directory")
                             .label(t!("Choose folder"))
                             .compact_action()
@@ -74,11 +102,97 @@ impl NavidromeApp {
                             .disabled(self.config.cache_dir.is_none())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.apply_cache_directory(None);
-                                cx.notify();
+                                this.refresh_cache_usage(cx);
                             })),
                     ),
             )
+            .child({
+                let usage_text = match self.state.settings.cache_usage {
+                    Some(usage) => t!(
+                        "Audio %{audio} (%{audio_count}) · Covers %{covers} (%{cover_count})",
+                        audio = format_file_size(usage.audio_bytes),
+                        audio_count = usage.audio_files,
+                        covers = format_file_size(usage.cover_bytes),
+                        cover_count = usage.cover_files
+                    )
+                    .to_string(),
+                    None => t!("Cache usage not scanned yet").to_string(),
+                };
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(p.text_secondary)
+                            .child(usage_text),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                ghost_button("refresh-cache-usage")
+                                    .label(t!("Scan"))
+                                    .compact_action()
+                                    .disabled(self.state.settings.cache_busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.refresh_cache_usage(cx);
+                                    })),
+                            )
+                            .child(
+                                surface_button("clear-audio-cache")
+                                    .label(t!("Clear audio cache"))
+                                    .compact_action()
+                                    .disabled(self.state.settings.cache_busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_audio_cache_action(cx);
+                                    })),
+                            )
+                            .child(
+                                surface_button("clear-cover-cache")
+                                    .label(t!("Clear cover cache"))
+                                    .compact_action()
+                                    .disabled(self.state.settings.cache_busy)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.clear_cover_cache_action(cx);
+                                    })),
+                            ),
+                    )
+            })
             .into_any_element();
+
+        let cache_limit_row = {
+            let app = cx.entity().downgrade();
+            let current_mb = self.config.audio_cache_limit_mb;
+            let picker = surface_button("audio-cache-limit-select")
+                .w(px(140.0))
+                .justify_between()
+                .label(format_cache_limit_label(current_mb))
+                .dropdown_caret(true)
+                .compact_action()
+                .dropdown_menu(move |menu, _, cx| {
+                    app.update(cx, |this, cx| {
+                        let mut menu = menu;
+                        for mb in AUDIO_CACHE_LIMIT_OPTIONS_MB {
+                            menu = menu.item(
+                                PopupMenuItem::new(format_cache_limit_label(mb))
+                                    .checked(this.config.audio_cache_limit_mb == mb)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_audio_cache_limit_mb(mb, cx);
+                                    })),
+                            );
+                        }
+                        menu
+                    })
+                    .expect("app owns cache limit menu")
+                })
+                .into_any_element();
+            settings_row(t!("Audio cache size limit"), None, picker, cx)
+        };
 
         let quality_row = {
             let app = cx.entity().downgrade();
@@ -111,7 +225,7 @@ impl NavidromeApp {
         settings_group(
             Some(t!("Streaming & cache").into()),
             None,
-            vec![quality_row, cache_row],
+            vec![quality_row, cache_limit_row, cache_row],
             cx,
         )
     }
@@ -248,7 +362,28 @@ impl NavidromeApp {
             .child(device_controls)
             .into_any_element();
 
-        settings_group(Some(t!("Audio output").into()), None, vec![output_row], cx)
+        let disconnect_row = settings_row(
+            t!("Pause when output device disconnects"),
+            Some(
+                t!("Keep playback paused after switching back from a disconnected headset or DAC.")
+                    .into(),
+            ),
+            Switch::new("pause-on-output-disconnect")
+                .checked(self.config.pause_on_output_disconnect)
+                .accessibility_label(t!("Pause when output device disconnects"))
+                .on_change(cx.listener(|this, checked, _, cx| {
+                    this.set_pause_on_output_disconnect(*checked, cx);
+                }))
+                .into_any_element(),
+            cx,
+        );
+
+        settings_group(
+            Some(t!("Audio output").into()),
+            None,
+            vec![output_row, disconnect_row],
+            cx,
+        )
     }
 
     fn render_normalization_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {

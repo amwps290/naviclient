@@ -98,10 +98,17 @@ impl ArtistDetails {
 
 impl NavidromeApp {
     pub(in crate::app) fn open_artist(&mut self, artist: Artist) {
+        self.record_nav_location(crate::app::shell::history::NavLocation::artist(
+            artist.clone(),
+        ));
+        self.open_artist_without_history(artist);
+    }
+
+    pub(in crate::app) fn open_artist_without_history(&mut self, artist: Artist) {
         self.clear_song_multi();
         self.ensure_cover(artist.cover_art.as_deref(), true);
         self.state.artist_details.select(artist);
-        self.state.view = View::ArtistDetail;
+        self.state.navigate_to(View::ArtistDetail);
         self.load_artist_albums();
         self.load_artist_top_songs();
     }

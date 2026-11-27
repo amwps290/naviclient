@@ -13,7 +13,7 @@ use crate::audio::next_track::PreloadRequest;
 use crate::audio::preparation::StreamRequest;
 use crate::audio::preparation_state::PreparationKind;
 use crate::audio::set_state;
-use crate::audio::stream_cache::prepare_cache_dir;
+use crate::audio::stream_cache::prepare_cache_dir_with_limit;
 use crate::audio::stream_response::stream_endpoint;
 use crate::audio::transport::WorkerCommand;
 
@@ -170,7 +170,7 @@ impl PlaybackWorker {
             }
             Command::SetCacheDirectory(new_cache_dir) => {
                 self.next_track.cancel();
-                match prepare_cache_dir(&new_cache_dir) {
+                match prepare_cache_dir_with_limit(&new_cache_dir, self.cache_limit_bytes) {
                     Ok(()) => {
                         log::info!(
                             "audio cache directory changed; directory={}",
@@ -183,6 +183,15 @@ impl PlaybackWorker {
                         new_cache_dir.display()
                     ),
                 }
+            }
+            Command::SetCacheLimitBytes(limit_bytes) => {
+                self.cache_limit_bytes = limit_bytes;
+                if let Err(error) = prepare_cache_dir_with_limit(&self.cache_dir, limit_bytes) {
+                    log::warn!("failed to prune audio cache to new limit: {error:#}");
+                }
+            }
+            Command::SetPauseOnOutputDisconnect(enabled) => {
+                self.pause_on_output_disconnect = enabled;
             }
             Command::SetOutputDevice(target) => {
                 // 先记录当前输出进度与出声状态（旧 Player 释放前）。

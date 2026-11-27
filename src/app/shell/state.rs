@@ -15,12 +15,14 @@ use crate::app::player::lyrics_state::LyricsState;
 use crate::app::playlists::library::PlaylistLibrary;
 use crate::app::prelude::*;
 use crate::app::queue::logic::ShuffleHistory;
+use crate::app::queue::undo::QueueUndoState;
 use crate::app::recommendations::auto_continue_state::AutoContinueState;
 use crate::app::recommendations::daily_mix_state::DailyMixState;
 use crate::app::recommendations::radio_state::RadioState;
 use crate::app::search::state::SearchState;
 use crate::app::server::connection_state::ServerConnection;
 use crate::app::settings::state::SettingsUi;
+use crate::app::shell::history::NavHistory;
 use crate::app::songs::selection::SongSelection;
 use crate::app::sound::loudness_state::LoudnessCache;
 use crate::app::sound::output::OutputDevices;
@@ -30,6 +32,7 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) bilibili: crate::app::bilibili::state::BilibiliWorkspace,
     pub(in crate::app) connection: ServerConnection,
     pub(in crate::app) view: View,
+    pub(in crate::app) nav_history: NavHistory,
     pub(in crate::app) artists: ArtistLibrary,
     pub(in crate::app) albums: PagedCollection<Album>,
     pub(in crate::app) albums_sort: AlbumSort,
@@ -48,6 +51,7 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) hovered_item: Option<String>,
     pub(in crate::app) queue: PlaybackQueue,
     pub(in crate::app) queue_index: Option<usize>,
+    pub(in crate::app) queue_undo: QueueUndoState,
     /// 右侧 Up Next / History 抽屉；不再用独立页面替换当前浏览上下文。
     pub(in crate::app) queue_drawer_open: bool,
     pub(in crate::app) queue_drawer_tab: QueueDrawerTab,
@@ -81,6 +85,7 @@ impl AppState {
         self.bilibili = Default::default();
         self.connection = ServerConnection::default();
         self.view = View::Home;
+        self.nav_history.reset();
         self.artists = ArtistLibrary::default();
         self.albums = PagedCollection::default();
         self.home_albums = HomeAlbums::default();
@@ -107,6 +112,7 @@ impl Default for AppState {
             bilibili: Default::default(),
             connection: ServerConnection::default(),
             view: View::Home,
+            nav_history: NavHistory::default(),
             artists: ArtistLibrary::default(),
             albums: PagedCollection::default(),
             albums_sort: AlbumSort::default(),
@@ -125,6 +131,7 @@ impl Default for AppState {
             hovered_item: None,
             queue: PlaybackQueue::default(),
             queue_index: None,
+            queue_undo: QueueUndoState::default(),
             queue_drawer_open: false,
             queue_drawer_tab: QueueDrawerTab::default(),
             now_playing: None,

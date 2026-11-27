@@ -18,6 +18,7 @@ struct TrackIdentity {
 pub(in crate::app) struct DesktopState {
     last_notified_track: Option<TrackIdentity>,
     last_tray_paused: Option<bool>,
+    last_tray_track: Option<Option<(String, String)>>,
 }
 
 impl DesktopState {
@@ -61,6 +62,18 @@ impl DesktopState {
         }
         self.last_tray_paused = Some(paused);
         Some(paused)
+    }
+
+    pub(in crate::app) fn tray_track_update(
+        &mut self,
+        song: Option<&crate::models::Song>,
+    ) -> Option<Option<(String, String)>> {
+        let next = song.map(|s| (s.title.clone(), s.artist.clone()));
+        if self.last_tray_track.as_ref() == Some(&next) {
+            return None;
+        }
+        self.last_tray_track = Some(next.clone());
+        Some(next)
     }
 }
 

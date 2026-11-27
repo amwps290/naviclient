@@ -14,10 +14,15 @@ pub enum ShortcutAction {
     VolumeUp,
     VolumeDown,
     ToggleMute,
+    ToggleFavorite,
+    ToggleShuffle,
+    CycleRepeat,
     ToggleNowPlaying,
     ToggleFullscreen,
+    ToggleMiniPlayer,
     ToggleQueue,
     FocusSearch,
+    OpenSettings,
     CloseOverlays,
     SelectPrevious,
     SelectNext,
@@ -26,7 +31,7 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 22] = [
         Self::TogglePlayback,
         Self::Previous,
         Self::Next,
@@ -35,10 +40,15 @@ impl ShortcutAction {
         Self::VolumeUp,
         Self::VolumeDown,
         Self::ToggleMute,
+        Self::ToggleFavorite,
+        Self::ToggleShuffle,
+        Self::CycleRepeat,
         Self::ToggleNowPlaying,
         Self::ToggleFullscreen,
+        Self::ToggleMiniPlayer,
         Self::ToggleQueue,
         Self::FocusSearch,
+        Self::OpenSettings,
         Self::CloseOverlays,
         Self::SelectPrevious,
         Self::SelectNext,
@@ -67,10 +77,15 @@ impl ShortcutAction {
             Self::VolumeUp => "up",
             Self::VolumeDown => "down",
             Self::ToggleMute => "m",
+            Self::ToggleFavorite => "ctrl-l",
+            Self::ToggleShuffle => "s",
+            Self::CycleRepeat => "r",
             Self::ToggleNowPlaying => "l",
             Self::ToggleFullscreen => "f11",
+            Self::ToggleMiniPlayer => "ctrl-shift-m",
             Self::ToggleQueue => "q",
             Self::FocusSearch => "ctrl-f",
+            Self::OpenSettings => "ctrl-,",
             Self::CloseOverlays => "escape",
             Self::SelectPrevious => "shift-up",
             Self::SelectNext => "shift-down",
@@ -89,10 +104,15 @@ impl ShortcutAction {
             Self::VolumeUp => Some("ctrl-alt-up"),
             Self::VolumeDown => Some("ctrl-alt-down"),
             Self::ToggleMute => Some("ctrl-alt-m"),
-            Self::ToggleNowPlaying
+            Self::ToggleFavorite
+            | Self::ToggleShuffle
+            | Self::CycleRepeat
+            | Self::ToggleNowPlaying
             | Self::ToggleFullscreen
+            | Self::ToggleMiniPlayer
             | Self::ToggleQueue
             | Self::FocusSearch
+            | Self::OpenSettings
             | Self::CloseOverlays
             | Self::SelectPrevious
             | Self::SelectNext

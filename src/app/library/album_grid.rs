@@ -1,8 +1,10 @@
 //! Album artwork cards, playback actions and metadata links.
 
+use crate::app::library::playback::LibraryQueueAction;
 use crate::app::prelude::*;
 use crate::app::shell::view_helpers::item_instance_key;
 use crate::app::widgets::shelf::cover_grid;
+use gpui_kit::component::menu::PopupMenuItem;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_album_grid(
@@ -51,7 +53,9 @@ impl NavidromeApp {
         let album_for_click = album.clone();
         let album_for_play = album.clone();
         let album_for_cover = album.clone();
+        let album_for_menu = album.clone();
         let album_id_for_hover = key.clone();
+        let menu_app = cx.entity().downgrade();
         v_flex()
             .id(SharedString::from(key))
             .min_w_0()
@@ -148,6 +152,73 @@ impl NavidromeApp {
                         this.child(t!("- %{year}", year = year))
                     }),
             )
+            .context_menu(move |menu, _, cx| {
+                let album = album_for_menu.clone();
+                menu_app
+                    .update(cx, |this, cx| {
+                        let play = album.clone();
+                        let next = album.clone();
+                        let append = album.clone();
+                        let key = FavoriteKey::new(FavoriteKind::Album, &album.id);
+                        let fav_label = if this.state.favorites.is_starred(&key) {
+                            t!("Remove from favorites")
+                        } else {
+                            t!("Add to favorites")
+                        };
+                        let fav_id = album.id.clone();
+                        let mut menu = menu
+                            .item(PopupMenuItem::new(t!("Play album")).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.queue_album(
+                                        play.clone(),
+                                        LibraryQueueAction::ReplaceAndPlay,
+                                    );
+                                    cx.notify();
+                                },
+                            )))
+                            .item(PopupMenuItem::new(t!("Play next")).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.queue_album(next.clone(), LibraryQueueAction::PlayNext);
+                                    cx.notify();
+                                },
+                            )))
+                            .item(PopupMenuItem::new(t!("Add to queue")).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.queue_album(append.clone(), LibraryQueueAction::Append);
+                                    cx.notify();
+                                },
+                            )))
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(fav_label)
+                                    .disabled(this.state.favorites.is_pending(&key))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.toggle_favorite(FavoriteKey::new(
+                                            FavoriteKind::Album,
+                                            &fav_id,
+                                        ));
+                                        cx.notify();
+                                    })),
+                            );
+                        if let Some(artist_id) = album.artist_id.clone().filter(|id| !id.is_empty())
+                        {
+                            let artist = Artist {
+                                id: artist_id,
+                                name: album.artist.clone(),
+                                album_count: None,
+                                cover_art: album.cover_art.clone(),
+                            };
+                            menu = menu.item(PopupMenuItem::new(t!("Go to artist")).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.open_artist(artist.clone());
+                                    cx.notify();
+                                }),
+                            ));
+                        }
+                        menu
+                    })
+                    .expect("app owns album menu")
+            })
             .into_any_element()
     }
 }

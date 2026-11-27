@@ -65,21 +65,22 @@ fn cancelling_alignment_resumes_the_same_cue_without_resetting_the_viewport(
     let (probe, mut visual) = on_screen(cx);
     visual.update(|_, cx| {
         probe.update(cx, |probe, _| {
+            let now = std::time::Instant::now();
             probe.scroll.set_offset(point(px(0.0), px(-40.0)));
             probe.lyrics.scroll_target = Some(px(-200.0));
             let before = probe.scroll.offset();
-            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), true);
+            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), true, now);
             assert_eq!(probe.scroll.offset(), before);
             assert_eq!(probe.lyrics.active_index, Some(0));
             let target = probe.scroll.bounds().center().y
                 - probe.scroll.bounds_for_item(1).unwrap().center().y;
-            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false, now);
             assert_eq!(probe.lyrics.scroll_target, Some(target));
             assert_ne!(probe.scroll.offset(), before);
             assert_ne!(probe.scroll.offset().y, px(0.0));
             assert!(!probe.lyrics.follow_reset);
             for _ in 0..40 {
-                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false, now);
             }
             assert_eq!(probe.lyrics.scroll_target, None);
             assert_eq!(probe.scroll.offset().y, target);
@@ -92,13 +93,54 @@ fn leaving_alignment_follows_the_latest_cue(cx: &mut TestAppContext) {
     let (probe, mut visual) = on_screen(cx);
     visual.update(|_, cx| {
         probe.update(cx, |probe, _| {
+            let now = std::time::Instant::now();
             probe.scroll.set_offset(point(px(0.0), px(-40.0)));
-            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), true);
+            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), true, now);
             assert_eq!(probe.lyrics.active_index, Some(0));
             let target = probe.scroll.bounds().center().y
                 - probe.scroll.bounds_for_item(2).unwrap().center().y;
-            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), false);
+            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), false, now);
             assert_eq!(probe.lyrics.active_index, Some(1));
+            assert_eq!(probe.lyrics.scroll_target, Some(target));
+        });
+    });
+}
+
+#[gpui_pre::test]
+fn manual_scroll_pauses_auto_follow_until_cooldown_or_explicit_resume(cx: &mut TestAppContext) {
+    let (probe, mut visual) = on_screen(cx);
+    visual.update(|_, cx| {
+        probe.update(cx, |probe, _| {
+            let start = std::time::Instant::now();
+            probe.scroll.set_offset(point(px(0.0), px(-80.0)));
+            probe.lyrics.pause_follow_for_scroll(start);
+            follow_lyrics(
+                &mut probe.lyrics,
+                &probe.scroll,
+                Some(1),
+                false,
+                start + Duration::from_secs(2),
+            );
+            assert_eq!(probe.scroll.offset().y, px(-80.0));
+            assert_eq!(probe.lyrics.scroll_target, None);
+
+            // Once cooldown expires, following automatically resumes to the active line.
+            let target = probe.scroll.bounds().center().y
+                - probe.scroll.bounds_for_item(2).unwrap().center().y;
+            follow_lyrics(
+                &mut probe.lyrics,
+                &probe.scroll,
+                Some(1),
+                false,
+                start + super::super::lyrics_state::MANUAL_SCROLL_PAUSE,
+            );
+            assert_eq!(probe.lyrics.scroll_target, Some(target));
+            assert_eq!(probe.lyrics.manual_scroll_until, None);
+
+            // Explicit resume cancels cooldown immediately.
+            probe.lyrics.pause_follow_for_scroll(start);
+            probe.lyrics.resume_follow_now();
+            follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(1), false, start);
             assert_eq!(probe.lyrics.scroll_target, Some(target));
         });
     });
@@ -107,11 +149,12 @@ fn leaving_alignment_follows_the_latest_cue(cx: &mut TestAppContext) {
 #[gpui_pre::test]
 fn switching_lyric_viewports_recenters_the_same_cue_with_its_new_height(cx: &mut TestAppContext) {
     let (probe, mut visual) = on_screen(cx);
+    let now = std::time::Instant::now();
     let old_scroll = visual.update(|_, cx| {
         probe.update(cx, |probe, cx| {
             probe.lyrics.follow_resume = true;
             for _ in 0..40 {
-                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false, now);
             }
             let old = probe.scroll.clone();
             probe.scroll = ScrollHandle::new();
@@ -131,7 +174,7 @@ fn switching_lyric_viewports_recenters_the_same_cue_with_its_new_height(cx: &mut
                 - probe.scroll.bounds_for_item(1).unwrap().center().y;
             assert_ne!(target, old_offset.y);
             for _ in 0..40 {
-                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false);
+                follow_lyrics(&mut probe.lyrics, &probe.scroll, Some(0), false, now);
             }
             assert_eq!(probe.lyrics.active_index, Some(0));
             assert_eq!(probe.lyrics.scroll_target, None);

@@ -4,18 +4,33 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomEqPreset {
+    pub name: String,
+    #[serde(default)]
+    pub preamp_db: f32,
+    #[serde(default)]
+    pub gains_db: [f32; 10],
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EqSettings {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
+    pub preamp_db: f32,
+    #[serde(default)]
     pub gains_db: [f32; 10],
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_presets: Vec<CustomEqPreset>,
 }
 
 impl Default for EqSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            preamp_db: 0.0,
             gains_db: [0.0; 10],
+            custom_presets: Vec::new(),
         }
     }
 }
@@ -66,8 +81,15 @@ impl EqSettings {
     }
 
     pub fn clamp_gains(&mut self) {
+        self.preamp_db = Self::normalize_gain(self.preamp_db);
         for gain in &mut self.gains_db {
             *gain = Self::normalize_gain(*gain);
+        }
+        for preset in &mut self.custom_presets {
+            preset.preamp_db = Self::normalize_gain(preset.preamp_db);
+            for gain in &mut preset.gains_db {
+                *gain = Self::normalize_gain(*gain);
+            }
         }
     }
 

@@ -85,6 +85,7 @@ fn replacement_keeps_old_audio_live_until_new_player_and_format_are_ready() {
     let settings = EqSettings {
         enabled: true,
         gains_db: [3.0; 10],
+        ..Default::default()
     };
     eq.set(settings.clone());
     eq.set_version_for_test(19);

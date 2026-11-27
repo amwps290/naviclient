@@ -210,3 +210,36 @@ fn an_existing_f11_binding_retains_priority_over_the_new_default() {
         Some(ShortcutAction::Next)
     );
 }
+
+#[test]
+fn new_batch_six_shortcuts_load_in_old_configs_without_default_conflicts() {
+    let settings: ShortcutSettings = serde_json::from_str(r#"{"bindings":{}}"#).unwrap();
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("ctrl-l").unwrap()),
+        Some(ShortcutAction::ToggleFavorite)
+    );
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("s").unwrap()),
+        Some(ShortcutAction::ToggleShuffle)
+    );
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("r").unwrap()),
+        Some(ShortcutAction::CycleRepeat)
+    );
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("ctrl-shift-m").unwrap()),
+        Some(ShortcutAction::ToggleMiniPlayer)
+    );
+    assert_eq!(
+        match_shortcut(&settings, &Keystroke::parse("ctrl-,").unwrap()),
+        Some(ShortcutAction::OpenSettings)
+    );
+    // Every default app shortcut must be unique.
+    for action in ShortcutAction::ALL {
+        assert_eq!(
+            shortcut_conflict(&settings, action, action.default_binding()),
+            None,
+            "default conflict for {action:?}"
+        );
+    }
+}

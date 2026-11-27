@@ -17,12 +17,17 @@ impl NavidromeApp {
             ShortcutAction::VolumeUp,
             ShortcutAction::VolumeDown,
             ShortcutAction::ToggleMute,
+            ShortcutAction::ToggleFavorite,
+            ShortcutAction::ToggleShuffle,
+            ShortcutAction::CycleRepeat,
         ];
         const NAVIGATION: &[ShortcutAction] = &[
             ShortcutAction::ToggleNowPlaying,
             ShortcutAction::ToggleFullscreen,
+            ShortcutAction::ToggleMiniPlayer,
             ShortcutAction::ToggleQueue,
             ShortcutAction::FocusSearch,
+            ShortcutAction::OpenSettings,
             ShortcutAction::CloseOverlays,
         ];
         const SONG_LIST: &[ShortcutAction] = &[

@@ -50,6 +50,7 @@ impl NavidromeApp {
         if !self.session.restore(&mut self.state, session) {
             return;
         }
+        self.state.queue_undo.clear();
         self.config.playback_modes = self.state.playback_modes;
         if let Some(song) = self.state.now_playing.clone() {
             self.ensure_song_cover(&song, true);

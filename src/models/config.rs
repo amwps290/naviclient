@@ -131,6 +131,8 @@ pub struct Config {
     pub language: LanguagePreference,
     #[serde(default)]
     pub cache_dir: Option<PathBuf>,
+    #[serde(default = "default_audio_cache_limit_mb")]
+    pub audio_cache_limit_mb: u64,
     #[serde(default)]
     pub transcoding_quality: TranscodingQuality,
     #[serde(default = "default_volume")]
@@ -141,6 +143,8 @@ pub struct Config {
     pub auto_continue: bool,
     #[serde(default)]
     pub volume_normalization: VolumeNormalization,
+    #[serde(default = "default_true")]
+    pub pause_on_output_disconnect: bool,
     #[serde(default)]
     pub sidebar_collapsed: bool,
     #[serde(default = "default_true")]
@@ -157,6 +161,10 @@ pub struct Config {
     pub show_track_notifications: bool,
     #[serde(default)]
     pub close_minimizes: bool,
+    #[serde(default)]
+    pub show_remaining_time: bool,
+    #[serde(default)]
+    pub mini_show_lyrics: bool,
     #[serde(default)]
     pub shortcuts: ShortcutSettings,
     #[serde(default)]
@@ -180,11 +188,13 @@ impl Default for Config {
             theme: ThemePreference::Light,
             language: LanguagePreference::System,
             cache_dir: None,
+            audio_cache_limit_mb: default_audio_cache_limit_mb(),
             transcoding_quality: TranscodingQuality::Original,
             volume: default_volume(),
             playback_modes: PlayModes::default(),
             auto_continue: false,
             volume_normalization: VolumeNormalization::Track,
+            pause_on_output_disconnect: default_true(),
             sidebar_collapsed: false,
             show_lyrics_translation: default_true(),
             output_device: None,
@@ -193,6 +203,8 @@ impl Default for Config {
             artists_sort: ArtistSort::default(),
             show_track_notifications: default_true(),
             close_minimizes: false,
+            show_remaining_time: false,
+            mini_show_lyrics: false,
             shortcuts: ShortcutSettings::default(),
             global_shortcuts: GlobalShortcutSettings::default(),
         }
@@ -398,6 +410,10 @@ impl Config {
 
 fn default_volume() -> f32 {
     0.7
+}
+
+fn default_audio_cache_limit_mb() -> u64 {
+    4096
 }
 
 fn default_true() -> bool {

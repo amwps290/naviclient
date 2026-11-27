@@ -16,6 +16,7 @@ fn band_edits_preserve_other_gains_and_do_not_reschedule_unchanged_values() {
     let mut settings = EqSettings {
         enabled: true,
         gains_db: EqSettings::PRESETS[1].1,
+        ..Default::default()
     };
     let mut expected = settings.clone();
     expected.gains_db[4] = -4.0;
@@ -58,6 +59,7 @@ fn invalid_gains_cannot_enter_the_canonical_settings() {
         let mut settings = EqSettings {
             enabled: true,
             gains_db: [4.0; 10],
+            ..Default::default()
         };
         let request = state.set_band(&mut settings, 2, gain).unwrap();
         assert_eq!(settings.gains_db[2], 0.0);
@@ -73,6 +75,7 @@ fn toggling_keeps_band_values_and_repeated_toggles_preserve_the_pending_save() {
     let mut settings = EqSettings {
         enabled: true,
         gains_db: EqSettings::PRESETS[4].1,
+        ..Default::default()
     };
     let original = settings.gains_db;
     let disabled = state.set_enabled(&mut settings, false).unwrap();
@@ -93,6 +96,7 @@ fn each_builtin_preset_enables_the_equalizer_and_replaces_all_bands() {
         let mut settings = EqSettings {
             enabled: false,
             gains_db: [-10.0; 10],
+            ..Default::default()
         };
         let request = state.set_preset(&mut settings, preset).unwrap();
         assert!(settings.enabled);
@@ -137,4 +141,41 @@ fn mixed_edits_accept_only_the_latest_save_callback_once() {
     assert!(!state.complete_save(toggle));
     assert!(state.complete_save(next));
     assert_eq!(settings.gains_db, EqSettings::PRESETS[4].1);
+}
+
+#[test]
+fn preamp_and_custom_presets_save_overwrite_and_delete() {
+    let mut state = EqualizerState::default();
+    let mut settings = EqSettings::default();
+    let preamp_req = state.set_preamp(&mut settings, -4.0).unwrap();
+    assert!(settings.enabled);
+    assert_eq!(settings.preamp_db, -4.0);
+    assert!(state.complete_save(preamp_req));
+
+    let band_req = state.set_band(&mut settings, 0, 5.0).unwrap();
+    assert!(state.complete_save(band_req));
+
+    let save_req = state
+        .save_custom_preset(&mut settings, "  My Headphones ")
+        .unwrap();
+    assert_eq!(settings.custom_presets.len(), 1);
+    assert_eq!(settings.custom_presets[0].name, "My Headphones");
+    assert_eq!(settings.custom_presets[0].preamp_db, -4.0);
+    assert_eq!(settings.custom_presets[0].gains_db[0], 5.0);
+    assert!(state.complete_save(save_req));
+
+    // Overwrite case-insensitively with updated curve
+    let _ = state.set_preamp(&mut settings, -2.0).unwrap();
+    let overwrite_req = state
+        .save_custom_preset(&mut settings, "my headphones")
+        .unwrap();
+    assert_eq!(settings.custom_presets.len(), 1);
+    assert_eq!(settings.custom_presets[0].preamp_db, -2.0);
+    assert!(state.complete_save(overwrite_req));
+
+    let del_req = state
+        .delete_custom_preset(&mut settings, "my headphones")
+        .unwrap();
+    assert!(settings.custom_presets.is_empty());
+    assert!(state.complete_save(del_req));
 }

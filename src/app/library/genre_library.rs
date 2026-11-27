@@ -143,8 +143,15 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn open_genre(&mut self, genre: String) {
+        self.record_nav_location(crate::app::shell::history::NavLocation::GenreDetail(
+            genre.clone(),
+        ));
+        self.open_genre_without_history(genre);
+    }
+
+    pub(in crate::app) fn open_genre_without_history(&mut self, genre: String) {
         self.state.genres.select(genre);
-        self.state.view = View::GenreDetail;
+        self.state.navigate_to(View::GenreDetail);
         self.load_more_genre_albums();
     }
 

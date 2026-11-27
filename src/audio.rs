@@ -230,6 +230,22 @@ impl AudioHandle {
         }
     }
 
+    pub fn set_cache_limit_mb(&self, limit_mb: u64) {
+        let bytes = limit_mb.saturating_mul(1024 * 1024);
+        if self.send(Command::SetCacheLimitBytes(bytes)).is_err() {
+            log::error!("failed to update cache limit: audio worker is unavailable");
+        }
+    }
+
+    pub fn set_pause_on_output_disconnect(&self, enabled: bool) {
+        if self
+            .send(Command::SetPauseOnOutputDisconnect(enabled))
+            .is_err()
+        {
+            log::error!("failed to update output disconnect behavior: audio worker is unavailable");
+        }
+    }
+
     /// 切换输出设备；播放中会在新设备上从当前位置继续，暂停意图保留。
     pub fn set_output_device(&self, name: Option<String>) {
         self.cancel_transition();

@@ -15,7 +15,7 @@ use super::output::{open_audio_device, report_output_device};
 use super::output_track::OutputTrack;
 use super::preparation::Preparation;
 use super::preparation_state::PreparationToken;
-use super::stream_cache::prepare_cache_dir;
+use super::stream_cache::{prepare_cache_dir_with_limit, MAX_AUDIO_CACHE_BYTES};
 use super::track_state::TrackState;
 use super::track_transition::Transition;
 use super::transport::{self, WorkerCommand};
@@ -51,6 +51,8 @@ pub(super) enum Command {
     Stop,
     SetVolume(f32),
     SetCacheDirectory(PathBuf),
+    SetCacheLimitBytes(u64),
+    SetPauseOnOutputDisconnect(bool),
     /// 切换输出设备；None 表示跟随系统默认。
     SetOutputDevice(Option<String>),
     /// 更新均衡器设置。
@@ -148,6 +150,8 @@ struct PlaybackWorker {
     preparation: Preparation,
     pending_commands: VecDeque<WorkerCommand>,
     cache_dir: PathBuf,
+    cache_limit_bytes: u64,
+    pause_on_output_disconnect: bool,
     current: TrackState,
     next_track: NextTrack,
     output: AudioOutput,
@@ -173,7 +177,8 @@ impl PlaybackWorker {
         let volume = 1.0;
         let current = TrackState::default();
         let cache_dir = initial_cache_dir;
-        if let Err(error) = prepare_cache_dir(&cache_dir) {
+        let cache_limit_bytes = MAX_AUDIO_CACHE_BYTES;
+        if let Err(error) = prepare_cache_dir_with_limit(&cache_dir, cache_limit_bytes) {
             log::warn!("audio cache is unavailable: {error:#}");
         } else {
             log::debug!("audio cache ready; directory={}", cache_dir.display());
@@ -187,6 +192,8 @@ impl PlaybackWorker {
             preparation,
             pending_commands,
             cache_dir,
+            cache_limit_bytes,
+            pause_on_output_disconnect: true,
             current,
             next_track,
             output,

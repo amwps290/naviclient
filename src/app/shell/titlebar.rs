@@ -71,9 +71,11 @@ impl NavidromeApp {
             .into_any_element()
     }
 
-    /// 主窗口标题栏：页面名称由内容区标题承担，这里只留详情页的返回入口
-    /// 和窗口级工具。
+    /// 主窗口标题栏：左侧为浏览历史后退/前进按钮，右侧为窗口级工具。
     pub(in crate::app) fn render_main_titlebar(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let can_back =
+            self.state.nav_history.can_go_back() || self.state.view.detail_parent().is_some();
+        let can_forward = self.state.nav_history.can_go_forward();
         let detail_parent = self.state.view.detail_parent();
 
         h_flex()
@@ -82,22 +84,43 @@ impl NavidromeApp {
             .items_center()
             .justify_between()
             .pr_2()
-            .child(div().min_w_0().when_some(detail_parent, |this, parent| {
-                this.child(
-                    div().occlude().child(
+            .child(
+                h_flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_0p5()
+                    .occlude()
+                    .child(
                         icon_button(
                             "titlebar-back",
-                            AppIcon::ArrowLeft,
-                            t!("Back to library"),
+                            KitIcon::ChevronLeft,
+                            t!("Back (Alt+Left)"),
                             tokens::ICON_BUTTON_XS,
                         )
+                        .disabled(!can_back)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.state.navigate_to(parent);
+                            if !this.navigate_back() {
+                                if let Some(parent) = detail_parent {
+                                    this.navigate_to(parent);
+                                }
+                            }
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        icon_button(
+                            "titlebar-forward",
+                            AppIcon::ChevronRight,
+                            t!("Forward (Alt+Right)"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .disabled(!can_forward)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.navigate_forward();
                             cx.notify();
                         })),
                     ),
-                )
-            }))
+            )
             .child(self.render_titlebar_actions("toggle-mini-player", "title-settings", cx))
             .into_any_element()
     }

@@ -60,6 +60,13 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn open_playlist(&mut self, playlist: Playlist) {
+        self.record_nav_location(crate::app::shell::history::NavLocation::playlist(
+            playlist.clone(),
+        ));
+        self.open_playlist_without_history(playlist);
+    }
+
+    pub(in crate::app) fn open_playlist_without_history(&mut self, playlist: Playlist) {
         if self.browsing_bilibili()
             && self
                 .state
@@ -76,7 +83,7 @@ impl NavidromeApp {
             .insert(SongScope::PlaylistDetail, UniformListScrollHandle::new());
         self.ensure_cover(playlist.cover_art.as_deref(), true);
         self.state.playlists.select(playlist);
-        self.state.view = View::PlaylistDetail;
+        self.state.navigate_to(View::PlaylistDetail);
         self.load_playlist_detail();
     }
 

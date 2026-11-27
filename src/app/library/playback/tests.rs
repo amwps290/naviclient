@@ -18,8 +18,16 @@ fn newer_album_or_artist_intent_rejects_previous_results() {
     ] {
         let mut playback = LibraryPlayback::default();
         let mut requests = LibraryRequests::default();
-        let old = playback.begin(&mut requests, old_source);
-        let current = playback.begin(&mut requests, new_source);
+        let old = playback.begin(
+            &mut requests,
+            old_source,
+            LibraryQueueAction::ReplaceAndPlay,
+        );
+        let current = playback.begin(
+            &mut requests,
+            new_source,
+            LibraryQueueAction::ReplaceAndPlay,
+        );
         assert!(playback.complete(old, Ok(vec![song("stale", 1)])).is_none());
         assert!(playback.complete(old, Err("stale error".into())).is_none());
         let songs = playback
@@ -37,7 +45,11 @@ fn newer_album_or_artist_intent_rejects_previous_results() {
 fn cancellation_rejects_late_success_and_failure_without_consuming_a_new_intent() {
     let mut playback = LibraryPlayback::default();
     let mut requests = LibraryRequests::default();
-    let cancelled = playback.begin(&mut requests, PlaybackSource::Album);
+    let cancelled = playback.begin(
+        &mut requests,
+        PlaybackSource::Album,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     playback.cancel();
     assert!(playback
         .complete(cancelled, Ok(vec![song("cancelled", 1)]))
@@ -45,7 +57,11 @@ fn cancellation_rejects_late_success_and_failure_without_consuming_a_new_intent(
     assert!(playback
         .complete(cancelled, Err("cancelled error".into()))
         .is_none());
-    let current = playback.begin(&mut requests, PlaybackSource::Artist);
+    let current = playback.begin(
+        &mut requests,
+        PlaybackSource::Artist,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     assert!(playback
         .complete(cancelled, Ok(vec![song("cancelled", 1)]))
         .is_none());
@@ -56,11 +72,15 @@ fn cancellation_rejects_late_success_and_failure_without_consuming_a_new_intent(
 }
 
 #[test]
-fn album_playback_sorts_tracks_and_artist_playback_keeps_aggregate_order() {
-    for source in [PlaybackSource::Album, PlaybackSource::Artist] {
+fn album_playback_sorts_tracks_and_artist_or_playlist_keeps_order() {
+    for source in [
+        PlaybackSource::Album,
+        PlaybackSource::Artist,
+        PlaybackSource::Playlist,
+    ] {
         let mut playback = LibraryPlayback::default();
         let mut requests = LibraryRequests::default();
-        let request = playback.begin(&mut requests, source);
+        let request = playback.begin(&mut requests, source, LibraryQueueAction::ReplaceAndPlay);
         let songs = playback
             .complete(request, Ok(vec![song("second", 2), song("first", 1)]))
             .unwrap()
@@ -81,16 +101,49 @@ fn album_playback_sorts_tracks_and_artist_playback_keeps_aggregate_order() {
 }
 
 #[test]
+fn queue_action_is_preserved_per_request() {
+    let mut playback = LibraryPlayback::default();
+    let mut requests = LibraryRequests::default();
+    let next = playback.begin(
+        &mut requests,
+        PlaybackSource::Playlist,
+        LibraryQueueAction::PlayNext,
+    );
+    assert_eq!(next.action, LibraryQueueAction::PlayNext);
+    let append = playback.begin(
+        &mut requests,
+        PlaybackSource::Album,
+        LibraryQueueAction::Append,
+    );
+    assert_eq!(append.action, LibraryQueueAction::Append);
+    assert!(playback
+        .complete(next, Ok(vec![song("stale", 1)]))
+        .is_none());
+    assert!(playback
+        .complete(append, Ok(vec![song("current", 1)]))
+        .unwrap()
+        .is_ok());
+}
+
+#[test]
 fn empty_results_and_failures_consume_only_their_own_playback_intent() {
     for result in [Ok(vec![]), Err("offline".into())] {
         let mut playback = LibraryPlayback::default();
         let mut requests = LibraryRequests::default();
-        let request = playback.begin(&mut requests, PlaybackSource::Album);
+        let request = playback.begin(
+            &mut requests,
+            PlaybackSource::Album,
+            LibraryQueueAction::ReplaceAndPlay,
+        );
         assert!(playback.complete(request, result).is_some());
         assert!(playback
             .complete(request, Ok(vec![song("late", 1)]))
             .is_none());
-        let retry = playback.begin(&mut requests, PlaybackSource::Album);
+        let retry = playback.begin(
+            &mut requests,
+            PlaybackSource::Album,
+            LibraryQueueAction::ReplaceAndPlay,
+        );
         assert!(playback
             .complete(retry, Ok(vec![song("retry", 1)]))
             .unwrap()
@@ -103,9 +156,11 @@ fn playing_album_a_and_browsing_album_b_have_independent_responses() {
     for playback_first in [true, false] {
         let mut state = AppState::default();
         let mut requests = LibraryRequests::default();
-        let play_a = state
-            .library_playback
-            .begin(&mut requests, PlaybackSource::Album);
+        let play_a = state.library_playback.begin(
+            &mut requests,
+            PlaybackSource::Album,
+            LibraryQueueAction::ReplaceAndPlay,
+        );
         state.album_details.select(Album {
             id: "B".into(),
             ..Default::default()
@@ -141,9 +196,11 @@ fn cancelled_playback_does_not_cancel_browsing() {
     let mut requests = LibraryRequests::default();
     state.album_details.select(Album::default());
     let details = state.album_details.begin(&mut requests).unwrap();
-    let playback = state
-        .library_playback
-        .begin(&mut requests, PlaybackSource::Album);
+    let playback = state.library_playback.begin(
+        &mut requests,
+        PlaybackSource::Album,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     state.library_playback.cancel();
     assert!(state
         .library_playback
@@ -162,13 +219,17 @@ fn cancelled_playback_does_not_cancel_browsing() {
 fn resetting_server_state_rejects_outstanding_playback() {
     let mut state = AppState::default();
     let mut requests = LibraryRequests::default();
-    let old = state
-        .library_playback
-        .begin(&mut requests, PlaybackSource::Artist);
+    let old = state.library_playback.begin(
+        &mut requests,
+        PlaybackSource::Artist,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     state = AppState::default();
-    let current = state
-        .library_playback
-        .begin(&mut requests, PlaybackSource::Artist);
+    let current = state.library_playback.begin(
+        &mut requests,
+        PlaybackSource::Artist,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     assert_ne!(old, current);
     assert!(state
         .library_playback
@@ -190,9 +251,11 @@ fn resetting_server_state_rejects_outstanding_playback() {
 fn manual_playback_cancels_pending_playback_but_preserves_daily_generation_and_browsing() {
     let mut state = AppState::default();
     let mut requests = LibraryRequests::default();
-    let library = state
-        .library_playback
-        .begin(&mut requests, PlaybackSource::Album);
+    let library = state.library_playback.begin(
+        &mut requests,
+        PlaybackSource::Album,
+        LibraryQueueAction::ReplaceAndPlay,
+    );
     state.album_details.select(Album::default());
     let browse = state.album_details.begin(&mut requests).unwrap();
     let queue = PlaybackQueue::from_songs(vec![song("anchor", 1)], QueueOrigin::Manual);

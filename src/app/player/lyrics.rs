@@ -110,17 +110,67 @@ impl NavidromeApp {
             scroll,
             active,
             self.lyrics_ui.timing.is_aligning(),
+            std::time::Instant::now(),
         );
+    }
+
+    pub(in crate::app) fn copy_text_to_clipboard(
+        &mut self,
+        text: impl Into<String>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.into()));
+        self.notify_success(t!("Copied to clipboard"));
+        cx.notify();
+    }
+
+    pub(in crate::app) fn copy_all_lyrics(&mut self, cx: &mut Context<Self>) {
+        let Some(lyrics) = self.state.lyrics.lyrics() else {
+            return;
+        };
+        let include_translation = self.config.show_lyrics_translation;
+        let text = format_lyrics_plain(lyrics, include_translation);
+        if text.is_empty() {
+            return;
+        }
+        self.copy_text_to_clipboard(text, cx);
     }
 }
 
+pub(in crate::app) fn format_lyrics_plain(
+    lyrics: &crate::models::Lyrics,
+    include_translation: bool,
+) -> String {
+    let mut lines = Vec::new();
+    for line in &lyrics.lines {
+        let main = line.text.trim();
+        if main.is_empty() {
+            continue;
+        }
+        lines.push(main.to_string());
+        if include_translation {
+            if let Some(translation) = line
+                .translation
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                lines.push(translation.to_string());
+            }
+        }
+    }
+    lines.join("\n")
+}
+
 /// Follow live cues from the current viewport, with a pause while a line is
-/// picked for alignment. Resuming rebuilds the target even within the same cue.
+/// picked for alignment or after manual wheel scrolling. Resuming rebuilds the
+/// target even within the same cue.
 fn follow_lyrics(
     lyrics: &mut super::lyrics_state::LyricsState,
     scroll: &ScrollHandle,
     active: Option<usize>,
     aligning: bool,
+    now: std::time::Instant,
 ) {
     if aligning {
         lyrics.scroll_target = None;
@@ -132,6 +182,14 @@ fn follow_lyrics(
     // actual viewport even when both the old and new active indices are None.
     if std::mem::take(&mut lyrics.follow_reset) {
         scroll.set_offset(point(px(0.0), px(0.0)));
+    }
+    if lyrics.is_manual_scroll_paused(now) {
+        lyrics.scroll_target = None;
+        return;
+    }
+    if lyrics.manual_scroll_until.is_some() {
+        lyrics.manual_scroll_until = None;
+        lyrics.follow_resume = true;
     }
     let resumed = std::mem::take(&mut lyrics.follow_resume);
     if active != lyrics.active_index || resumed {

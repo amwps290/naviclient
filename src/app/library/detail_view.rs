@@ -30,9 +30,8 @@ impl NavidromeApp {
                 wide_cover: false,
                 meta: div()
                     .child(t!(
-                        "%{albums} albums · %{songs} songs",
-                        albums = self.state.artist_details.albums().len(),
-                        songs = popular_count
+                        "%{albums} albums",
+                        albums = self.state.artist_details.albums().len()
                     ))
                     .into_any_element(),
                 actions: h_flex()
@@ -180,11 +179,41 @@ impl NavidromeApp {
         let Some(album) = self.state.album_details.album() else {
             return div().child(t!("Album not found")).into_any_element();
         };
-        let actions_disabled =
-            self.state.album_details.loading() || self.state.album_details.songs().is_empty();
+        let songs = self.state.album_details.songs();
+        let actions_disabled = self.state.album_details.loading() || songs.is_empty();
+        let track_count = if !songs.is_empty() {
+            Some(songs.len())
+        } else {
+            album.song_count.filter(|c| *c > 0).map(|c| c as usize)
+        };
+        let total_duration = album.duration.filter(|d| *d > 0).or_else(|| {
+            let sum: i32 = songs
+                .iter()
+                .filter_map(|song| song.duration.filter(|d| *d > 0))
+                .sum();
+            (sum > 0).then_some(sum)
+        });
+        let uniform_format = songs.first().and_then(|first| {
+            let suffix = first.suffix.as_deref().filter(|s| !s.is_empty())?;
+            songs
+                .iter()
+                .all(|song| {
+                    song.suffix
+                        .as_deref()
+                        .is_some_and(|other| other.eq_ignore_ascii_case(suffix))
+                })
+                .then(|| suffix.to_uppercase())
+        });
+        let genre = album
+            .genre
+            .as_deref()
+            .map(str::trim)
+            .filter(|genre| !genre.is_empty())
+            .map(str::to_string);
         let layout = self.shell_layout(window);
         let padding = layout.page_padding;
         let player_clearance = layout.player_clearance();
+        let p = palette(cx);
         let hero = self.render_detail_hero(
             DetailHero {
                 kind: t!("Album").into(),
@@ -193,11 +222,13 @@ impl NavidromeApp {
                 round_cover: false,
                 wide_cover: false,
                 meta: h_flex()
-                    .gap_1()
+                    .gap_1p5()
+                    .flex_wrap()
+                    .items_center()
                     .min_w_0()
                     .child(
                         div()
-                            .text_color(palette(cx).brand)
+                            .text_color(p.brand)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.artist_name_link(
                                 "album-detail-artist",
@@ -207,8 +238,45 @@ impl NavidromeApp {
                                 cx,
                             )),
                     )
-                    .when_some(album.year, |this, year| {
-                        this.child(t!("- %{year}", year = year))
+                    .when_some(album.year, |this, year| this.child(format!("· {year}")))
+                    .when_some(track_count, |this, count| {
+                        this.child(format!("· {}", t!("%{count} tracks", count = count)))
+                    })
+                    .when_some(total_duration, |this, duration| {
+                        this.child(format!("· {}", format_duration(Some(duration))))
+                    })
+                    .when_some(genre, |this, genre| {
+                        let genre_click = genre.clone();
+                        this.child("·").child(
+                            div()
+                                .id("album-detail-genre")
+                                .cursor_pointer()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_full()
+                                .bg(p.sunken)
+                                .text_xs()
+                                .text_color(p.text_secondary)
+                                .hover(move |style| style.text_color(p.brand).bg(p.brand_soft))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_genre(genre_click.clone());
+                                    cx.notify();
+                                }))
+                                .child(genre),
+                        )
+                    })
+                    .when_some(uniform_format, |this, format| {
+                        this.child(
+                            div()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_full()
+                                .bg(p.brand_soft)
+                                .text_size(px(11.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(p.brand)
+                                .child(format),
+                        )
                     })
                     .into_any_element(),
                 actions: h_flex()
@@ -251,6 +319,12 @@ impl NavidromeApp {
                                 );
                             })),
                     )
+                    .child(self.favorite_button_sized(
+                        FavoriteKind::Album,
+                        &album.id,
+                        tokens::ICON_BUTTON_LG,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             window,

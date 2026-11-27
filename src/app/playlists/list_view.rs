@@ -1,7 +1,9 @@
 //! 播放列表集合页、空状态及创建和导入入口渲染。
 
+use crate::app::library::playback::LibraryQueueAction;
 use crate::app::prelude::*;
 use crate::app::widgets::shelf::cover_grid;
+use gpui_kit::component::menu::PopupMenuItem;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_playlists(
@@ -20,6 +22,8 @@ impl NavidromeApp {
                 .iter()
                 .map(|playlist| {
                     let playlist_for_click = playlist.clone();
+                    let playlist_for_menu = playlist.clone();
+                    let menu_app = cx.entity().downgrade();
                     let hover_key = format!("playlist-row-{}", playlist.id);
                     let hovered = self.state.hovered_item.as_deref() == Some(hover_key.as_str());
                     let hover_key_for_cb = hover_key.clone();
@@ -72,6 +76,74 @@ impl NavidromeApp {
                             this.open_playlist(playlist_for_click.clone());
                             cx.notify();
                         }))
+                        .context_menu(move |menu, _, cx| {
+                            let playlist = playlist_for_menu.clone();
+                            menu_app
+                                .update(cx, |this, cx| {
+                                    let play = playlist.clone();
+                                    let append = playlist.clone();
+                                    let rename = playlist.clone();
+                                    let delete = playlist.clone();
+                                    let editable = !this.browsing_bilibili()
+                                        && crate::playlist::can_edit(
+                                            &playlist,
+                                            &this.config.username,
+                                        )
+                                        && !this.state.playlists.editing();
+                                    let mut menu = menu
+                                        .item(PopupMenuItem::new(t!("Play all")).on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.queue_playlist(
+                                                    play.clone(),
+                                                    LibraryQueueAction::ReplaceAndPlay,
+                                                );
+                                                cx.notify();
+                                            }),
+                                        ))
+                                        .item(PopupMenuItem::new(t!("Append all")).on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.queue_playlist(
+                                                    append.clone(),
+                                                    LibraryQueueAction::Append,
+                                                );
+                                                cx.notify();
+                                            }),
+                                        ));
+                                    if !this.browsing_bilibili() {
+                                        menu = menu
+                                            .separator()
+                                            .item(
+                                                PopupMenuItem::new(t!("Rename"))
+                                                    .disabled(!editable)
+                                                    .on_click(cx.listener(
+                                                        move |this, _, window, cx| {
+                                                            this.name_playlist(
+                                                                Some(rename.clone()),
+                                                                vec![],
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        },
+                                                    )),
+                                            )
+                                            .item(
+                                                PopupMenuItem::new(t!("Delete"))
+                                                    .disabled(!editable)
+                                                    .on_click(cx.listener(
+                                                        move |this, _, window, cx| {
+                                                            this.delete_playlist(
+                                                                delete.clone(),
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        },
+                                                    )),
+                                            );
+                                    }
+                                    menu
+                                })
+                                .expect("app owns playlist card menu")
+                        })
                         .into_any_element()
                 })
                 .collect::<Vec<_>>(),

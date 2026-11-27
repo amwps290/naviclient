@@ -13,7 +13,7 @@ mod sort;
 pub(crate) mod source;
 
 pub use config::{Config, ServerProfile};
-pub use equalizer::EqSettings;
+pub use equalizer::{CustomEqPreset, EqSettings};
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
     Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine,

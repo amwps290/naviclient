@@ -18,6 +18,15 @@ impl NavidromeApp {
         }
     }
 
+    pub(in crate::app) fn set_eq_preamp(&mut self, preamp_db: f32, cx: &mut Context<Self>) {
+        if let Some(request) = self
+            .equalizer
+            .set_preamp(&mut self.config.equalizer, preamp_db)
+        {
+            self.apply_equalizer_change(request, cx);
+        }
+    }
+
     pub(in crate::app) fn set_eq_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if let Some(request) = self
             .equalizer
@@ -33,11 +42,51 @@ impl NavidromeApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let request = self.equalizer.set_preset(&mut self.config.equalizer, gains);
+        self.set_eq_preset_with_preamp(0.0, gains, window, cx);
+    }
+
+    pub(in crate::app) fn set_eq_preset_with_preamp(
+        &mut self,
+        preamp_db: f32,
+        gains: [f32; 10],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let request =
+            self.equalizer
+                .set_preset_with_preamp(&mut self.config.equalizer, preamp_db, gains);
+        let preamp = self.config.equalizer.preamp_db;
+        self.eq_preamp_slider
+            .update(cx, |slider, cx| slider.set_value(preamp, window, cx));
         for (slider, gain) in self.eq_sliders.iter().zip(self.config.equalizer.gains_db) {
             slider.update(cx, |slider, cx| slider.set_value(gain, window, cx));
         }
         if let Some(request) = request {
+            self.apply_equalizer_change(request, cx);
+        }
+    }
+
+    pub(in crate::app) fn save_eq_custom_preset(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = self.eq_preset_name_input.read(cx).value().to_string();
+        if let Some(request) = self
+            .equalizer
+            .save_custom_preset(&mut self.config.equalizer, &name)
+        {
+            self.eq_preset_name_input
+                .update(cx, |input, cx| input.set_value(String::new(), window, cx));
+            self.apply_equalizer_change(request, cx);
+        }
+    }
+
+    pub(in crate::app) fn delete_eq_custom_preset(&mut self, name: &str, cx: &mut Context<Self>) {
+        if let Some(request) = self
+            .equalizer
+            .delete_custom_preset(&mut self.config.equalizer, name)
+        {
             self.apply_equalizer_change(request, cx);
         }
     }

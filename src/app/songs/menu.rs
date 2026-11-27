@@ -428,18 +428,85 @@ impl NavidromeApp {
                     })),
             );
         } else if let SongMenuSource::Queue(entry) = context.source {
-            menu = menu
-                .separator()
-                .item(
-                    PopupMenuItem::new(t!("Remove from queue")).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            if let Some(index) = queue_menu_index(&this.state.queue, entry) {
-                                this.remove_from_queue(index);
-                            }
-                            cx.notify();
-                        },
-                    )),
-                );
+            let current_index = queue_menu_index(&self.state.queue, entry);
+            let queue_len = self.state.queue.len();
+            let move_next_target = current_index.and_then(|index| {
+                crate::app::queue::undo::queue_move_to_next_target(
+                    index,
+                    self.state.queue_index,
+                    queue_len,
+                )
+            });
+            let can_move_up = current_index.is_some_and(|index| index > 0);
+            let can_move_down = current_index.is_some_and(|index| index + 1 < queue_len);
+            menu =
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(t!("Move to next"))
+                            .disabled(move_next_target.is_none())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(index) = queue_menu_index(&this.state.queue, entry) {
+                                    if let Some(to) =
+                                        crate::app::queue::undo::queue_move_to_next_target(
+                                            index,
+                                            this.state.queue_index,
+                                            this.state.queue.len(),
+                                        )
+                                    {
+                                        this.move_queue_item(index, to);
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(t!("Move up"))
+                            .disabled(!can_move_up)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(index) = queue_menu_index(&this.state.queue, entry) {
+                                    if let Some(to) = index.checked_sub(1) {
+                                        this.move_queue_item(index, to);
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(t!("Move down"))
+                            .disabled(!can_move_down)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(index) = queue_menu_index(&this.state.queue, entry) {
+                                    if index + 1 < this.state.queue.len() {
+                                        this.move_queue_item(index, index + 1);
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(t!("Move to end"))
+                            .disabled(!can_move_down)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(index) = queue_menu_index(&this.state.queue, entry) {
+                                    let last = this.state.queue.len().saturating_sub(1);
+                                    if index < last {
+                                        this.move_queue_item(index, last);
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(t!("Remove from queue")).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                if let Some(index) = queue_menu_index(&this.state.queue, entry) {
+                                    this.remove_from_queue(index);
+                                }
+                                cx.notify();
+                            },
+                        )),
+                    );
         }
         menu
     }

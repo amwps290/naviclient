@@ -32,6 +32,17 @@ impl NavidromeApp {
         } else {
             (playback.buffered.as_secs_f32() / duration.as_secs_f32() * 100.0).clamp(0.0, 100.0)
         };
+        let duration_label = format_duration_or_remaining(
+            playback.position,
+            duration,
+            self.config.show_remaining_time,
+        );
+        let duration_tooltip: SharedString = if self.config.show_remaining_time {
+            t!("Show total duration")
+        } else {
+            t!("Show remaining time")
+        }
+        .into();
         h_flex()
             .w_full()
             .min_w_0()
@@ -80,11 +91,35 @@ impl NavidromeApp {
             )
             .child(
                 div()
+                    .id("player-duration-toggle")
                     .flex_none()
-                    .min_w(px(40.0))
-                    .child(format_playback(duration)),
+                    .min_w(px(44.0))
+                    .cursor_pointer()
+                    .rounded(px(tokens::radius::CONTROL))
+                    .px_1()
+                    .hover(|style| style.bg(palette(cx).sunken))
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(duration_tooltip.clone()).build(window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_remaining_time(cx);
+                    }))
+                    .child(duration_label),
             )
             .into_any_element()
+    }
+}
+
+pub(in crate::app) fn format_duration_or_remaining(
+    position: Duration,
+    duration: Duration,
+    show_remaining: bool,
+) -> String {
+    if show_remaining && !duration.is_zero() {
+        let remaining = duration.saturating_sub(position);
+        format!("-{}", format_playback(remaining))
+    } else {
+        format_playback(duration)
     }
 }
 
@@ -148,4 +183,29 @@ fn render_playback_error_chip(error: String, cx: &Context<NavidromeApp>) -> gpui
                 })),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remaining_time_formats_negative_and_clamps_past_end() {
+        assert_eq!(
+            format_duration_or_remaining(Duration::from_secs(65), Duration::from_secs(200), false),
+            "3:20"
+        );
+        assert_eq!(
+            format_duration_or_remaining(Duration::from_secs(65), Duration::from_secs(200), true),
+            "-2:15"
+        );
+        assert_eq!(
+            format_duration_or_remaining(Duration::from_secs(240), Duration::from_secs(200), true),
+            "-0:00"
+        );
+        assert_eq!(
+            format_duration_or_remaining(Duration::from_secs(10), Duration::ZERO, true),
+            "0:00"
+        );
+    }
 }

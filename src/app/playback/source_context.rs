@@ -170,6 +170,7 @@ impl NavidromeApp {
         self.persist_loudness();
         self.stop_playback();
         self.state.edit_queue().clear();
+        self.state.queue_undo.clear();
         self.state.listening = Default::default();
         self.state.loudness = Default::default();
         self.session.bind(None, None);

@@ -82,6 +82,7 @@ fn pipeline_matches_the_previous_inline_order_and_gain_clamping_sample_for_sampl
     let settings = EqSettings {
         enabled: true,
         gains_db: [3.0, -2.0, 1.0, 0.0, -1.0, 4.0, 2.0, -3.0, 1.0, 0.0],
+        ..Default::default()
     };
     for (channels, rate, output_channels, output_rate) in [
         (1, 8_000, 2, 48_000),

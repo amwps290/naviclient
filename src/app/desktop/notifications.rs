@@ -84,10 +84,16 @@ impl NavidromeApp {
         );
     }
 
-    /// 播放/暂停状态变化时同步托盘菜单文案（Play/Pause）。
+    /// 播放/暂停状态与当前曲目变化时同步托盘菜单文案与悬停提示。
     pub(in crate::app) fn sync_tray_paused(&mut self) {
         if let Some(paused) = self.desktop.tray_paused_update(&self.audio.state()) {
             tray::set_tray_paused(paused);
+        }
+        if let Some(track) = self
+            .desktop
+            .tray_track_update(self.state.now_playing.as_ref())
+        {
+            tray::set_tray_track(track);
         }
     }
 }

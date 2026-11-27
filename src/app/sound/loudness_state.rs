@@ -10,6 +10,15 @@ pub(in crate::app) struct LoudnessCache {
     measurements: HashMap<String, (f32, f32)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::app) enum ReplayGainSource {
+    Off,
+    TrackTag { gain_db: f32, peak: Option<f32> },
+    AlbumTag { gain_db: f32, peak: Option<f32> },
+    LocalMeasurement { rms_db: f32, peak: f32 },
+    Neutral,
+}
+
 impl LoudnessCache {
     pub(in crate::app) fn server_id(&self) -> Option<&str> {
         self.server_id.as_deref()
@@ -46,6 +55,44 @@ impl LoudnessCache {
         self.measurements
             .insert(song_id.to_string(), (rms_db, peak));
         true
+    }
+
+    /// Inspect which ReplayGain source applies to `song` under `mode`,
+    /// along with the effective gain factor (1.0 = unity).
+    pub(in crate::app) fn describe(
+        &self,
+        song: &Song,
+        mode: VolumeNormalization,
+    ) -> (ReplayGainSource, f32) {
+        let factor = self.gain(song, mode);
+        let source = match mode {
+            VolumeNormalization::Off => ReplayGainSource::Off,
+            VolumeNormalization::Track => {
+                if let Some(gain_db) = song.replay_gain_track_gain.filter(|g| g.is_finite()) {
+                    ReplayGainSource::TrackTag {
+                        gain_db,
+                        peak: song.replay_gain_track_peak,
+                    }
+                } else if let Some((rms_db, peak)) = self.measurement(&song.id) {
+                    ReplayGainSource::LocalMeasurement { rms_db, peak }
+                } else {
+                    ReplayGainSource::Neutral
+                }
+            }
+            VolumeNormalization::Album => {
+                if let Some(gain_db) = song.replay_gain_album_gain.filter(|g| g.is_finite()) {
+                    ReplayGainSource::AlbumTag {
+                        gain_db,
+                        peak: song.replay_gain_album_peak,
+                    }
+                } else if let Some((rms_db, peak)) = self.measurement(&song.id) {
+                    ReplayGainSource::LocalMeasurement { rms_db, peak }
+                } else {
+                    ReplayGainSource::Neutral
+                }
+            }
+        };
+        (source, factor)
     }
 
     /// Prefer the selected ReplayGain tag, then a local measurement, then unity.

@@ -38,7 +38,12 @@ pub fn store_password(server_id: &str, username: &str, password: &str) -> anyhow
         let target = target_name(server_id);
         windows_credentials::store(&target, username, password)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let target = target_name(server_id);
+        linux_credentials::store_server_password(&target, username, password)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (server_id, username, password);
         Err(anyhow::anyhow!(
@@ -55,7 +60,11 @@ pub fn load_password(server_id: &str) -> Option<(String, String)> {
     {
         windows_credentials::load(&target)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_credentials::load_server_password(&target)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = target;
         None
@@ -69,7 +78,11 @@ pub fn delete_password(server_id: &str) -> bool {
     {
         windows_credentials::delete(&target)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_credentials::delete_server_password(&target)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = target;
         false

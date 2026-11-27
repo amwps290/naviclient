@@ -70,6 +70,7 @@ pub(crate) struct Equalizer<S> {
     shared: EqHandle,
     version: u64,
     enabled: bool,
+    preamp_factor: f32,
     bands: Vec<Band>,
     channels: usize,
     sample_rate: f32,
@@ -88,6 +89,7 @@ impl<S: Source<Item = f32>> Equalizer<S> {
             shared,
             version,
             enabled: false,
+            preamp_factor: 1.0,
             bands: EqSettings::BANDS
                 .iter()
                 .map(|_| Band::new(channels))
@@ -105,6 +107,12 @@ impl<S: Source<Item = f32>> Equalizer<S> {
     /// 按设置重算 10 段系数（热更新，保留滤波状态）；关闭时各段回 0 dB。
     fn apply(&mut self, settings: &EqSettings) {
         self.enabled = settings.enabled;
+        let preamp_db = if settings.enabled {
+            EqSettings::normalize_gain(settings.preamp_db)
+        } else {
+            0.0
+        };
+        self.preamp_factor = 10f32.powf(preamp_db / 20.0);
         for (index, band) in self.bands.iter_mut().enumerate() {
             let gain_db = if settings.enabled {
                 EqSettings::normalize_gain(settings.gains_db[index])
@@ -139,7 +147,7 @@ impl<S: Source<Item = f32>> Iterator for Equalizer<S> {
         if !self.enabled {
             return Some(sample);
         }
-        let mut value = sample;
+        let mut value = sample * self.preamp_factor;
         for band in &mut self.bands {
             value = band.states[channel].run(value);
         }

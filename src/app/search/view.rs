@@ -76,14 +76,76 @@ impl NavidromeApp {
         if self.state.search.loading() && self.state.search.results().is_none() {
             content = content.child(self.render_list_skeleton(6, cx));
         }
-        if self.state.search.results().is_some() {
+        if self.state.search.results().is_none()
+            && !self.state.search.loading()
+            && !self.state.search.recent_queries().is_empty()
+        {
+            content = content.child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(p.text_muted)
+                                    .child(t!("Recent searches")),
+                            )
+                            .child(
+                                ghost_button("clear-recent-searches")
+                                    .label(t!("Clear"))
+                                    .dense_action()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.state.search.clear_recent_queries();
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(h_flex().flex_wrap().gap_2().children(
+                        self.state.search.recent_queries().iter().enumerate().map(
+                            |(index, query)| {
+                                let query_click = query.clone();
+                                pill_filter_button(
+                                    SharedString::from(format!("recent-search-{index}")),
+                                    query.clone(),
+                                    false,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        let q = query_click.clone();
+                                        this.search_input.update(cx, |input, cx| {
+                                            input.set_value(q, window, cx);
+                                        });
+                                        this.submit_search(cx);
+                                        cx.notify();
+                                    },
+                                ))
+                            },
+                        ),
+                    )),
+            );
+        }
+        if let Some(results) = self.state.search.results() {
             // 过滤只在有结果后出现；会话内状态，不持久化。
             content = content.child(h_flex().flex_wrap().items_center().gap_2().children(
                 SearchFilter::ALL.map(|filter| {
                     let selected = self.state.search.filter() == filter;
+                    let count = match filter {
+                        SearchFilter::All => {
+                            results.artists.len() + results.albums.len() + results.songs.len()
+                        }
+                        SearchFilter::Artists => results.artists.len(),
+                        SearchFilter::Albums => results.albums.len(),
+                        SearchFilter::Songs => results.songs.len(),
+                    };
+                    let label = format!("{} ({count})", filter.label());
                     pill_filter_button(
-                        SharedString::from(format!("search-filter-{}", filter.label())),
-                        filter.label(),
+                        SharedString::from(format!("search-filter-{filter:?}")),
+                        label,
                         selected,
                         cx,
                     )

@@ -31,6 +31,145 @@ impl NavidromeApp {
         self.state.status = t!("Audio cache: %{dir}", dir = effective_dir.display()).to_string();
     }
 
+    pub(in crate::app) fn refresh_cache_usage(&mut self, cx: &mut Context<Self>) {
+        if self.state.settings.cache_busy {
+            return;
+        }
+        self.state.settings.cache_busy = true;
+        let cfg = self.config.clone();
+        let (tx, rx) = mpsc::channel();
+        self.runtime.spawn_blocking(move || {
+            let _ = tx.send(config::cache_usage(&cfg));
+        });
+        cx.spawn(async move |this, cx| {
+            let usage = loop {
+                if let Ok(usage) = rx.try_recv() {
+                    break Some(usage);
+                }
+                Timer::after(Duration::from_millis(25)).await;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.state.settings.cache_busy = false;
+                if let Some(usage) = usage {
+                    this.state.settings.cache_usage = Some(usage);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(in crate::app) fn clear_audio_cache_action(&mut self, cx: &mut Context<Self>) {
+        if self.state.settings.cache_busy {
+            return;
+        }
+        self.cancel_next_preload();
+        self.state.settings.cache_busy = true;
+        let cfg = self.config.clone();
+        let (tx, rx) = mpsc::channel();
+        self.runtime.spawn_blocking(move || {
+            let result = config::clear_audio_cache(&cfg).map_err(|e| e.to_string());
+            let usage = config::cache_usage(&cfg);
+            let _ = tx.send((result, usage));
+        });
+        cx.spawn(async move |this, cx| {
+            let outcome = loop {
+                if let Ok(outcome) = rx.try_recv() {
+                    break outcome;
+                }
+                Timer::after(Duration::from_millis(25)).await;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.state.settings.cache_busy = false;
+                this.state.settings.cache_usage = Some(outcome.1);
+                match outcome.0 {
+                    Ok(freed) => this.notify_success(t!(
+                        "Cleared audio cache (%{size})",
+                        size = crate::app::playback::display::format_file_size(freed)
+                    )),
+                    Err(error) => this
+                        .notify_error(t!("Could not clear audio cache: %{error}", error = error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(in crate::app) fn clear_cover_cache_action(&mut self, cx: &mut Context<Self>) {
+        if self.state.settings.cache_busy {
+            return;
+        }
+        self.state.settings.cache_busy = true;
+        let cfg = self.config.clone();
+        let (tx, rx) = mpsc::channel();
+        self.runtime.spawn_blocking(move || {
+            let result = config::clear_cover_cache(&cfg).map_err(|e| e.to_string());
+            let usage = config::cache_usage(&cfg);
+            let _ = tx.send((result, usage));
+        });
+        cx.spawn(async move |this, cx| {
+            let outcome = loop {
+                if let Ok(outcome) = rx.try_recv() {
+                    break outcome;
+                }
+                Timer::after(Duration::from_millis(25)).await;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.state.settings.cache_busy = false;
+                this.state.settings.cache_usage = Some(outcome.1);
+                match outcome.0 {
+                    Ok(freed) => this.notify_success(t!(
+                        "Cleared cover cache (%{size})",
+                        size = crate::app::playback::display::format_file_size(freed)
+                    )),
+                    Err(error) => this
+                        .notify_error(t!("Could not clear cover cache: %{error}", error = error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(in crate::app) fn set_audio_cache_limit_mb(
+        &mut self,
+        limit_mb: u64,
+        cx: &mut Context<Self>,
+    ) {
+        if self.config.audio_cache_limit_mb == limit_mb {
+            return;
+        }
+        self.config.audio_cache_limit_mb = limit_mb;
+        self.audio.set_cache_limit_mb(limit_mb);
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        self.refresh_cache_usage(cx);
+    }
+
+    pub(in crate::app) fn set_pause_on_output_disconnect(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.config.pause_on_output_disconnect = enabled;
+        self.audio.set_pause_on_output_disconnect(enabled);
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        cx.notify();
+    }
+
     pub(in crate::app) fn choose_cache_directory(&mut self, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -109,6 +248,28 @@ impl NavidromeApp {
         } else {
             self.config = next;
             self.notify_success(t!("Lyrics settings saved."));
+        }
+        cx.notify();
+    }
+
+    pub(in crate::app) fn toggle_remaining_time(&mut self, cx: &mut Context<Self>) {
+        self.config.show_remaining_time = !self.config.show_remaining_time;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
+        }
+        cx.notify();
+    }
+
+    pub(in crate::app) fn set_mini_show_lyrics(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.config.mini_show_lyrics = enabled;
+        if let Err(error) = config::save(&self.config) {
+            self.notify_error(t!(
+                "Config save failed: %{error}",
+                error = format!("{error:#}")
+            ));
         }
         cx.notify();
     }

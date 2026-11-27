@@ -32,6 +32,14 @@ impl NavidromeApp {
                 .min_h_0()
                 .overflow_y_scroll()
                 .track_scroll(&self.fullscreen.scroll)
+                .on_scroll_wheel(cx.listener(move |this, _, _, cx| {
+                    if synced {
+                        this.state
+                            .lyrics
+                            .pause_follow_for_scroll(std::time::Instant::now());
+                        cx.notify();
+                    }
+                }))
                 // The spacers let the first and last cue reach the viewport center.
                 .child(div().h(px(layout.body_height * 0.48)).flex_none())
                 .children(lyrics.lines.iter().enumerate().map(|(index, line)| {

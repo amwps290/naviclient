@@ -39,6 +39,7 @@ impl NavidromeApp {
             return;
         }
         let Some(api) = self.api.clone() else { return };
+        self.state.search.record_query(&query);
         let request = self.state.search.begin(&mut self.library_requests);
         let tx = self.tx.clone();
         self.spawn_future(async move {

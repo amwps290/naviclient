@@ -22,6 +22,7 @@ fn clones_publish_coherent_settings_and_revisions_to_other_threads() {
             publisher.set(EqSettings {
                 enabled: version % 2 == 0,
                 gains_db: [version as f32; 10],
+                ..Default::default()
             });
         }
     });
@@ -61,6 +62,7 @@ fn owned_snapshot_survives_later_edits_and_filters_read_the_latest_revision() {
         handle.set(EqSettings {
             enabled: true,
             gains_db: [gain; 10],
+            ..Default::default()
         });
     }
     assert_eq!(snapshot, (0, EqSettings::default()));
@@ -71,6 +73,7 @@ fn owned_snapshot_survives_later_edits_and_filters_read_the_latest_revision() {
             EqSettings {
                 enabled: true,
                 gains_db: [7.0; 10],
+                ..Default::default()
             }
         ))
     );
@@ -96,6 +99,7 @@ fn poisoned_state_keeps_existing_audio_and_ignores_new_publications() {
     handle.set(EqSettings {
         enabled: true,
         gains_db: [12.0; 10],
+        ..Default::default()
     });
     assert!(handle.changed_since(0).is_none());
     assert!(active.all(|sample| sample == 0.25));

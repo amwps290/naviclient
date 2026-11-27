@@ -137,3 +137,37 @@ fn cover_cleanup_does_not_follow_a_redirected_cover_directory() {
     assert!(prune_cover_cache_at(&config, 0).is_err());
     assert_eq!(fs::read(personal).unwrap(), b"personal cover");
 }
+
+#[test]
+fn cache_usage_and_clear_only_count_and_remove_app_owned_files() {
+    let parent = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: Some(parent.path().into()),
+        ..Config::default()
+    };
+    let audio_dir = prepare_audio_cache_dir(&config).unwrap();
+    let owned_audio = audio_dir.join("0123456789abcdef0123456789abcdef.audio");
+    let foreign_audio = audio_dir.join("notes.txt");
+    fs::write(&owned_audio, vec![1u8; 1024]).unwrap();
+    fs::write(&foreign_audio, b"keep me").unwrap();
+
+    let subsonic = SourceId::new(ProviderKind::OpenSubsonic, "srv");
+    write_source_cover_cache(&config, &subsonic, "cover-1", &[2u8; 512]);
+    let foreign_cover = cover_cache_dir(&config).join("user.png");
+    fs::write(&foreign_cover, b"keep cover").unwrap();
+
+    let usage = cache_usage(&config);
+    assert_eq!(usage.audio_bytes, 1024);
+    assert_eq!(usage.audio_files, 1);
+    assert_eq!(usage.cover_bytes, 512);
+    assert_eq!(usage.cover_files, 1);
+    assert_eq!(usage.total_bytes(), 1536);
+
+    assert_eq!(clear_audio_cache(&config).unwrap(), 1024);
+    assert!(!owned_audio.exists());
+    assert!(foreign_audio.exists());
+
+    assert_eq!(clear_cover_cache(&config).unwrap(), 512);
+    assert!(foreign_cover.exists());
+    assert_eq!(cache_usage(&config), CacheUsage::default());
+}

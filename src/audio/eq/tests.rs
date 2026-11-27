@@ -40,6 +40,7 @@ fn eq_with_gains(source: SineWave, gains: [f32; 10]) -> Equalizer<SineWave> {
     let handle = new_eq_handle(EqSettings {
         enabled: true,
         gains_db: gains,
+        ..Default::default()
     });
     Equalizer::new(source, handle)
 }
@@ -116,6 +117,7 @@ fn disabled_eq_is_a_passthrough() {
     let handle = new_eq_handle(EqSettings {
         enabled: false,
         gains_db: [12.0; 10],
+        ..Default::default()
     });
     let mut eq = Equalizer::new(sine(440.0), handle);
     for index in 0..256 {
@@ -123,6 +125,21 @@ fn disabled_eq_is_a_passthrough() {
         let expected = (std::f64::consts::TAU * index as f64 * 440.0 / 48_000.0).sin() as f32;
         assert!((value - expected).abs() < 1e-3);
     }
+}
+
+#[test]
+fn preamp_attenuates_and_boosts_flat_signal() {
+    let handle = new_eq_handle(EqSettings {
+        enabled: true,
+        preamp_db: -6.0,
+        gains_db: [0.0; 10],
+        ..Default::default()
+    });
+    let mut eq = Equalizer::new(sine(1_000.0), handle);
+    let samples: Vec<f32> = (0..2_000).map(|_| eq.next().unwrap()).collect();
+    let rms = steady_rms(&samples);
+    // -6 dB is roughly 0.5x amplitude (~0.354 RMS for unit sine)
+    assert!((rms - 0.354).abs() < 0.03, "unexpected preamp rms: {rms}");
 }
 
 #[test]
@@ -146,6 +163,7 @@ fn live_invalid_gains_do_not_poison_filter_state_or_later_changes() {
     let handle = new_eq_handle(EqSettings {
         enabled: true,
         gains_db: [0.0; 10],
+        ..Default::default()
     });
     let mut eq = Equalizer::new(sine(1_000.0), handle.clone());
     for _ in 0..64 {
@@ -174,6 +192,7 @@ fn version_change_updates_coefficients_live() {
     let handle = new_eq_handle(EqSettings {
         enabled: true,
         gains_db: [0.0; 10],
+        ..Default::default()
     });
     let mut eq = Equalizer::new(sine(31.0), handle.clone());
     for _ in 0..64 {

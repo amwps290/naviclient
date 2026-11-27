@@ -79,7 +79,9 @@ fn migrate_config_keeps_plaintext_when_the_store_is_unavailable() {
         ..Config::default()
     };
 
-    assert!(migrate_config(&mut config).is_empty());
+    let migrated =
+        migration::migrate_config(&mut config, |_, _, _| Err(anyhow::anyhow!("unavailable")));
+    assert!(migrated.is_empty());
     let profile = &config.servers[0];
     assert!(!profile.password_in_keyring);
     assert_eq!(profile.password, "plain-secret");

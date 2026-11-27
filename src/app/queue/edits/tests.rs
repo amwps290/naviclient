@@ -645,3 +645,62 @@ fn copying_a_browsed_collection_once_preserves_the_source_and_moves_the_copy_int
         );
     }
 }
+
+#[test]
+fn remove_many_deduplicates_remaps_history_and_selects_replacement_when_current_removed() {
+    // Case 1: removing items around current keeps current identity and remaps history once.
+    let mut s = state();
+    let current_entry = s.queue.entry_id(1).unwrap();
+    let keep_entry_2 = s.queue.entry_id(2).unwrap();
+    assert_eq!(
+        s.edit_queue().remove_many(&[0, 3, 0, 99]),
+        QueueRemoval::KeptCurrent
+    );
+    assert_eq!(s.queue.len(), 2);
+    assert_eq!(s.queue_index, Some(0));
+    assert_eq!(s.queue.entry_id(0), Some(current_entry));
+    assert_eq!(s.queue.entry_id(1), Some(keep_entry_2));
+    assert_eq!(s.shuffle_history.snapshot(), (vec![0, 0], vec![1]));
+
+    // Case 2: removing current and its immediate neighbor picks the next surviving entry.
+    let mut s = state();
+    let tail_entry = s.queue.entry_id(3).unwrap();
+    assert_eq!(
+        s.edit_queue().remove_many(&[1, 2]),
+        QueueRemoval::PlayReplacement(1)
+    );
+    assert_eq!(s.queue.len(), 2);
+    assert_eq!(s.queue_index, Some(1));
+    assert_eq!(s.queue.entry_id(1), Some(tail_entry));
+
+    // Case 3: removing current through end falls back to last surviving entry before current.
+    let mut s = state();
+    let first_entry = s.queue.entry_id(0).unwrap();
+    assert_eq!(
+        s.edit_queue().remove_many(&[1, 2, 3]),
+        QueueRemoval::PlayReplacement(0)
+    );
+    assert_eq!(s.queue.len(), 1);
+    assert_eq!(s.queue_index, Some(0));
+    assert_eq!(s.queue.entry_id(0), Some(first_entry));
+
+    // Case 4: removing all entries returns Stop and clears history & selection.
+    let mut s = state();
+    assert_eq!(
+        s.edit_queue().remove_many(&[0, 1, 2, 3]),
+        QueueRemoval::Stop
+    );
+    assert!(s.queue.is_empty());
+    assert_eq!(s.queue_index, None);
+    assert_eq!(s.shuffle_history.snapshot(), (vec![], vec![]));
+    assert!(s.song_selection.multi().is_none());
+
+    // Case 5: empty or out-of-bounds indices return Missing without mutating state.
+    let mut s = state();
+    let before = snapshot(&s);
+    assert_eq!(
+        s.edit_queue().remove_many(&[99, 100]),
+        QueueRemoval::Missing
+    );
+    assert_eq!(snapshot(&s), before);
+}

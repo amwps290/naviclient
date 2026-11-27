@@ -265,6 +265,20 @@ impl NavidromeApp {
                 })),
             )
         })
+        .when(scope == SongScope::Queue, |this| {
+            this.child(
+                icon_button(
+                    "multi-remove-queue",
+                    AppIcon::Trash,
+                    t!("Remove selected from queue (Delete)"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.remove_selected_from_queue();
+                    cx.notify();
+                })),
+            )
+        })
         .child(
             icon_button(
                 SharedString::from(format!("multi-clear-{scope}")),
