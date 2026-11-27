@@ -69,9 +69,8 @@ impl NavidromeApp {
                                     ),
                             )
                             .child(
-                                Button::new("bilibili-submit-search")
+                                primary_button("bilibili-submit-search")
                                     .label(t!("Search"))
-                                    .primary()
                                     .px_6()
                                     .rounded(px(tokens::radius::FULL))
                                     .h(px(tokens::SEARCH_CONTROL_HEIGHT))
@@ -112,9 +111,8 @@ impl NavidromeApp {
                                         .child(error.to_string()),
                                 )
                                 .child(
-                                    Button::new("retry-bilibili-search")
+                                    surface_button("retry-bilibili-search")
                                         .label(t!("Retry"))
-                                        .outline()
                                         .compact_action()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.search_bilibili_page(
@@ -210,16 +208,15 @@ impl NavidromeApp {
                                                 cx.stop_propagation()
                                             })
                                             .child(
-                                                Button::new(SharedString::from(format!(
-                                                    "save-bilibili-video-{}",
-                                                    video.bvid
-                                                )))
-                                                .icon(AppIcon::Heart)
-                                                .tooltip(t!("Save video to…"))
-                                                .accessibility_label(t!("Save video to…"))
-                                                .ghost()
-                                                .small()
-                                                .rounded_full()
+                                                icon_button(
+                                                    SharedString::from(format!(
+                                                        "save-bilibili-video-{}",
+                                                        video.bvid
+                                                    )),
+                                                    AppIcon::Heart,
+                                                    t!("Save video to…"),
+                                                    tokens::ICON_BUTTON_XS,
+                                                )
                                                 .disabled(
                                                     state.search_loading()
                                                         || self.favorite_ui.writing,
@@ -247,15 +244,14 @@ impl NavidromeApp {
                                                 cx.stop_propagation()
                                             })
                                             .child(
-                                                Button::new(SharedString::from(format!(
+                                                primary_button(SharedString::from(format!(
                                                     "open-bilibili-video-{}",
                                                     video.bvid
                                                 )))
                                                 .icon(AppIcon::ChevronRight)
                                                 .tooltip(t!("Open video parts"))
                                                 .accessibility_label(t!("Open video parts"))
-                                                .primary()
-                                                .rounded_full()
+                                                .rounded(px(tokens::radius::FULL))
                                                 .w(px(tokens::PLAY_BUTTON_COMPACT))
                                                 .h(px(tokens::PLAY_BUTTON_COMPACT))
                                                 .disabled(state.search_loading())
@@ -347,14 +343,15 @@ impl NavidromeApp {
                                     .rounded_full()
                                     .bg(p.sunken)
                                     .child(
-                                        Button::new("previous-bilibili-search-page")
-                                            .icon(KitIcon::ChevronLeft)
-                                            .tooltip(t!("Previous"))
-                                            .ghost()
-                                            .small()
-                                            .rounded_full()
-                                            .disabled(page.page <= 1 || state.search_loading())
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                        icon_button(
+                                            "previous-bilibili-search-page",
+                                            KitIcon::ChevronLeft,
+                                            t!("Previous"),
+                                            tokens::ICON_BUTTON_XS,
+                                        )
+                                        .disabled(page.page <= 1 || state.search_loading())
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
                                                 if this.api.as_ref().map(|api| api.id())
                                                     == Some(&owner_for_previous)
                                                 {
@@ -364,7 +361,8 @@ impl NavidromeApp {
                                                         cx,
                                                     );
                                                 }
-                                            })),
+                                            }),
+                                        ),
                                     )
                                     .child(
                                         div()
@@ -378,18 +376,19 @@ impl NavidromeApp {
                                             )),
                                     )
                                     .child(
-                                        Button::new("next-bilibili-search-page")
-                                            .icon(AppIcon::ChevronRight)
-                                            .tooltip(t!("Next"))
-                                            .ghost()
-                                            .small()
-                                            .rounded_full()
-                                            .disabled(
-                                                next > page.pages
-                                                    || next > MAX_SEARCH_PAGES
-                                                    || state.search_loading(),
-                                            )
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                        icon_button(
+                                            "next-bilibili-search-page",
+                                            AppIcon::ChevronRight,
+                                            t!("Next"),
+                                            tokens::ICON_BUTTON_XS,
+                                        )
+                                        .disabled(
+                                            next > page.pages
+                                                || next > MAX_SEARCH_PAGES
+                                                || state.search_loading(),
+                                        )
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
                                                 if this.api.as_ref().map(|api| api.id())
                                                     == Some(&owner_for_next)
                                                 {
@@ -399,7 +398,8 @@ impl NavidromeApp {
                                                         cx,
                                                     );
                                                 }
-                                            })),
+                                            }),
+                                        ),
                                     ),
                             )
                             .when(page.pages > MAX_SEARCH_PAGES, |this| {
@@ -470,18 +470,18 @@ impl NavidromeApp {
                             .child(t!("Video parts")),
                     )
                     .child(
-                        Button::new("close-bilibili-video-preview")
-                            .icon(AppIcon::Close)
-                            .tooltip(t!("Back to search results"))
-                            .ghost()
-                            .small()
-                            .rounded_full()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.state.bilibili_discovery.close_video();
-                                this.bilibili_search_input
-                                    .update(cx, |input, cx| input.focus(window, cx));
-                                cx.notify();
-                            })),
+                        icon_button(
+                            "close-bilibili-video-preview",
+                            AppIcon::Close,
+                            t!("Back to search results"),
+                            tokens::ICON_BUTTON_SM,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.state.bilibili_discovery.close_video();
+                            this.bilibili_search_input
+                                .update(cx, |input, cx| input.focus(window, cx));
+                            cx.notify();
+                        })),
                     ),
             )
             .when(state.video_loading(), |this| {
@@ -511,9 +511,8 @@ impl NavidromeApp {
                                 .child(error.to_string()),
                         )
                         .child(
-                            Button::new("retry-bilibili-video-preview")
+                            surface_button("retry-bilibili-video-preview")
                                 .label(t!("Retry"))
-                                .outline()
                                 .compact_action()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.open_bilibili_discovery_video(
@@ -583,6 +582,7 @@ impl NavidromeApp {
                                             PlayerIcon::Play,
                                             t!("Play from selected part"),
                                             tokens::PLAY_BUTTON,
+                                            cx,
                                         )
                                         .on_click(cx.listener(
                                             move |this, _, _, cx| {
@@ -598,30 +598,27 @@ impl NavidromeApp {
                                         )),
                                     )
                                     .child(
-                                        capsule_button("play-all-bilibili-parts")
+                                        capsule_button_sm("play-all-bilibili-parts")
                                             .label(t!("Play all"))
-                                            .small()
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.play_bilibili_preview(request, 0, false);
                                                 cx.notify();
                                             })),
                                     )
                                     .child(
-                                        capsule_button("append-all-bilibili-parts")
+                                        capsule_button_sm("append-all-bilibili-parts")
                                             .icon(AppIcon::Queue)
                                             .label(t!("Append all parts"))
-                                            .small()
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.play_bilibili_preview(request, 0, true);
                                                 cx.notify();
                                             })),
                                     )
                                     .child(
-                                        capsule_button("save-bilibili-preview-video")
+                                        capsule_button_sm("save-bilibili-preview-video")
                                             .icon(AppIcon::Heart)
                                             .label(t!("Save video to…"))
-                                            .small()
-                                            .disabled(
+                                            .disabled_tonal(
                                                 favorite_bvid.is_empty()
                                                     || self.favorite_ui.writing,
                                             )
@@ -736,6 +733,7 @@ impl NavidromeApp {
                                                                 PlayerIcon::Play,
                                                                 t!("Play"),
                                                                 30.0,
+                                                                cx,
                                                             )
                                                             .on_mouse_down(
                                                                 MouseButton::Left,

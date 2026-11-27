@@ -94,8 +94,9 @@ impl NavidromeApp {
                 .child(div().text_sm().text_color(cx.theme().danger).child(message))
                 .footer(
                     h_flex().justify_end().child(
-                        Button::new("bilibili-close-login")
+                        ghost_button("bilibili-close-login")
                             .label(t!("Cancel"))
+                            .dialog_action()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.cancel_settings_dialog(window, cx);
                             })),
@@ -191,9 +192,8 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("bilibili-cancel-login")
+                ghost_button("bilibili-cancel-login")
                     .label(t!("Cancel"))
-                    .ghost()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
@@ -201,9 +201,8 @@ impl NavidromeApp {
             )
             .when(!working, |footer| {
                 footer.child(
-                    Button::new("bilibili-refresh-qr")
+                    surface_button("bilibili-refresh-qr")
                         .label(t!("New QR code"))
-                        .outline()
                         .dialog_action()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.restart_bilibili_login();
@@ -245,7 +244,7 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-remove-bilibili")
+                ghost_button("cancel-remove-bilibili")
                     .label(t!("Cancel"))
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -253,9 +252,8 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new("confirm-remove-bilibili")
+                danger_button("confirm-remove-bilibili")
                     .label(t!("Remove"))
-                    .danger()
                     .dialog_action()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.remove_bilibili_account(remove.clone());

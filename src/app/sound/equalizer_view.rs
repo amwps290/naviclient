@@ -15,16 +15,14 @@ impl NavidromeApp {
         let presets: Vec<(&'static str, [f32; 10])> = EqSettings::PRESETS.to_vec();
 
         Popover::new("eq-popover")
-            .trigger(
-                Button::new("player-eq")
-                    .icon(AppIcon::Eq)
-                    .tooltip(t!("Equalizer"))
-                    .custom(self.player_toggle_style(enabled, cx))
-                    .selected(enabled)
-                    .with_size(px(30.0))
-                    .rounded_full()
-                    .toggled(enabled),
-            )
+            .trigger(toggle_icon_button(
+                "player-eq",
+                AppIcon::Eq,
+                t!("Equalizer"),
+                enabled,
+                tokens::ICON_BUTTON_MD,
+                cx,
+            ))
             .content(move |_, _, popover_cx| {
                 // accent 是背景 token，做文字/进度色在亮色主题里几乎不可见。
                 let emphasis = popover_cx.theme().primary;
@@ -48,37 +46,39 @@ impl NavidromeApp {
                                 [(true, t!("On")), (false, t!("Off"))].map(|(enable, label)| {
                                     let app = app.clone();
                                     let active = enabled == enable;
-                                    Button::new(SharedString::from(format!("eq-popover-{enable}")))
-                                        .label(label)
-                                        .custom(soft_toggle_style(active, popover_cx))
-                                        .compact_action()
-                                        .rounded_full()
-                                        .selected(active)
-                                        .on_click(move |_, _, cx| {
+                                    pill_filter_button(
+                                        SharedString::from(format!("eq-popover-{enable}")),
+                                        label,
+                                        active,
+                                        popover_cx,
+                                    )
+                                    .on_click(
+                                        move |_, _, cx| {
                                             let _ = app.update(cx, |this, cx| {
                                                 this.set_eq_enabled(enable, cx);
                                             });
-                                        })
+                                        },
+                                    )
                                 }),
                             )),
                     )
                     // 预设
-                    .child(h_flex().gap_1().flex_wrap().children(presets.iter().map(
+                    .child(h_flex().gap_1p5().flex_wrap().children(presets.iter().map(
                         |(name, preset_gains)| {
                             let preset_gains = *preset_gains;
                             let app = app.clone();
                             let active = enabled && gains == preset_gains;
-                            Button::new(SharedString::from(format!("eq-popover-preset-{name}")))
-                                .label(EqSettings::preset_label(name))
-                                .custom(soft_toggle_style(active, popover_cx))
-                                .compact_action()
-                                .rounded_full()
-                                .selected(active)
-                                .on_click(move |_, window, cx| {
-                                    let _ = app.update(cx, |this, cx| {
-                                        this.set_eq_preset(preset_gains, window, cx);
-                                    });
-                                })
+                            pill_filter_button(
+                                SharedString::from(format!("eq-popover-preset-{name}")),
+                                EqSettings::preset_label(name),
+                                active,
+                                popover_cx,
+                            )
+                            .on_click(move |_, window, cx| {
+                                let _ = app.update(cx, |this, cx| {
+                                    this.set_eq_preset(preset_gains, window, cx);
+                                });
+                            })
                         },
                     )))
                     // 10 段滑杆

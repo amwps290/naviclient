@@ -90,6 +90,7 @@ impl NavidromeApp {
                                                     PlayerIcon::Play,
                                                     t!("Play all"),
                                                     tokens::HOVER_PLAY_BUTTON,
+                                                    cx,
                                                 )
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     cx.stop_propagation();

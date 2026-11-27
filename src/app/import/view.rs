@@ -291,9 +291,9 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-import-dialog")
+                ghost_button("cancel-import-dialog")
                     .label(t!("Cancel"))
-                    .outline()
+                    .dialog_action()
                     .disabled(self.state.playlists.editing())
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_import_dialog(window, cx);
@@ -301,9 +301,9 @@ impl NavidromeApp {
             )
             .when_some(action, |footer, action| {
                 footer.child(
-                    Button::new("submit-import-dialog")
+                    primary_button("submit-import-dialog")
                         .label(action)
-                        .primary()
+                        .dialog_action()
                         .disabled(busy || review_empty)
                         .on_click(cx.listener(|this, _, _, cx| this.submit_import_step(cx))),
                 )

@@ -163,17 +163,17 @@ impl NavidromeApp {
     }
 
     fn render_settings_close_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
-        Button::new("close-settings")
-            .icon(AppIcon::Close)
-            .tooltip(t!("Close settings"))
-            .ghost()
-            .small()
-            .rounded_full()
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.state.settings.close();
-                this.cancel_shortcut_recording();
-                cx.notify();
-            }))
-            .into_any_element()
+        icon_button(
+            "close-settings",
+            AppIcon::Close,
+            t!("Close settings"),
+            tokens::ICON_BUTTON_SM,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.state.settings.close();
+            this.cancel_shortcut_recording();
+            cx.notify();
+        }))
+        .into_any_element()
     }
 }

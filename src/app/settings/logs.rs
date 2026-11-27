@@ -272,9 +272,8 @@ impl NavidromeApp {
                             .child(config::log_path().display().to_string()),
                     )
                     .child(
-                        Button::new("open-log-directory")
+                        surface_button("open-log-directory")
                             .label(t!("Open log directory"))
-                            .outline()
                             .compact_action()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 match crate::logging::open_directory() {
@@ -328,10 +327,9 @@ impl NavidromeApp {
                                 .items_center()
                                 .gap_2()
                                 .child(
-                                    Button::new("log-filter")
+                                    surface_button("log-filter")
                                         .label(filter.label())
                                         .dropdown_caret(true)
-                                        .outline()
                                         .compact_action()
                                         .dropdown_menu(move |menu, _, cx| {
                                             app.update(cx, |_, cx| {
@@ -388,10 +386,9 @@ impl NavidromeApp {
                                 .items_center()
                                 .gap_2()
                                 .child(
-                                    Button::new("refresh-logs")
+                                    surface_button("refresh-logs")
                                         .icon(AppIcon::Refresh)
                                         .label(t!("Refresh logs"))
-                                        .outline()
                                         .compact_action()
                                         .disabled(self.logs.pending.is_some())
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -400,9 +397,8 @@ impl NavidromeApp {
                                         })),
                                 )
                                 .child(
-                                    Button::new("copy-logs")
+                                    surface_button("copy-logs")
                                         .label(t!("Copy log report"))
-                                        .outline()
                                         .compact_action()
                                         .disabled(self.logs.updated_at.is_none() || self.logs.dirty)
                                         .on_click(

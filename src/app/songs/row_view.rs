@@ -276,45 +276,48 @@ impl NavidromeApp {
                 .gap_0p5()
                 .when(editable && !compact_columns, |slot| {
                     slot.child(
-                        Button::new(SharedString::from(format!("queue-up-{key}")))
-                            .icon(AppIcon::ChevronUp)
-                            .tooltip(t!("Move up"))
-                            .ghost()
-                            .small()
-                            .disabled(index == 0)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.move_queue_row(target, -1);
-                                cx.notify();
-                            })),
+                        icon_button(
+                            SharedString::from(format!("queue-up-{key}")),
+                            AppIcon::ChevronUp,
+                            t!("Move up"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .disabled(index == 0)
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.move_queue_row(target, -1);
+                            cx.notify();
+                        })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("queue-down-{key}")))
-                            .icon(AppIcon::ChevronDown)
-                            .tooltip(t!("Move down"))
-                            .ghost()
-                            .small()
-                            .disabled(index + 1 >= total)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.move_queue_row(target, 1);
-                                cx.notify();
-                            })),
+                        icon_button(
+                            SharedString::from(format!("queue-down-{key}")),
+                            AppIcon::ChevronDown,
+                            t!("Move down"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .disabled(index + 1 >= total)
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.move_queue_row(target, 1);
+                            cx.notify();
+                        })),
                     )
                 })
                 .when(editable, |slot| {
                     slot.child(
-                        Button::new(SharedString::from(format!("queue-remove-{key}")))
-                            .icon(AppIcon::Close)
-                            .tooltip(t!("Remove from queue"))
-                            .ghost()
-                            .small()
-                            .text_color(p.text_secondary)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_queue_row(target);
-                                cx.notify();
-                            })),
+                        icon_button(
+                            SharedString::from(format!("queue-remove-{key}")),
+                            AppIcon::Close,
+                            t!("Remove from queue"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .text_color(p.text_secondary)
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_queue_row(target);
+                            cx.notify();
+                        })),
                     )
                 })
                 .when(
@@ -329,18 +332,20 @@ impl NavidromeApp {
                 )
                 .when(!editable, |slot| {
                     slot.child(
-                        Button::new(SharedString::from(format!("play-song-{key}")))
-                            .icon(PlayerIcon::Play)
-                            .tooltip(t!("Play"))
-                            .ghost()
-                            .small()
-                            .disabled(!self.state.song_scope_ready(scope))
-                            .text_color(p.brand)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.click_song_row(target, SongRowClickAction::Play);
-                                cx.notify();
-                            })),
+                        icon_button(
+                            SharedString::from(format!("play-song-{key}")),
+                            PlayerIcon::Play,
+                            t!("Play"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .disabled(!self.state.song_scope_ready(scope))
+                        .text_color(if current { p.brand } else { p.text_secondary })
+                        .hover(move |style| style.text_color(p.brand))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.click_song_row(target, SongRowClickAction::Play);
+                            cx.notify();
+                        })),
                     )
                 })
                 .child(
@@ -349,27 +354,28 @@ impl NavidromeApp {
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(|_, _, cx| cx.stop_propagation())
                         .child(
-                            Button::new(SharedString::from(format!("song-menu-{key}")))
-                                .icon(IconName::Ellipsis)
-                                .tooltip(t!("Song actions"))
-                                .ghost()
-                                .small()
-                                .dropdown_menu(move |menu, _, cx| {
-                                    button_menu_app
-                                        .update(cx, |this, cx| {
-                                            let Some((scope, index)) = target.resolve(&this.state)
-                                            else {
-                                                return menu;
-                                            };
-                                            let Some(context) =
-                                                this.song_menu_context(scope, index)
-                                            else {
-                                                return menu;
-                                            };
-                                            this.song_menu(menu, context, cx)
-                                        })
-                                        .expect("app owns song menu")
-                                }),
+                            icon_button(
+                                SharedString::from(format!("song-menu-{key}")),
+                                IconName::Ellipsis,
+                                t!("Song actions"),
+                                tokens::ICON_BUTTON_XS,
+                            )
+                            .text_color(p.text_secondary)
+                            .dropdown_menu(move |menu, _, cx| {
+                                button_menu_app
+                                    .update(cx, |this, cx| {
+                                        let Some((scope, index)) = target.resolve(&this.state)
+                                        else {
+                                            return menu;
+                                        };
+                                        let Some(context) = this.song_menu_context(scope, index)
+                                        else {
+                                            return menu;
+                                        };
+                                        this.song_menu(menu, context, cx)
+                                    })
+                                    .expect("app owns song menu")
+                            }),
                         ),
                 ),
         )

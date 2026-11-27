@@ -44,8 +44,10 @@ pub(super) fn salon_button(
         .custom(salon_toggle_style(false, cx))
         .accessibility_label(label.clone())
         .tooltip(label)
-        .with_size(px(34.0))
+        .w(px(34.0))
+        .h(px(34.0))
         .rounded_full()
+        .cursor_pointer()
 }
 
 pub(super) fn salon_toggle_style(active: bool, cx: &App) -> ButtonCustomVariant {
@@ -373,9 +375,10 @@ impl NavidromeApp {
                                             self.fullscreen.state.opacity() > 0.0,
                                             |this| {
                                                 this.child(
-                                                    self.favorite_button(
+                                                    self.favorite_button_sized(
                                                         FavoriteKind::Song,
                                                         &song.id,
+                                                        34.0,
                                                         cx,
                                                     )
                                                     .text_color(if starred {

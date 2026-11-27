@@ -113,6 +113,7 @@ impl NavidromeApp {
             .custom(soft_toggle_style(selected, cx))
             .selected(selected)
             .rounded(px(tokens::radius::ROW))
+            .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
                 if section != this.state.settings.section {
                     this.state.settings.bilibili_login.cancel();

@@ -30,11 +30,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
         action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
     ) -> gpui_kit::AnyElement {
-        Button::new(id)
-            .icon(AppIcon::Refresh)
-            .tooltip(tooltip)
-            .ghost()
-            .small()
+        icon_button(id, AppIcon::Refresh, tooltip, tokens::ICON_BUTTON_SM)
             .loading(loading)
             .on_click(cx.listener(move |this, _, _, cx| {
                 action(this, cx);
@@ -55,9 +51,8 @@ impl NavidromeApp {
             .flex()
             .justify_center()
             .child(
-                Button::new(id)
+                surface_button(id)
                     .label(t!("Loading failed — try again"))
-                    .outline()
                     .compact_action()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         action(this, cx);

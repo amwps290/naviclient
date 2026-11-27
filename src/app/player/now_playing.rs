@@ -190,9 +190,8 @@ impl NavidromeApp {
                 .text_color(p.text_secondary)
                 .child(self.state.lyrics.status.message())
                 .child(
-                    Button::new("empty-lyrics-search")
+                    ghost_button("empty-lyrics-search")
                         .label(t!("Search lyrics"))
-                        .ghost()
                         .compact_action()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_lyrics_dialog(
@@ -305,6 +304,10 @@ impl NavidromeApp {
                                 },
                             )
                             .when(song.bilibili_part.is_none(), |this| {
+                                let disabled = self
+                                    .source_for_song(song)
+                                    .is_none_or(|api| !api.capabilities().recommendations)
+                                    || radio_loading;
                                 this.child(
                                     capsule_button("now-playing-song-radio")
                                         .icon(PlayerIcon::Play)
@@ -313,11 +316,7 @@ impl NavidromeApp {
                                         } else {
                                             t!("Start song radio")
                                         })
-                                        .disabled(
-                                            self.source_for_song(song).is_none_or(|api| {
-                                                !api.capabilities().recommendations
-                                            }) || radio_loading,
-                                        )
+                                        .disabled_tonal(disabled)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.start_song_radio(radio_seed.clone());
                                             cx.notify();

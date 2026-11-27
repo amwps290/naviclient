@@ -21,6 +21,11 @@ fn assert_palette(hex: PaletteHex) {
         assert_readable(&format!("brand on {surface_name}"), p.brand, surface);
     }
     assert_readable("brand on soft", p.brand, p.brand_soft);
+    assert_readable(
+        "brand hover on soft hover",
+        p.brand_hover,
+        p.brand_soft_hover,
+    );
     assert_readable("text on soft", p.text, p.brand_soft);
     assert_readable("on-brand on brand", p.on_brand, p.brand);
     assert_readable("on-brand on hover", p.on_brand, rgb(hex.brand_hover).into());
@@ -28,6 +33,31 @@ fn assert_palette(hex: PaletteHex) {
         "on-brand on active",
         p.on_brand,
         rgb(hex.brand_active).into(),
+    );
+    for (name, bg) in [
+        ("button_surface", hex.button_surface),
+        ("button_surface_hover", hex.button_surface_hover),
+        ("button_surface_active", hex.button_surface_active),
+        ("button_tonal", hex.button_tonal),
+        ("button_tonal_hover", hex.button_tonal_hover),
+        ("button_tonal_active", hex.button_tonal_active),
+    ] {
+        assert_readable(&format!("text on {name}"), p.text, rgb(bg).into());
+    }
+    assert_readable(
+        "on-danger on danger",
+        rgb(hex.on_danger).into(),
+        rgb(hex.danger).into(),
+    );
+    assert_readable(
+        "on-danger on danger hover",
+        rgb(hex.on_danger).into(),
+        rgb(hex.danger_hover).into(),
+    );
+    assert_readable(
+        "on-danger on danger active",
+        rgb(hex.on_danger).into(),
+        rgb(hex.danger_active).into(),
     );
 }
 

@@ -216,6 +216,7 @@ impl NavidromeApp {
                                         } else {
                                             tokens::PLAY_BUTTON
                                         },
+                                        cx,
                                     )
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
@@ -225,12 +226,11 @@ impl NavidromeApp {
                                     )),
                                 )
                                 .child(
-                                    Button::new(content.ids.open)
+                                    ghost_button(content.ids.open)
                                         .label(content.open_label)
                                         .icon(AppIcon::ChevronRight)
-                                        .ghost()
                                         .compact_action()
-                                        .rounded(px(tokens::radius::CONTROL))
+                                        .rounded(px(tokens::radius::FULL))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.open_feature(&target_open);
                                             cx.notify();

@@ -17,7 +17,7 @@ impl Render for LayoutProbe {
             "很长的歌曲名Long video title".repeat(20).into(),
             "UP 主名称Long uploader".repeat(10).into(),
             thumbnail,
-            round_play_button("probe-continue", PlayerIcon::Play, t!("Play"), 36.0)
+            round_play_button("probe-continue", PlayerIcon::Play, t!("Play"), 36.0, cx)
                 .debug_selector(|| "probe-continue".into())
                 .on_click(cx.listener(|probe, _, _, cx| {
                     probe.played += 1;
@@ -46,6 +46,7 @@ impl Render for LayoutProbe {
                     PlayerIcon::Play,
                     t!("Play"),
                     tokens::HOVER_PLAY_BUTTON,
+                    cx,
                 )
                 .debug_selector(|| "probe-recent-play".into())
                 .on_click(cx.listener(|probe, _, _, cx| {

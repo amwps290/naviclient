@@ -120,16 +120,17 @@ impl NavidromeApp {
                     ),
             )
             .child(
-                Button::new("close-queue-drawer")
-                    .icon(AppIcon::Close)
-                    .tooltip(t!("Close"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.queue_drawer_open = false;
-                        this.clear_song_multi();
-                        cx.notify();
-                    })),
+                icon_button(
+                    "close-queue-drawer",
+                    AppIcon::Close,
+                    t!("Close"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.state.queue_drawer_open = false;
+                    this.clear_song_multi();
+                    cx.notify();
+                })),
             )
             .into_any_element()
     }
@@ -156,16 +157,16 @@ impl NavidromeApp {
                     .bg(p.sunken)
                     .children(QueueDrawerTab::ALL.map(|tab| {
                         let active = selected == tab;
-                        Button::new(match tab {
-                            QueueDrawerTab::UpNext => "queue-tab-up-next",
-                            QueueDrawerTab::History => "queue-tab-history",
-                        })
-                        .label(tab.label())
-                        .custom(soft_toggle_style(active, cx))
-                        .compact_action()
+                        pill_filter_button(
+                            match tab {
+                                QueueDrawerTab::UpNext => "queue-tab-up-next",
+                                QueueDrawerTab::History => "queue-tab-history",
+                            },
+                            tab.label(),
+                            active,
+                            cx,
+                        )
                         .flex_1()
-                        .rounded_full()
-                        .selected(active)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.state.queue_drawer_tab = tab;
                             this.clear_song_multi();
@@ -274,13 +275,14 @@ impl NavidromeApp {
             .when(compact, |this| this.px_2())
             .when(!compact, |this| this.px_3())
             .py_2()
-            .gap_0p5()
+            .items_center()
+            .gap_1()
             .child(
-                Button::new("drawer-queue-play-all")
+                primary_button("drawer-queue-play-all")
                     .icon(PlayerIcon::Play)
                     .label(t!("Play all"))
                     .tooltip(t!("Play all"))
-                    .primary()
+                    .rounded(px(tokens::radius::FULL))
                     .compact_action()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.state.queue.is_empty() {
@@ -290,14 +292,13 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new("drawer-queue-clear-after")
+                ghost_button("drawer-queue-clear-after")
                     .label(if compact {
                         t!("Clear after")
                     } else {
                         t!("Clear after current")
                     })
                     .tooltip(t!("Clear after current"))
-                    .ghost()
                     .compact_action()
                     .disabled(self.state.queue_index.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -306,46 +307,48 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new("drawer-save-queue-playlist")
-                    .icon(AppIcon::Playlists)
-                    .tooltip(t!("Save as playlist"))
-                    .ghost()
-                    .small()
-                    .disabled(
-                        self.state.playlists.editing()
-                            || self.api.as_ref().is_none_or(|api| {
-                                !api.capabilities().playlist_write
-                                    || self
-                                        .state
-                                        .queue
-                                        .songs()
-                                        .any(|song| !song.belongs_to(api.id()))
-                            }),
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.api.as_ref().is_some_and(|api| {
-                            api.capabilities().playlist_write
-                                && this
+                icon_button(
+                    "drawer-save-queue-playlist",
+                    AppIcon::Playlists,
+                    t!("Save as playlist"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .disabled(
+                    self.state.playlists.editing()
+                        || self.api.as_ref().is_none_or(|api| {
+                            !api.capabilities().playlist_write
+                                || self
                                     .state
                                     .queue
                                     .songs()
-                                    .all(|song| song.belongs_to(api.id()))
-                        }) {
-                            this.name_playlist(None, this.state.queue.song_ids(), window, cx);
-                        }
-                    })),
+                                    .any(|song| !song.belongs_to(api.id()))
+                        }),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.api.as_ref().is_some_and(|api| {
+                        api.capabilities().playlist_write
+                            && this
+                                .state
+                                .queue
+                                .songs()
+                                .all(|song| song.belongs_to(api.id()))
+                    }) {
+                        this.name_playlist(None, this.state.queue.song_ids(), window, cx);
+                    }
+                })),
             )
             .child(div().flex_1())
             .child(
-                Button::new("drawer-queue-clear-all")
-                    .icon(AppIcon::Trash)
-                    .tooltip(t!("Clear queue"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.clear_queue();
-                        cx.notify();
-                    })),
+                icon_button(
+                    "drawer-queue-clear-all",
+                    AppIcon::Trash,
+                    t!("Clear queue"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.clear_queue();
+                    cx.notify();
+                })),
             )
             .into_any_element()
     }

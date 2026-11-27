@@ -92,7 +92,9 @@ pub(in crate::app) use crate::app::songs::scope::SongScope;
 pub(in crate::app) use crate::app::sound::equalizer_state::EqualizerState;
 pub(in crate::app) use crate::app::sound::volume_state::VolumeState;
 pub(in crate::app) use crate::app::style::buttons::{
-    capsule_button, round_play_button, soft_toggle_style, ButtonExt,
+    capsule_button, capsule_button_sm, capsule_icon_button, danger_button, danger_surface_button,
+    ghost_button, icon_button, pill_filter_button, primary_button, round_play_button,
+    soft_toggle_style, surface_button, toggle_icon_button, ButtonExt,
 };
 pub(in crate::app) use crate::app::style::surface::{
     cover_shadow, raised_surface, translucent_surface,

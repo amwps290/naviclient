@@ -226,11 +226,10 @@ impl NavidromeApp {
     /// 专辑页排序菜单：当前方式打勾；切换后持久化并从第一页重新加载。
     fn render_album_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
-        Button::new("albums-sort")
+        ghost_button("albums-sort")
             .label(t!("Sort: %{mode}", mode = self.state.albums_sort.label()))
             .icon(AppIcon::ChevronDown)
             .tooltip(t!("Album sort order"))
-            .ghost()
             .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {
@@ -254,14 +253,13 @@ impl NavidromeApp {
     /// 艺术家页排序菜单：全量列表在客户端重排，切换立即生效。
     fn render_artist_sort_button(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
-        Button::new("artists-sort")
+        ghost_button("artists-sort")
             .label(t!(
                 "Sort: %{mode}",
                 mode = self.state.artists.sort().label()
             ))
             .icon(AppIcon::ChevronDown)
             .tooltip(t!("Artist sort order"))
-            .ghost()
             .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {

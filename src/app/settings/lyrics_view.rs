@@ -129,12 +129,11 @@ impl NavidromeApp {
                 settings_row(
                     t!("Loading policy"),
                     None,
-                    Button::new("lyrics-policy")
+                    surface_button("lyrics-policy")
                         .w(px(220.0))
                         .justify_between()
                         .label(policy.label())
                         .dropdown_caret(true)
-                        .outline()
                         .compact_action()
                         .dropdown_menu(move |menu, _, cx| {
                             app.update(cx, |_, cx| {
@@ -227,9 +226,8 @@ impl NavidromeApp {
                     t!("Clearing online cache keeps remembered choices and timing adjustments.")
                         .into(),
                 ),
-                Button::new("clear-online-lyrics-cache")
+                surface_button("clear-online-lyrics-cache")
                     .label(t!("Clear online cache"))
-                    .outline()
                     .compact_action()
                     .on_click(cx.listener(|this, _, _, cx| {
                         match this.lyrics_cache.clear_automatic() {

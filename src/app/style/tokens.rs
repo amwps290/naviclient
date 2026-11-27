@@ -16,7 +16,21 @@ pub(in crate::app) struct PaletteHex {
     pub(in crate::app) brand_hover: u32,
     pub(in crate::app) brand_active: u32,
     pub(in crate::app) brand_soft: u32,
+    pub(in crate::app) brand_soft_hover: u32,
     pub(in crate::app) on_brand: u32,
+    pub(in crate::app) button_surface: u32,
+    pub(in crate::app) button_surface_hover: u32,
+    pub(in crate::app) button_surface_active: u32,
+    pub(in crate::app) button_surface_border: u32,
+    pub(in crate::app) button_tonal: u32,
+    pub(in crate::app) button_tonal_hover: u32,
+    pub(in crate::app) button_tonal_active: u32,
+    pub(in crate::app) ghost_hover: u32,
+    pub(in crate::app) ghost_active: u32,
+    pub(in crate::app) danger: u32,
+    pub(in crate::app) danger_hover: u32,
+    pub(in crate::app) danger_active: u32,
+    pub(in crate::app) on_danger: u32,
     pub(in crate::app) border: u32,
     pub(in crate::app) online: u32,
 }
@@ -29,10 +43,24 @@ pub(in crate::app) const LIGHT: PaletteHex = PaletteHex {
     text_secondary: 0x57534E,
     text_muted: 0x6F6863,
     brand: 0xB53660,
-    brand_hover: 0xA32F56,
-    brand_active: 0x8F294B,
+    brand_hover: 0x9E2D53,
+    brand_active: 0x882546,
     brand_soft: 0xF2E4E3,
+    brand_soft_hover: 0xECD9D8,
     on_brand: 0xFFFFFF,
+    button_surface: 0xFFFFFF,
+    button_surface_hover: 0xFAF6F1,
+    button_surface_active: 0xEFE8E0,
+    button_surface_border: 0xDFD6CA,
+    button_tonal: 0xEAE3DA,
+    button_tonal_hover: 0xE0D6CA,
+    button_tonal_active: 0xD5C9BB,
+    ghost_hover: 0xEFE9E2,
+    ghost_active: 0xE4DCD2,
+    danger: 0xC9353F,
+    danger_hover: 0xB32C35,
+    danger_active: 0x9B242C,
+    on_danger: 0xFFFFFF,
     border: 0xE7E0D8,
     online: 0x2F7D4F,
 };
@@ -48,7 +76,21 @@ pub(in crate::app) const DARK: PaletteHex = PaletteHex {
     brand_hover: 0xF5A0B8,
     brand_active: 0xF7B3C6,
     brand_soft: 0x3A292B,
+    brand_soft_hover: 0x483135,
     on_brand: 0x1C1917,
+    button_surface: 0x2E2927,
+    button_surface_hover: 0x38322F,
+    button_surface_active: 0x25211F,
+    button_surface_border: 0x463F3B,
+    button_tonal: 0x342F2C,
+    button_tonal_hover: 0x403A36,
+    button_tonal_active: 0x4C4540,
+    ghost_hover: 0x433D39,
+    ghost_active: 0x4E4742,
+    danger: 0xF27D83,
+    danger_hover: 0xF59499,
+    danger_active: 0xF8AAAC,
+    on_danger: 0x1C1917,
     border: 0x3A3431,
     online: 0x6FCF9F,
 };
@@ -62,8 +104,12 @@ pub(in crate::app) struct Palette {
     pub(in crate::app) text_secondary: Hsla,
     pub(in crate::app) text_muted: Hsla,
     pub(in crate::app) brand: Hsla,
+    pub(in crate::app) brand_hover: Hsla,
     pub(in crate::app) brand_soft: Hsla,
+    pub(in crate::app) brand_soft_hover: Hsla,
     pub(in crate::app) on_brand: Hsla,
+    pub(in crate::app) ghost_hover: Hsla,
+    pub(in crate::app) ghost_active: Hsla,
     pub(in crate::app) border: Hsla,
     pub(in crate::app) online: Hsla,
 }
@@ -79,8 +125,12 @@ impl PaletteHex {
             text_secondary: color(self.text_secondary),
             text_muted: color(self.text_muted),
             brand: color(self.brand),
+            brand_hover: color(self.brand_hover),
             brand_soft: color(self.brand_soft),
+            brand_soft_hover: color(self.brand_soft_hover),
             on_brand: color(self.on_brand),
+            ghost_hover: color(self.ghost_hover),
+            ghost_active: color(self.ghost_active),
             border: color(self.border),
             online: color(self.online),
         }
@@ -104,11 +154,18 @@ pub(in crate::app) const CAPTION: f32 = 12.0;
 
 pub(in crate::app) mod radius {
     pub(in crate::app) const CONTROL: f32 = 8.0;
+    pub(in crate::app) const BUTTON: f32 = 10.0;
     pub(in crate::app) const ROW: f32 = 10.0;
     pub(in crate::app) const COVER: f32 = 12.0;
     pub(in crate::app) const LARGE: f32 = 20.0;
     pub(in crate::app) const FULL: f32 = 999.0;
 }
+
+// Icon button diameters.
+pub(in crate::app) const ICON_BUTTON_LG: f32 = 36.0;
+pub(in crate::app) const ICON_BUTTON_MD: f32 = 32.0;
+pub(in crate::app) const ICON_BUTTON_SM: f32 = 30.0;
+pub(in crate::app) const ICON_BUTTON_XS: f32 = 28.0;
 
 // Window frame.
 pub(in crate::app) const SIDEBAR_WIDTH: f32 = 200.0;

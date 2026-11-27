@@ -68,7 +68,7 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-remove-server")
+                ghost_button("cancel-remove-server")
                     .label(t!("Cancel"))
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -77,10 +77,8 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new("confirm-remove-server")
+                danger_surface_button("confirm-remove-server")
                     .label(t!("Remove"))
-                    .danger()
-                    .outline()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_remove_server(false, window, cx);
@@ -88,9 +86,8 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new("confirm-remove-server-data")
+                danger_button("confirm-remove-server-data")
                     .label(t!("Remove and clear data"))
-                    .danger()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_remove_server(true, window, cx);

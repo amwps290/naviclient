@@ -93,7 +93,7 @@ impl NavidromeApp {
                             .gap_1p5()
                             .items_center()
                             .child(
-                                Button::new(SharedString::from(format!(
+                                surface_button(SharedString::from(format!(
                                     "{prefix}shortcut-binding-{action:?}"
                                 )))
                                 .w(px(184.0))
@@ -104,8 +104,12 @@ impl NavidromeApp {
                                 } else {
                                     shortcut_display(binding)
                                 })
-                                .outline()
-                                .selected(recording)
+                                .when(recording, |this| {
+                                    this.custom(soft_toggle_style(true, cx))
+                                        .selected(true)
+                                        .border_1()
+                                        .border_color(p.brand)
+                                })
                                 .disabled(unsupported)
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
@@ -120,13 +124,14 @@ impl NavidromeApp {
                                 )),
                             )
                             .child(
-                                Button::new(SharedString::from(format!(
-                                    "{prefix}shortcut-reset-{action:?}"
-                                )))
-                                .icon(KitIcon::Undo2)
-                                .tooltip(t!("Restore default"))
-                                .ghost()
-                                .small()
+                                icon_button(
+                                    SharedString::from(format!(
+                                        "{prefix}shortcut-reset-{action:?}"
+                                    )),
+                                    KitIcon::Undo2,
+                                    t!("Restore default"),
+                                    tokens::ICON_BUTTON_SM,
+                                )
                                 .disabled(unsupported || is_default)
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {

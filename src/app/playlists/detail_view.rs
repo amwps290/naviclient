@@ -135,11 +135,10 @@ pub(in crate::app) fn render_playlist_status_content(
         )
         .when(error.is_some(), |this| {
             this.child(
-                Button::new("retry-playlist")
+                ghost_button("retry-playlist")
                     .debug_selector(|| "retry-playlist".into())
                     .label(t!("Retry"))
                     .compact_action()
-                    .ghost()
                     .disabled(playlists.editing() || playlists.detail_loading())
                     .on_click(on_retry),
             )

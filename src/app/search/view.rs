@@ -48,9 +48,8 @@ impl NavidromeApp {
                                 ),
                         )
                         .child(
-                            Button::new("run-search")
+                            primary_button("run-search")
                                 .label(t!("Search"))
-                                .primary()
                                 .h(px(tokens::SEARCH_CONTROL_HEIGHT))
                                 .px_6()
                                 .rounded(px(tokens::radius::FULL))
@@ -60,20 +59,17 @@ impl NavidromeApp {
                                 })),
                         )
                         .child(
-                            Button::new("refresh-search")
-                                .icon(AppIcon::Refresh)
-                                .accessibility_label(t!("Run search again"))
-                                .tooltip(t!("Run search again"))
-                                .ghost()
-                                .small()
-                                .w(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                .h(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                .rounded(px(tokens::radius::FULL))
-                                .loading(self.state.search.loading())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_search(cx);
-                                    cx.notify();
-                                })),
+                            icon_button(
+                                "refresh-search",
+                                AppIcon::Refresh,
+                                t!("Run search again"),
+                                tokens::SEARCH_CONTROL_HEIGHT,
+                            )
+                            .loading(self.state.search.loading())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_search(cx);
+                                cx.notify();
+                            })),
                         ),
                 ),
         );
@@ -85,16 +81,13 @@ impl NavidromeApp {
             content = content.child(h_flex().flex_wrap().items_center().gap_2().children(
                 SearchFilter::ALL.map(|filter| {
                     let selected = self.state.search.filter() == filter;
-                    Button::new(SharedString::from(format!(
-                        "search-filter-{}",
-                        filter.label()
-                    )))
-                    .label(filter.label())
-                    .custom(soft_toggle_style(selected, cx))
-                    .compact_action()
+                    pill_filter_button(
+                        SharedString::from(format!("search-filter-{}", filter.label())),
+                        filter.label(),
+                        selected,
+                        cx,
+                    )
                     .px_4()
-                    .rounded(px(tokens::radius::FULL))
-                    .selected(selected)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_search_filter(filter, cx);
                     }))

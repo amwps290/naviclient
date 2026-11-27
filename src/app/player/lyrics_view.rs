@@ -110,23 +110,25 @@ impl NavidromeApp {
                     )
                     .child(
                         h_flex()
+                            .items_center()
                             .gap_1()
                             .child(
-                                Button::new("change-lyrics")
+                                ghost_button("change-lyrics")
                                     .label(t!("Change lyrics"))
-                                    .ghost()
                                     .compact_action()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_lyrics_dialog(LyricsDialog::Search, window, cx)
                                     })),
                             )
                             .child(
-                                Button::new("lyrics-actions")
-                                    .label("⋯")
-                                    .accessibility_label(t!("Lyrics actions"))
-                                    .ghost()
-                                    .small()
-                                    .dropdown_menu(move |menu, _, cx| {
+                                icon_button(
+                                    "lyrics-actions",
+                                    IconName::Ellipsis,
+                                    t!("Lyrics actions"),
+                                    tokens::ICON_BUTTON_SM,
+                                )
+                                .dropdown_menu(
+                                    move |menu, _, cx| {
                                         app.update(cx, |_, cx| {
                                             let mut menu = menu
                                                 .item(
@@ -194,7 +196,8 @@ impl NavidromeApp {
                                             menu
                                         })
                                         .expect("app owns lyrics menu")
-                                    }),
+                                    },
+                                ),
                             ),
                     ),
             )
@@ -280,9 +283,9 @@ impl NavidromeApp {
                             .child(Input::new(&ui.album)),
                     )
                     .child(
-                        Button::new("search-online-lyrics")
+                        primary_button("search-online-lyrics")
                             .label(t!("Search lyrics"))
-                            .primary()
+                            .compact_action()
                             .disabled(!enabled)
                             .on_click(cx.listener(|this, _, _, cx| this.search_lyrics(cx))),
                     ),
@@ -293,14 +296,13 @@ impl NavidromeApp {
                     .items_center()
                     .child(div().text_xs().child(t!("Lyrics source")))
                     .child(
-                        Button::new("lyrics-search-source")
+                        surface_button("lyrics-search-source")
                             .label(
                                 source
                                     .map(ProviderId::label)
                                     .unwrap_or_else(|| t!("All enabled sources").into()),
                             )
-                            .outline()
-                            .small()
+                            .compact_action()
                             .dropdown_caret(true)
                             .disabled(!enabled || sources.is_empty())
                             .dropdown_menu(move |menu, _, cx| {
@@ -396,7 +398,16 @@ impl NavidromeApp {
                                 .w_full()
                                 .h_auto()
                                 .justify_start()
-                                .outline()
+                                .py_2()
+                                .px_3()
+                                .rounded(px(tokens::radius::ROW))
+                                .border_1()
+                                .border_color(if ui.selected == Some(index) {
+                                    palette(cx).brand.opacity(0.45)
+                                } else {
+                                    palette(cx).border
+                                })
+                                .cursor_pointer()
                                 .selected(ui.selected == Some(index))
                                 .custom(soft_toggle_style(ui.selected == Some(index), cx))
                                 .child(
@@ -593,9 +604,9 @@ impl NavidromeApp {
                         )),
                 )
                 .child(
-                    Button::new("enable-online-lyrics")
+                    surface_button("enable-online-lyrics")
                         .label(t!("Enable online lyrics"))
-                        .outline()
+                        .compact_action()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.save_lyrics_settings(|s| s.enabled = true, cx);
                         })),
@@ -646,17 +657,17 @@ impl NavidromeApp {
                     .justify_end()
                     .gap_2()
                     .child(
-                        Button::new("cancel-lyrics-search")
+                        ghost_button("cancel-lyrics-search")
                             .label(t!("Cancel"))
-                            .ghost()
+                            .dialog_action()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_lyrics_dialog(window, cx)
                             })),
                     )
                     .child(
-                        Button::new("apply-lyrics-candidate")
+                        primary_button("apply-lyrics-candidate")
                             .label(t!("Use these lyrics"))
-                            .primary()
+                            .dialog_action()
                             .disabled(selected.is_none() || ui.request.is_some())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.apply_lyrics_candidate(window, cx)

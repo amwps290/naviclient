@@ -59,13 +59,11 @@ impl NavidromeApp {
             .gap_3()
             .child(
                 h_flex().justify_end().child(
-                    Button::new("add-music-source")
+                    primary_button("add-music-source")
                         .label(t!("Add music source"))
                         .icon(KitIcon::Plus)
                         .dropdown_caret(true)
-                        .primary()
                         .compact_action()
-                        .rounded(px(tokens::radius::CONTROL))
                         .dropdown_menu(move |menu, _, cx| {
                             app.update(cx, |_, cx| {
                                 menu.item(
@@ -136,15 +134,19 @@ impl NavidromeApp {
         let connection = self.connection_label(&self.config.source_connection(&source));
         let action = row.action.map(|action| {
             let target = source.clone();
-            Button::new(SharedString::from(format!("source-action-{key}")))
+            let id = SharedString::from(format!("source-action-{key}"));
+            let button = if action == SourceAction::Switch {
+                surface_button(id)
+            } else {
+                primary_button(id)
+            };
+            button
                 .label(match action {
                     SourceAction::SetUp => t!("Set up"),
                     SourceAction::SignIn => t!("Sign in"),
                     SourceAction::Retry => t!("Retry"),
                     SourceAction::Switch => t!("Use"),
                 })
-                .when(action == SourceAction::Switch, |button| button.outline())
-                .when(action != SourceAction::Switch, |button| button.primary())
                 .compact_action()
                 .disabled(row.busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -310,14 +312,12 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
         let source = source.clone();
-        Button::new(SharedString::from(format!(
-            "source-menu-{}",
-            source.cache_namespace()
-        )))
-        .icon(AppIcon::More)
-        .tooltip(t!("More actions"))
-        .ghost()
-        .small()
+        icon_button(
+            SharedString::from(format!("source-menu-{}", source.cache_namespace())),
+            AppIcon::More,
+            t!("More actions"),
+            tokens::ICON_BUTTON_SM,
+        )
         .disabled(busy)
         .dropdown_menu(move |menu, window, cx| {
             let head = source.clone();

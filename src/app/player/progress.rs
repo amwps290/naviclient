@@ -139,9 +139,8 @@ fn render_playback_error_chip(error: String, cx: &Context<NavidromeApp>) -> gpui
                 .child(summary),
         )
         .child(
-            Button::new("player-retry")
+            ghost_button("player-retry")
                 .label(t!("Retry"))
-                .ghost()
                 .xsmall()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.retry_current_track();

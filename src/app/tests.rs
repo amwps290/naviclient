@@ -21,13 +21,20 @@ fn theme_overrides_follow_runtime_mode_changes(cx: &mut gpui_kit::TestAppContext
         assert!(close(cx.theme().background, light.page));
         assert!(close(cx.theme().primary, light.brand));
         assert!(close(cx.theme().muted_foreground, light.text_secondary));
-        // Capsule buttons use the kit's solid secondary variant.
-        assert!(close(cx.theme().button_secondary, light.sunken));
+        // Surface buttons use the kit's default variant; capsule buttons use secondary.
+        assert!(close(
+            cx.theme().button,
+            gpui_kit::rgb(LIGHT.button_surface).into()
+        ));
+        assert!(close(
+            cx.theme().button_secondary,
+            gpui_kit::rgb(LIGHT.button_tonal).into()
+        ));
         assert!(close(cx.theme().button_secondary_foreground, light.text));
         assert!(close(cx.theme().button_primary, light.brand));
         assert!(close(cx.theme().button_primary_foreground, light.on_brand));
         assert!(close(palette(cx).page, light.page));
-        assert_eq!(cx.theme().radius, px(8.0));
+        assert_eq!(cx.theme().radius, px(10.0));
         assert_eq!(cx.theme().radius_lg, px(20.0));
 
         Theme::change(ThemeMode::Dark, None, cx);
@@ -35,7 +42,7 @@ fn theme_overrides_follow_runtime_mode_changes(cx: &mut gpui_kit::TestAppContext
         assert!(close(cx.theme().background, dark.page));
         assert!(close(cx.theme().primary, dark.brand));
         assert!(close(palette(cx).page, dark.page));
-        assert_eq!(cx.theme().radius, px(8.0));
+        assert_eq!(cx.theme().radius, px(10.0));
 
         Theme::change(ThemeMode::Light, None, cx);
         assert!(close(cx.theme().background, light.page));

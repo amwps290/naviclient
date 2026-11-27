@@ -82,6 +82,7 @@ fn playlist_search_button(
         .ghost()
         .text_color(palette(cx).text_muted)
         .rounded_full()
+        .cursor_pointer()
         .small()
         .size(px(SEARCH_BUTTON_SIZE))
         .on_click(on_toggle)
@@ -147,6 +148,7 @@ pub(in crate::app) fn render_playlist_search_controls(
                             .ghost()
                             .text_color(p.text_muted)
                             .rounded_full()
+                            .cursor_pointer()
                             .small()
                             .size(px(SEARCH_BUTTON_SIZE))
                             .on_click(on_close),
@@ -233,10 +235,9 @@ pub(in crate::app) fn render_playlist_search_feedback(
             playlists.search.error().is_some() && playlists.detail_ready(),
             |this| {
                 this.child(
-                    Button::new("retry-playlist-search")
+                    ghost_button("retry-playlist-search")
                         .label(t!("Retry"))
                         .debug_selector(|| "retry-playlist-search".into())
-                        .ghost()
                         .compact_action()
                         .on_click(on_retry),
                 )

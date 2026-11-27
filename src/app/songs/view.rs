@@ -194,47 +194,49 @@ impl NavidromeApp {
         )
         .child(div().flex_1())
         .child(
-            Button::new(SharedString::from(format!("multi-play-{scope}")))
-                .icon(PlayerIcon::Play)
-                .tooltip(t!("Play selected (Enter)"))
-                .ghost()
-                .small()
-                .disabled(!self.state.song_scope_ready(scope))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.play_selected_songs(scope);
-                    cx.notify();
-                })),
+            icon_button(
+                SharedString::from(format!("multi-play-{scope}")),
+                PlayerIcon::Play,
+                t!("Play selected (Enter)"),
+                tokens::ICON_BUTTON_SM,
+            )
+            .disabled(!self.state.song_scope_ready(scope))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.play_selected_songs(scope);
+                cx.notify();
+            })),
         )
         .child(
-            Button::new(SharedString::from(format!("multi-next-{scope}")))
-                .icon(PlayerIcon::Next)
-                .tooltip(t!("Play selected next"))
-                .ghost()
-                .small()
-                .disabled(!self.state.song_scope_ready(scope))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.selected_play_next(scope);
-                    cx.notify();
-                })),
+            icon_button(
+                SharedString::from(format!("multi-next-{scope}")),
+                PlayerIcon::Next,
+                t!("Play selected next"),
+                tokens::ICON_BUTTON_SM,
+            )
+            .disabled(!self.state.song_scope_ready(scope))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_play_next(scope);
+                cx.notify();
+            })),
         )
         .child(
-            Button::new(SharedString::from(format!("multi-queue-{scope}")))
-                .icon(AppIcon::Queue)
-                .tooltip(t!("Add selected to queue"))
-                .ghost()
-                .small()
-                .disabled(!self.state.song_scope_ready(scope))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.selected_to_queue(scope);
-                    cx.notify();
-                })),
+            icon_button(
+                SharedString::from(format!("multi-queue-{scope}")),
+                AppIcon::Queue,
+                t!("Add selected to queue"),
+                tokens::ICON_BUTTON_SM,
+            )
+            .disabled(!self.state.song_scope_ready(scope))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_to_queue(scope);
+                cx.notify();
+            })),
         )
         .when(capabilities.playlist_write, |this| {
             this.child(
-                Button::new(SharedString::from(format!("multi-playlist-{scope}")))
+                ghost_button(SharedString::from(format!("multi-playlist-{scope}")))
                     .label(t!("Add to playlist…"))
                     .disabled(add_disabled)
-                    .ghost()
                     .compact_action()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this
@@ -250,28 +252,30 @@ impl NavidromeApp {
         })
         .when(capabilities.favorite_write, |this| {
             this.child(
-                Button::new(SharedString::from(format!("multi-favorite-{scope}")))
-                    .icon(favorite_icon)
-                    .tooltip(favorite_label)
-                    .disabled(!selected_owner || !capabilities.favorite_write)
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.favorite_selected(scope);
-                        cx.notify();
-                    })),
+                icon_button(
+                    SharedString::from(format!("multi-favorite-{scope}")),
+                    favorite_icon,
+                    favorite_label,
+                    tokens::ICON_BUTTON_SM,
+                )
+                .disabled(!selected_owner || !capabilities.favorite_write)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.favorite_selected(scope);
+                    cx.notify();
+                })),
             )
         })
         .child(
-            Button::new(SharedString::from(format!("multi-clear-{scope}")))
-                .icon(AppIcon::Close)
-                .tooltip(t!("Clear selection (Esc)"))
-                .ghost()
-                .small()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.clear_song_multi();
-                    cx.notify();
-                })),
+            icon_button(
+                SharedString::from(format!("multi-clear-{scope}")),
+                AppIcon::Close,
+                t!("Clear selection (Esc)"),
+                tokens::ICON_BUTTON_SM,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.clear_song_multi();
+                cx.notify();
+            })),
         )
         .into_any_element()
     }

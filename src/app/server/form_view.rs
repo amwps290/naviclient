@@ -63,22 +63,20 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-server-edit")
+                ghost_button("cancel-server-edit")
                     .label(t!("Cancel"))
-                    .ghost()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
             )
             .child(
-                Button::new("save-settings")
+                primary_button("save-settings")
                     .label(if reconnect {
                         t!("Save and connect")
                     } else {
                         t!("Save")
                     })
-                    .primary()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.save_settings(cx);

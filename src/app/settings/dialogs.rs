@@ -99,11 +99,10 @@ impl NavidromeApp {
     ) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
         let current = current.clone();
-        Button::new(id.into())
+        surface_button(id.into())
             .label(self.connection_label(&current))
             .icon(AppIcon::Globe)
             .dropdown_caret(true)
-            .outline()
             .compact_action()
             .disabled(disabled)
             .dropdown_menu(move |menu, _, cx| {

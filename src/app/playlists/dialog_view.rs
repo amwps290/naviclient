@@ -50,9 +50,9 @@ impl NavidromeApp {
                         count = songs.len()
                     ))
                     .child(
-                        Button::new("new-playlist-from-songs")
+                        surface_button("new-playlist-from-songs")
                             .label(t!("New playlist…"))
-                            .outline()
+                            .compact_action()
                             .disabled(busy)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.name_playlist(None, new_songs.clone(), window, cx)
@@ -84,12 +84,12 @@ impl NavidromeApp {
                         .gap_1()
                         .children(playlists.into_iter().map(|playlist| {
                             let songs = songs.clone();
-                            Button::new(SharedString::from(format!(
+                            ghost_button(SharedString::from(format!(
                                 "choose-playlist-{}",
                                 playlist.id
                             )))
                             .label(playlist.name)
-                            .ghost()
+                            .compact_action()
                             .w_full()
                             .justify_start()
                             .disabled(busy || self.state.playlists.list_loading())
@@ -143,8 +143,9 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-playlist-dialog")
+                ghost_button("cancel-playlist-dialog")
                     .label(t!("Cancel"))
+                    .dialog_action()
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.playlist_ui.close_dialog();
@@ -153,11 +154,15 @@ impl NavidromeApp {
                     })),
             )
             .when_some(action, |footer, action| {
+                let button = if destructive {
+                    danger_button("save-playlist-dialog")
+                } else {
+                    primary_button("save-playlist-dialog")
+                };
                 footer.child(
-                    Button::new("save-playlist-dialog")
+                    button
                         .label(action)
-                        .primary()
-                        .when(destructive, |button| button.danger())
+                        .dialog_action()
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, _, cx| this.submit_playlist_dialog(cx))),
                 )

@@ -126,7 +126,7 @@ impl NavidromeApp {
                         .items_center()
                         .when(count == 0, |this| {
                             this.child(
-                                Button::new("daily-mix-create")
+                                primary_button("daily-mix-create")
                                     .label(if loading {
                                         t!("Creating…")
                                     } else if error.is_some() {
@@ -134,7 +134,6 @@ impl NavidromeApp {
                                     } else {
                                         t!("Create and play")
                                     })
-                                    .primary()
                                     .rounded(px(tokens::radius::FULL))
                                     .compact_action()
                                     .px_4()
@@ -160,6 +159,7 @@ impl NavidromeApp {
                                     } else {
                                         tokens::PLAY_BUTTON
                                     },
+                                    cx,
                                 )
                                 .on_click(cx.listener(
                                     |this, _, _, cx| {
@@ -169,27 +169,33 @@ impl NavidromeApp {
                                 )),
                             )
                             .child(
-                                capsule_button("daily-mix-append")
-                                    .icon(AppIcon::Queue)
-                                    .tooltip(t!("Add to queue"))
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                capsule_icon_button(
+                                    "daily-mix-append",
+                                    AppIcon::Queue,
+                                    t!("Add to queue"),
+                                    tokens::ICON_BUTTON_LG,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
                                         this.append_daily_mix();
                                         cx.notify();
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
-                                Button::new("daily-mix-refresh")
-                                    .icon(AppIcon::Refresh)
-                                    .tooltip(t!("Refresh mix"))
-                                    .ghost()
-                                    .small()
-                                    .rounded(px(tokens::radius::CONTROL))
-                                    .disabled(loading)
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                icon_button(
+                                    "daily-mix-refresh",
+                                    AppIcon::Refresh,
+                                    t!("Refresh mix"),
+                                    tokens::ICON_BUTTON_MD,
+                                )
+                                .disabled(loading)
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
                                         this.refresh_daily_mix();
                                         cx.notify();
-                                    })),
+                                    },
+                                )),
                             )
                         }),
                 ),

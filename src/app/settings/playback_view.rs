@@ -60,18 +60,16 @@ impl NavidromeApp {
                             .child(cache_dir.display().to_string()),
                     )
                     .child(
-                        Button::new("choose-cache-directory")
+                        surface_button("choose-cache-directory")
                             .label(t!("Choose folder"))
-                            .outline()
                             .compact_action()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.choose_cache_directory(cx);
                             })),
                     )
                     .child(
-                        Button::new("reset-cache-directory")
+                        ghost_button("reset-cache-directory")
                             .label(t!("Use default"))
-                            .ghost()
                             .compact_action()
                             .disabled(self.config.cache_dir.is_none())
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -84,12 +82,11 @@ impl NavidromeApp {
 
         let quality_row = {
             let app = cx.entity().downgrade();
-            let picker = Button::new("streaming-quality-select")
+            let picker = surface_button("streaming-quality-select")
                 .w(px(220.0))
                 .justify_between()
                 .label(self.config.transcoding_quality.label())
                 .dropdown_caret(true)
-                .outline()
                 .compact_action()
                 .dropdown_menu(move |menu, _, cx| {
                     app.update(cx, |this, cx| {
@@ -145,14 +142,13 @@ impl NavidromeApp {
             .gap_1p5()
             .items_center()
             .child(
-                Button::new("output-device-select")
+                surface_button("output-device-select")
                     .w(px(240.0))
                     .max_w_full()
                     .justify_between()
                     .label(selected_label.clone())
                     .tooltip(selected_label)
                     .dropdown_caret(true)
-                    .outline()
                     .compact_action()
                     .dropdown_menu(move |menu, _, cx| {
                         app.update(cx, |this, cx| {
@@ -191,15 +187,16 @@ impl NavidromeApp {
                     }),
             )
             .child(
-                Button::new("refresh-output-devices")
-                    .icon(AppIcon::Refresh)
-                    .tooltip(t!("Refresh devices"))
-                    .ghost()
-                    .small()
-                    .loading(self.state.output_devices.loading())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.refresh_output_devices(cx);
-                    })),
+                icon_button(
+                    "refresh-output-devices",
+                    AppIcon::Refresh,
+                    t!("Refresh devices"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .loading(self.state.output_devices.loading())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.refresh_output_devices(cx);
+                })),
             )
             .into_any_element();
 
@@ -256,13 +253,12 @@ impl NavidromeApp {
 
     fn render_normalization_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
-        let picker = Button::new("volume-normalization-select")
+        let picker = surface_button("volume-normalization-select")
             .w(px(220.0))
             .justify_between()
             .label(self.config.volume_normalization.label())
             .tooltip(self.config.volume_normalization.tooltip())
             .dropdown_caret(true)
-            .outline()
             .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {

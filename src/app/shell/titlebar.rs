@@ -16,55 +16,57 @@ impl NavidromeApp {
             .gap_1()
             .occlude()
             .child(
-                Button::new(SharedString::from(format!("{mini_id}-fullscreen")))
-                    .icon(AppIcon::Fullscreen)
-                    .tooltip(t!(
+                icon_button(
+                    SharedString::from(format!("{mini_id}-fullscreen")),
+                    AppIcon::Fullscreen,
+                    t!(
                         "Fullscreen player (%{shortcut})",
                         shortcut = shortcut_display(
                             self.config
                                 .shortcuts
                                 .binding(ShortcutAction::ToggleFullscreen)
                         )
-                    ))
-                    .accessibility_label(t!("Fullscreen player"))
-                    .ghost()
-                    .small()
-                    .on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.toggle_fullscreen_player(window, cx)
-                        }),
                     ),
+                    tokens::ICON_BUTTON_XS,
+                )
+                .accessibility_label(t!("Fullscreen player"))
+                .on_click(
+                    cx.listener(|this, _, window, cx| this.toggle_fullscreen_player(window, cx)),
+                ),
             )
             .child(
-                Button::new(mini_id)
-                    .icon(AppIcon::MiniPlayer)
-                    .tooltip(t!("Switch to mini player"))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_mini_mode(window, cx);
-                    })),
+                icon_button(
+                    mini_id,
+                    AppIcon::MiniPlayer,
+                    t!("Switch to mini player"),
+                    tokens::ICON_BUTTON_XS,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_mini_mode(window, cx);
+                })),
             )
             .child(
-                Button::new(settings_id)
-                    .icon(AppIcon::Settings)
-                    .tooltip(t!("Settings"))
-                    .ghost()
-                    .small()
-                    .selected(self.state.settings.open)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if this.state.settings.open {
-                            this.state.settings.close();
-                        } else {
-                            this.state.settings.open = true;
-                        }
-                        if this.state.settings.open {
-                            this.refresh_output_devices(cx);
-                        } else {
-                            this.cancel_shortcut_recording();
-                        }
-                        cx.notify();
-                    })),
+                toggle_icon_button(
+                    settings_id,
+                    AppIcon::Settings,
+                    t!("Settings"),
+                    self.state.settings.open,
+                    tokens::ICON_BUTTON_XS,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.state.settings.open {
+                        this.state.settings.close();
+                    } else {
+                        this.state.settings.open = true;
+                    }
+                    if this.state.settings.open {
+                        this.refresh_output_devices(cx);
+                    } else {
+                        this.cancel_shortcut_recording();
+                    }
+                    cx.notify();
+                })),
             )
             .into_any_element()
     }
@@ -83,15 +85,16 @@ impl NavidromeApp {
             .child(div().min_w_0().when_some(detail_parent, |this, parent| {
                 this.child(
                     div().occlude().child(
-                        Button::new("titlebar-back")
-                            .icon(AppIcon::ArrowLeft)
-                            .tooltip(t!("Back to library"))
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.state.navigate_to(parent);
-                                cx.notify();
-                            })),
+                        icon_button(
+                            "titlebar-back",
+                            AppIcon::ArrowLeft,
+                            t!("Back to library"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.state.navigate_to(parent);
+                            cx.notify();
+                        })),
                     ),
                 )
             }))
@@ -129,15 +132,16 @@ impl NavidromeApp {
                     .gap_1()
                     .occlude()
                     .child(
-                        Button::new("leave-now-playing")
-                            .icon(AppIcon::ArrowLeft)
-                            .tooltip(t!("Back to library"))
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.leave_now_playing();
-                                cx.notify();
-                            })),
+                        icon_button(
+                            "leave-now-playing",
+                            AppIcon::ArrowLeft,
+                            t!("Back to library"),
+                            tokens::ICON_BUTTON_XS,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.leave_now_playing();
+                            cx.notify();
+                        })),
                     )
                     .child(
                         div()

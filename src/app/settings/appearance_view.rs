@@ -213,12 +213,11 @@ impl NavidromeApp {
 
     fn render_language_settings(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
         let app = cx.entity().downgrade();
-        let picker = Button::new("language-select")
+        let picker = surface_button("language-select")
             .w(px(220.0))
             .justify_between()
             .label(self.config.language.native_label())
             .dropdown_caret(true)
-            .outline()
             .compact_action()
             .dropdown_menu(move |menu, _, cx| {
                 app.update(cx, |this, cx| {

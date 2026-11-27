@@ -174,27 +174,25 @@ impl NavidromeApp {
                     .truncate(),
                 )
                 .child(
-                    Button::new("bilibili-all-folders")
-                        .icon(if error.is_some() {
+                    icon_button(
+                        "bilibili-all-folders",
+                        if error.is_some() {
                             AppIcon::Refresh
                         } else {
                             AppIcon::ChevronRight
-                        })
-                        .accessibility_label(action_label.clone())
-                        .tooltip(action_label)
-                        .ghost()
-                        .small()
-                        .w(px(30.0))
-                        .h(px(30.0))
-                        .disabled(self.api.is_none())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if this.state.playlists.list_error().is_some() {
-                                this.load_playlists();
-                            } else {
-                                this.navigate_to(View::Playlists);
-                            }
-                            cx.notify();
-                        })),
+                        },
+                        action_label,
+                        tokens::ICON_BUTTON_SM,
+                    )
+                    .disabled(self.api.is_none())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.state.playlists.list_error().is_some() {
+                            this.load_playlists();
+                        } else {
+                            this.navigate_to(View::Playlists);
+                        }
+                        cx.notify();
+                    })),
                 ),
         );
         if let Some(error) = error {
@@ -373,6 +371,7 @@ impl NavidromeApp {
                         t!("Play")
                     },
                     play_size,
+                    cx,
                 )
                 .debug_selector(|| "bilibili-continue-action".into())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -411,19 +410,17 @@ impl NavidromeApp {
                     false,
                     cx,
                 ),
-                Button::new("bilibili-browse-folders")
-                    .icon(AppIcon::ChevronRight)
-                    .tooltip(t!("Browse favorite folders"))
-                    .accessibility_label(t!("Browse favorite folders"))
-                    .secondary()
-                    .rounded(px(tokens::radius::FULL))
-                    .w(px(play_size))
-                    .h(px(play_size))
-                    .disabled(self.api.is_none())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.navigate_to(View::Playlists);
-                        cx.notify();
-                    })),
+                capsule_icon_button(
+                    "bilibili-browse-folders",
+                    AppIcon::ChevronRight,
+                    t!("Browse favorite folders"),
+                    play_size,
+                )
+                .disabled_tonal(self.api.is_none())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.navigate_to(View::Playlists);
+                    cx.notify();
+                })),
                 None,
                 compact,
                 cx,
@@ -471,9 +468,8 @@ impl NavidromeApp {
                 .items_center()
                 .gap_3()
                 .child(
-                    Button::new("retry-bilibili-history")
+                    surface_button("retry-bilibili-history")
                         .label(t!("Retry listening history"))
-                        .outline()
                         .compact_action()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_bilibili_home();
@@ -534,6 +530,7 @@ impl NavidromeApp {
                                         PlayerIcon::Play,
                                         t!("Play"),
                                         tokens::HOVER_PLAY_BUTTON,
+                                        cx,
                                     )
                                     .on_click(cx.listener(
                                         move |this, _, _, cx| {
@@ -667,17 +664,18 @@ impl NavidromeApp {
             )
             .when(!self.state.bilibili.folder_query.is_empty(), |this| {
                 this.child(
-                    Button::new("clear-bilibili-folder-search")
-                        .icon(AppIcon::Close)
-                        .tooltip(t!("Clear folder search"))
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.bilibili_folder_search
-                                .update(cx, |input, cx| input.set_value("", window, cx));
-                            this.state.bilibili.set_folder_query(String::new());
-                            cx.notify();
-                        })),
+                    icon_button(
+                        "clear-bilibili-folder-search",
+                        AppIcon::Close,
+                        t!("Clear folder search"),
+                        tokens::ICON_BUTTON_XS,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.bilibili_folder_search
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.state.bilibili.set_folder_query(String::new());
+                        cx.notify();
+                    })),
                 )
             });
 
@@ -764,9 +762,8 @@ impl NavidromeApp {
             .when(folders.len() > limit, |this| {
                 this.child(
                     div().pt_2().flex().justify_center().child(
-                        capsule_button("more-bilibili-folders")
+                        capsule_button_sm("more-bilibili-folders")
                             .label(t!("Show more folders"))
-                            .small()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.state.bilibili.show_more_folders();
                                 cx.notify();

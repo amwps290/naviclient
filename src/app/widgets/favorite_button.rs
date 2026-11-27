@@ -9,6 +9,16 @@ impl NavidromeApp {
         id: &str,
         cx: &Context<Self>,
     ) -> Button {
+        self.favorite_button_sized(kind, id, tokens::ICON_BUTTON_XS, cx)
+    }
+
+    pub(in crate::app) fn favorite_button_sized(
+        &self,
+        kind: FavoriteKind,
+        id: &str,
+        size: f32,
+        cx: &Context<Self>,
+    ) -> Button {
         let key = FavoriteKey::new(kind, id);
         let starred = self.state.favorites.is_starred(&key);
         let pending = self.state.favorites.is_pending(&key);
@@ -18,29 +28,29 @@ impl NavidromeApp {
             FavoriteKind::Song => "song",
         };
 
-        Button::new(SharedString::from(format!("favorite-{kind_name}-{id}")))
-            .icon(if starred {
+        icon_button(
+            SharedString::from(format!("favorite-{kind_name}-{id}")),
+            if starred {
                 AppIcon::HeartFilled
             } else {
                 AppIcon::Heart
-            })
-            .tooltip(if starred {
+            },
+            if starred {
                 t!("Remove from favorites")
             } else {
                 t!("Add to favorites")
-            })
-            .ghost()
-            .small()
-            .opacity(if pending { 0.6 } else { 1.0 })
-            .rounded_full()
-            .text_color(if starred {
-                palette(cx).brand
-            } else {
-                palette(cx).text_secondary
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_favorite(key.clone());
-                cx.notify();
-            }))
+            },
+            size,
+        )
+        .opacity(if pending { 0.6 } else { 1.0 })
+        .text_color(if starred {
+            palette(cx).brand
+        } else {
+            palette(cx).text_secondary
+        })
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.toggle_favorite(key.clone());
+            cx.notify();
+        }))
     }
 }

@@ -130,12 +130,11 @@ impl NavidromeApp {
                                             .child(t!("Favorite status unknown"))
                                             .into_any_element()
                                     } else {
-                                        Button::new(SharedString::from(format!(
+                                        primary_button(SharedString::from(format!(
                                             "bilibili-save-to-folder-{id}"
                                         )))
                                         .label(t!("Save here"))
-                                        .primary()
-                                        .rounded_full()
+                                        .rounded(px(tokens::radius::FULL))
                                         .compact_action()
                                         .disabled(disabled)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -220,16 +219,16 @@ impl NavidromeApp {
             .items_center()
             .gap_2()
             .child(
-                Button::new("check-bilibili-favorite-status")
+                ghost_button("check-bilibili-favorite-status")
                     .label(t!("Check favorite status"))
-                    .ghost()
+                    .dialog_action()
                     .disabled(ui.loading || ui.writing || !active_source)
                     .on_click(cx.listener(|this, _, _, cx| this.reload_bilibili_favorite(cx))),
             )
             .child(
-                Button::new("close-bilibili-favorite")
+                ghost_button("close-bilibili-favorite")
                     .label(t!("Close"))
-                    .outline()
+                    .dialog_action()
                     .disabled(ui.writing)
                     .on_click(
                         cx.listener(|this, _, window, cx| this.close_bilibili_favorite(window, cx)),
@@ -238,9 +237,9 @@ impl NavidromeApp {
         if let Some(FavoriteDialogKind::Remove { folder_id, .. }) = &ui.kind {
             let id = *folder_id;
             footer = footer.child(
-                Button::new("confirm-bilibili-favorite-removal")
+                danger_button("confirm-bilibili-favorite-removal")
                     .label(t!("Remove video"))
-                    .danger()
+                    .dialog_action()
                     .disabled(
                         disabled
                             || ui

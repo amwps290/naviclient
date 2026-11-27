@@ -101,9 +101,10 @@ impl NavidromeApp {
                 )
             })
             .child(
-                Button::new("player-volume-mute")
-                    .icon(volume_icon)
-                    .tooltip(if self.volume.muted() {
+                icon_button(
+                    "player-volume-mute",
+                    volume_icon,
+                    if self.volume.muted() {
                         t!(
                             "Unmute (%{shortcut})",
                             shortcut = shortcut_display(
@@ -117,13 +118,12 @@ impl NavidromeApp {
                                 self.config.shortcuts.binding(ShortcutAction::ToggleMute)
                             )
                         )
-                    })
-                    .ghost()
-                    .with_size(px(30.0))
-                    .rounded_full()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_mute(window, cx);
-                    })),
+                    },
+                    tokens::ICON_BUTTON_MD,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_mute(window, cx);
+                })),
             )
             .into_any_element()
     }

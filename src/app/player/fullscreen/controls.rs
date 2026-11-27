@@ -150,20 +150,40 @@ impl NavidromeApp {
         let playing = playback.active && !playback.paused;
         let label = if playing { t!("Pause") } else { t!("Play") };
         let play_size = if compact { 42.0 } else { 46.0 };
+        let shuffle = self.state.playback_modes.shuffle;
+        let repeat = self.state.playback_modes.repeat;
+        let repeat_active = repeat != RepeatMode::Off;
         h_flex()
             .items_center()
             .gap(px(if compact { 12.0 } else { 18.0 }))
             .flex_none()
             .child(
-                self.shuffle_button(cx)
-                    .custom(salon_toggle_style(self.state.playback_modes.shuffle, cx)),
+                salon_button(
+                    "player-shuffle",
+                    AppIcon::Shuffle,
+                    if shuffle {
+                        t!("Shuffle on")
+                    } else {
+                        t!("Shuffle off")
+                    },
+                    cx,
+                )
+                .custom(salon_toggle_style(shuffle, cx))
+                .selected(shuffle)
+                .toggled(shuffle)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_shuffle(cx);
+                })),
             )
             .child(
                 Button::new("fullscreen-previous")
-                    .icon(PlayerIcon::Previous)
+                    .child(Icon::new(PlayerIcon::Previous).with_size(px(16.0)))
                     .custom(salon_toggle_style(false, cx))
-                    .with_size(px(34.0))
+                    .w(px(34.0))
+                    .h(px(34.0))
+                    .p_0()
                     .rounded_full()
+                    .cursor_pointer()
                     .accessibility_label(t!("Previous track"))
                     .tooltip(t!("Previous track"))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -173,11 +193,14 @@ impl NavidromeApp {
             )
             .child(
                 Button::new("fullscreen-play-pause")
-                    .icon(if playing {
-                        PlayerIcon::Pause
-                    } else {
-                        PlayerIcon::Play
-                    })
+                    .child(
+                        Icon::new(if playing {
+                            PlayerIcon::Pause
+                        } else {
+                            PlayerIcon::Play
+                        })
+                        .with_size(px(if compact { 18.0 } else { 20.0 })),
+                    )
                     .custom(
                         ButtonCustomVariant::new(cx)
                             .color(p.accent)
@@ -186,8 +209,11 @@ impl NavidromeApp {
                             .active(p.accent.opacity(0.9)),
                     )
                     .selected(true)
-                    .with_size(px(play_size))
+                    .w(px(play_size))
+                    .h(px(play_size))
+                    .p_0()
                     .rounded_full()
+                    .cursor_pointer()
                     .shadow(vec![box_shadow(
                         px(0.0),
                         px(6.0),
@@ -204,10 +230,13 @@ impl NavidromeApp {
             )
             .child(
                 Button::new("fullscreen-next")
-                    .icon(PlayerIcon::Next)
+                    .child(Icon::new(PlayerIcon::Next).with_size(px(16.0)))
                     .custom(salon_toggle_style(false, cx))
-                    .with_size(px(34.0))
+                    .w(px(34.0))
+                    .h(px(34.0))
+                    .p_0()
                     .rounded_full()
+                    .cursor_pointer()
                     .accessibility_label(t!("Next track"))
                     .tooltip(t!("Next track"))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -215,10 +244,24 @@ impl NavidromeApp {
                         cx.notify();
                     })),
             )
-            .child(self.repeat_button(cx).custom(salon_toggle_style(
-                self.state.playback_modes.repeat != RepeatMode::Off,
-                cx,
-            )))
+            .child(
+                salon_button(
+                    "player-repeat",
+                    if repeat == RepeatMode::One {
+                        AppIcon::RepeatOne
+                    } else {
+                        AppIcon::Repeat
+                    },
+                    repeat.tooltip(),
+                    cx,
+                )
+                .custom(salon_toggle_style(repeat_active, cx))
+                .selected(repeat_active)
+                .toggled(repeat_active)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.cycle_repeat(cx);
+                })),
+            )
             .into_any_element()
     }
 

@@ -45,6 +45,7 @@ impl NavidromeApp {
                             PlayerIcon::Play,
                             t!("Play all"),
                             tokens::DETAIL_PLAY_BUTTON,
+                            cx,
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.play_artist(artist_for_play_all.clone());
@@ -54,7 +55,7 @@ impl NavidromeApp {
                     .child(
                         capsule_button("play-artist-popular")
                             .label(t!("Play popular"))
-                            .disabled(popular_disabled)
+                            .disabled_tonal(popular_disabled)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.play_song_at_scope(SongScope::ArtistTop, 0);
                                 cx.notify();
@@ -67,13 +68,18 @@ impl NavidromeApp {
                             } else {
                                 t!("Start artist radio")
                             })
-                            .disabled(popular_disabled || artist_radio_loading)
+                            .disabled_tonal(popular_disabled || artist_radio_loading)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.start_artist_radio();
                                 cx.notify();
                             })),
                     )
-                    .child(self.favorite_button(FavoriteKind::Artist, &artist.id, cx))
+                    .child(self.favorite_button_sized(
+                        FavoriteKind::Artist,
+                        &artist.id,
+                        tokens::ICON_BUTTON_LG,
+                        cx,
+                    ))
                     .into_any_element(),
             },
             window,
@@ -105,11 +111,10 @@ impl NavidromeApp {
                         .child(t!("Popular songs are unavailable: %{error}", error = error)),
                 )
                 .child(
-                    Button::new("retry-artist-popular")
+                    surface_button("retry-artist-popular")
                         .icon(AppIcon::Refresh)
                         .label(t!("Retry"))
                         .compact_action()
-                        .outline()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.load_artist_top_songs();
                             cx.notify();
@@ -216,6 +221,7 @@ impl NavidromeApp {
                             PlayerIcon::Play,
                             t!("Play album"),
                             tokens::DETAIL_PLAY_BUTTON,
+                            cx,
                         )
                         .disabled(actions_disabled)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -227,7 +233,7 @@ impl NavidromeApp {
                         capsule_button("append-album")
                             .icon(AppIcon::Queue)
                             .label(t!("Append all"))
-                            .disabled(actions_disabled)
+                            .disabled_tonal(actions_disabled)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.append_songs_at_scope(SongScope::AlbumDetail);
                                 cx.notify();
@@ -236,7 +242,7 @@ impl NavidromeApp {
                     .child(
                         capsule_button("album-add-to-playlist")
                             .label(t!("Add to playlist…"))
-                            .disabled(self.state.playlists.editing() || actions_disabled)
+                            .disabled_tonal(self.state.playlists.editing() || actions_disabled)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.choose_playlist(
                                     crate::playlist::song_ids(this.state.album_details.songs()),
@@ -326,6 +332,7 @@ impl NavidromeApp {
                             PlayerIcon::Play,
                             t!("Play all"),
                             tokens::DETAIL_PLAY_BUTTON,
+                            cx,
                         )
                         .disabled(playback_disabled)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -337,7 +344,7 @@ impl NavidromeApp {
                         capsule_button("append-playlist")
                             .icon(AppIcon::Queue)
                             .label(t!("Append all"))
-                            .disabled(playback_disabled)
+                            .disabled_tonal(playback_disabled)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.append_playlist_all();
                                 cx.notify();
@@ -345,8 +352,10 @@ impl NavidromeApp {
                     )
                     .when(!bilibili, |this| {
                         this.child(
-                            capsule_button("rename-playlist")
+                            ghost_button("rename-playlist")
                                 .label(t!("Rename"))
+                                .rounded(px(tokens::radius::FULL))
+                                .compact_action()
                                 .disabled(edit_disabled)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.name_playlist(Some(rename.clone()), vec![], window, cx)
@@ -355,8 +364,12 @@ impl NavidromeApp {
                     })
                     .when(!bilibili, |this| {
                         this.child(
-                            capsule_button("delete-playlist")
+                            ghost_button("delete-playlist")
                                 .label(t!("Delete"))
+                                .rounded(px(tokens::radius::FULL))
+                                .compact_action()
+                                .text_color(palette(cx).text_secondary)
+                                .hover(|style| style.text_color(cx.theme().danger))
                                 .disabled(edit_disabled)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.delete_playlist(delete.clone(), window, cx)
@@ -364,19 +377,19 @@ impl NavidromeApp {
                         )
                     })
                     .child(
-                        Button::new("refresh-playlist")
-                            .icon(AppIcon::Refresh)
-                            .tooltip(t!("Refresh playlist"))
-                            .small()
-                            .ghost()
-                            .disabled(
-                                self.state.playlists.editing()
-                                    || self.state.playlists.detail_loading(),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.load_playlist_detail();
-                                cx.notify();
-                            })),
+                        icon_button(
+                            "refresh-playlist",
+                            AppIcon::Refresh,
+                            t!("Refresh playlist"),
+                            tokens::ICON_BUTTON_MD,
+                        )
+                        .disabled(
+                            self.state.playlists.editing() || self.state.playlists.detail_loading(),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.load_playlist_detail();
+                            cx.notify();
+                        })),
                     )
                     .child(self.render_playlist_search(window, cx))
                     .into_any_element(),

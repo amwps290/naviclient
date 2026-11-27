@@ -59,9 +59,8 @@ impl NavidromeApp {
                                     .gap_4()
                                     .child(section_title(t!("App shortcuts"), cx))
                                     .child(
-                                        Button::new("reset-all-shortcuts")
+                                        surface_button("reset-all-shortcuts")
                                             .label(t!("Restore app defaults"))
-                                            .outline()
                                             .compact_action()
                                             .disabled(all_default)
                                             .on_click(cx.listener(|this, _, _, cx| {
@@ -91,9 +90,8 @@ impl NavidromeApp {
                                     .gap_4()
                                     .child(section_title(t!("Global shortcuts"), cx))
                                     .child(
-                                        Button::new("reset-all-global-shortcuts")
+                                        surface_button("reset-all-global-shortcuts")
                                             .label(t!("Restore global defaults"))
-                                            .outline()
                                             .compact_action()
                                             .disabled(!cfg!(target_os = "windows") || all_global_default)
                                             .on_click(cx.listener(|this, _, _, cx| {

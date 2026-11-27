@@ -97,11 +97,10 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .items_center()
-                            .gap_1()
+                            .gap_2()
                             .when(!bilibili, |this| this.child(
-                                Button::new("new-playlist")
+                                primary_button("new-playlist")
                                     .label(t!("New playlist"))
-                                    .primary()
                                     .compact_action()
                                     .disabled(self.state.playlists.editing() || self.api.is_none())
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -109,9 +108,8 @@ impl NavidromeApp {
                                     })),
                             ))
                             .when(!bilibili, |this| this.child(
-                                Button::new("import-playlist")
+                                surface_button("import-playlist")
                                     .label(t!("Import playlist"))
-                                    .outline()
                                     .compact_action()
                                     .disabled(self.api.is_none() || self.state.playlists.editing())
                                     .on_click(cx.listener(|this, _, window, cx| {

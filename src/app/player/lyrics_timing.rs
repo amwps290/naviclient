@@ -211,17 +211,15 @@ fn timing_bar<V: 'static>(
         t!("Timing changes apply to this song only.")
     }
     .into();
-    let button = |id: &'static str, action: TimingAction| {
-        Button::new(id)
-            .debug_selector(move || id.into())
-            .small()
-            .on_click(cx.listener(move |this, _, _, cx| host(this, action, cx)))
-    };
     let step = |id: &'static str, label: &'static str, delta_ms: i64| {
-        button(id, TimingAction::Nudge(delta_ms))
+        surface_button(id)
+            .debug_selector(move || id.into())
             .label(label)
             .tooltip(shift_label(delta_ms))
-            .outline()
+            .dense_action()
+            .on_click(
+                cx.listener(move |this, _, _, cx| host(this, TimingAction::Nudge(delta_ms), cx)),
+            )
     };
     let steps = h_flex()
         .min_w_0()
@@ -253,22 +251,35 @@ fn timing_bar<V: 'static>(
         .items_center()
         .gap_1()
         .child(
-            button("lyrics-align", TimingAction::ToggleAlign)
+            Button::new("lyrics-align")
+                .debug_selector(|| "lyrics-align".into())
                 .label(t!("Align to clicked line"))
-                .ghost()
-                .selected(aligning),
+                .custom(soft_toggle_style(aligning, cx))
+                .selected(aligning)
+                .toggled(aligning)
+                .rounded(px(tokens::radius::BUTTON))
+                .dense_action()
+                .on_click(
+                    cx.listener(move |this, _, _, cx| host(this, TimingAction::ToggleAlign, cx)),
+                ),
         )
         .child(
-            button("lyrics-timing-reset", TimingAction::Reset)
+            ghost_button("lyrics-timing-reset")
+                .debug_selector(|| "lyrics-timing-reset".into())
                 .label(t!("Reset"))
-                .ghost()
-                .disabled(!adjusted(document)),
+                .dense_action()
+                .disabled(!adjusted(document))
+                .on_click(cx.listener(move |this, _, _, cx| host(this, TimingAction::Reset, cx))),
         )
         .child(
-            button("lyrics-timing-close", TimingAction::Close)
-                .icon(AppIcon::Close)
-                .tooltip(t!("Close"))
-                .ghost(),
+            icon_button(
+                "lyrics-timing-close",
+                AppIcon::Close,
+                t!("Close"),
+                tokens::ICON_BUTTON_XS,
+            )
+            .debug_selector(|| "lyrics-timing-close".into())
+            .on_click(cx.listener(move |this, _, _, cx| host(this, TimingAction::Close, cx))),
         );
     v_flex()
         .pt_1()

@@ -7,7 +7,7 @@ use gpui_kit::{App, SharedString};
 
 use super::tokens::{PaletteHex, DARK, LIGHT};
 
-const CONTROL_RADIUS: usize = 8;
+const CONTROL_RADIUS: usize = 10;
 const LARGE_RADIUS: usize = 20;
 
 fn hex(value: u32) -> Option<SharedString> {
@@ -22,6 +22,10 @@ fn apply_palette(config: &mut ThemeConfig, p: &PaletteHex) {
     c.foreground = hex(p.text);
     c.popover = hex(p.raised);
     c.popover_foreground = hex(p.text);
+    c.button = hex(p.button_surface);
+    c.button_hover = hex(p.button_surface_hover);
+    c.button_active = hex(p.button_surface_active);
+    c.button_foreground = hex(p.text);
     c.primary = hex(p.brand);
     c.primary_hover = hex(p.brand_hover);
     c.primary_active = hex(p.brand_active);
@@ -30,16 +34,28 @@ fn apply_palette(config: &mut ThemeConfig, p: &PaletteHex) {
     c.button_primary_hover = hex(p.brand_hover);
     c.button_primary_active = hex(p.brand_active);
     c.button_primary_foreground = hex(p.on_brand);
-    c.secondary = hex(p.sunken);
-    c.secondary_hover = hex(p.border);
-    c.secondary_active = hex(p.border);
+    c.secondary = hex(p.button_tonal);
+    c.secondary_hover = hex(p.button_tonal_hover);
+    c.secondary_active = hex(p.button_tonal_active);
     c.secondary_foreground = hex(p.text);
+    c.button_secondary = hex(p.button_tonal);
+    c.button_secondary_hover = hex(p.button_tonal_hover);
+    c.button_secondary_active = hex(p.button_tonal_active);
+    c.button_secondary_foreground = hex(p.text);
+    c.danger = hex(p.danger);
+    c.danger_hover = hex(p.danger_hover);
+    c.danger_active = hex(p.danger_active);
+    c.danger_foreground = hex(p.on_danger);
+    c.button_danger = hex(p.danger);
+    c.button_danger_hover = hex(p.danger_hover);
+    c.button_danger_active = hex(p.danger_active);
+    c.button_danger_foreground = hex(p.on_danger);
     c.muted = hex(p.sunken);
     c.muted_foreground = hex(p.text_secondary);
-    c.accent = hex(p.sunken);
+    c.accent = hex(p.ghost_hover);
     c.accent_foreground = hex(p.text);
     c.border = hex(p.border);
-    c.input = hex(p.border);
+    c.input = hex(p.button_surface_border);
     c.ring = hex(p.brand);
     c.caret = hex(p.brand);
     // The kit caps selection opacity at 30%; a soft surface tint disappears.

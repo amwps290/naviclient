@@ -263,12 +263,10 @@ impl NavidromeApp {
                             .child(t!("New music sources use the system proxy. Choose a saved proxy or a direct connection for each source in its menu.")),
                     )
                     .child(
-                        Button::new("add-proxy")
+                        primary_button("add-proxy")
                             .label(t!("Add proxy"))
                             .icon(KitIcon::Plus)
-                            .primary()
                             .compact_action()
-                            .rounded(px(tokens::radius::CONTROL))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_proxy_dialog(None, window, cx);
                             })),
@@ -377,9 +375,8 @@ impl NavidromeApp {
                     ),
             )
             .child(
-                Button::new(SharedString::from(format!("test-proxy-{}", proxy.id)))
+                surface_button(SharedString::from(format!("test-proxy-{}", proxy.id)))
                     .label(t!("Test"))
-                    .outline()
                     .compact_action()
                     .loading(probe == Some(ProbeState::Testing))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -388,42 +385,43 @@ impl NavidromeApp {
                     })),
             )
             .child(
-                Button::new(SharedString::from(format!("proxy-menu-{}", proxy.id)))
-                    .icon(AppIcon::More)
-                    .tooltip(t!("More actions"))
-                    .ghost()
-                    .small()
-                    .dropdown_menu(move |menu, _, cx| {
-                        let edit = menu_id.clone();
-                        let remove = menu_id.clone();
-                        app.update(cx, move |this, cx| {
-                            let used = this.config.proxy_users(&remove) > 0;
-                            menu.item(
-                                PopupMenuItem::new(t!("Edit proxy"))
-                                    .icon(AppIcon::Pencil)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.open_proxy_dialog(Some(&edit), window, cx);
-                                    })),
-                            )
-                            .separator()
-                            .item(
-                                PopupMenuItem::new(if used {
-                                    t!("In use — change its music sources and lyrics connection first")
-                                } else {
-                                    t!("Remove proxy")
-                                })
-                                .icon(AppIcon::Trash)
-                                .disabled(used)
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        this.remove_proxy(&remove);
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                        })
-                        .expect("app owns proxy menu")
-                    }),
+                icon_button(
+                    SharedString::from(format!("proxy-menu-{}", proxy.id)),
+                    AppIcon::More,
+                    t!("More actions"),
+                    tokens::ICON_BUTTON_SM,
+                )
+                .dropdown_menu(move |menu, _, cx| {
+                    let edit = menu_id.clone();
+                    let remove = menu_id.clone();
+                    app.update(cx, move |this, cx| {
+                        let used = this.config.proxy_users(&remove) > 0;
+                        menu.item(
+                            PopupMenuItem::new(t!("Edit proxy"))
+                                .icon(AppIcon::Pencil)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_proxy_dialog(Some(&edit), window, cx);
+                                })),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new(if used {
+                                t!("In use — change its music sources and lyrics connection first")
+                            } else {
+                                t!("Remove proxy")
+                            })
+                            .icon(AppIcon::Trash)
+                            .disabled(used)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.remove_proxy(&remove);
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                    })
+                    .expect("app owns proxy menu")
+                }),
             )
             .into_any_element()
     }
@@ -467,18 +465,16 @@ impl NavidromeApp {
             .justify_end()
             .gap_2()
             .child(
-                Button::new("cancel-proxy-edit")
+                ghost_button("cancel-proxy-edit")
                     .label(t!("Cancel"))
-                    .ghost()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_settings_dialog(window, cx);
                     })),
             )
             .child(
-                Button::new("save-proxy")
+                primary_button("save-proxy")
                     .label(t!("Save proxy"))
-                    .primary()
                     .dialog_action()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.save_proxy(cx);

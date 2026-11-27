@@ -223,34 +223,36 @@ impl NavidromeApp {
                 },
             )
             .when_some(self.state.now_playing.as_ref(), |this, song| {
-                this.child(
-                    self.favorite_button(FavoriteKind::Song, &song.id, cx)
-                        .with_size(px(30.0)),
-                )
+                this.child(self.favorite_button_sized(
+                    FavoriteKind::Song,
+                    &song.id,
+                    tokens::ICON_BUTTON_MD,
+                    cx,
+                ))
             })
             .child(self.render_eq_popover(cx))
             .child(
-                Button::new("player-queue")
-                    .icon(AppIcon::Queue)
-                    .tooltip(t!(
+                toggle_icon_button(
+                    "player-queue",
+                    AppIcon::Queue,
+                    t!(
                         "Queue (%{shortcut})",
                         shortcut = shortcut_display(
                             self.config.shortcuts.binding(ShortcutAction::ToggleQueue)
                         )
-                    ))
-                    .custom(self.player_toggle_style(queue_open, cx))
-                    .selected(queue_open)
-                    .with_size(px(30.0))
-                    .rounded_full()
-                    .toggled(queue_open)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings.close();
-                        this.state.queue_drawer_open = !this.state.queue_drawer_open;
-                        if !this.state.queue_drawer_open {
-                            this.clear_song_multi();
-                        }
-                        cx.notify();
-                    })),
+                    ),
+                    queue_open,
+                    tokens::ICON_BUTTON_MD,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.state.settings.close();
+                    this.state.queue_drawer_open = !this.state.queue_drawer_open;
+                    if !this.state.queue_drawer_open {
+                        this.clear_song_multi();
+                    }
+                    cx.notify();
+                })),
             )
             .child(self.render_volume_control(accent, cx))
             .into_any_element()

@@ -113,29 +113,30 @@ impl NavidromeApp {
 
     /// 侧边栏的折叠/展开按钮；状态持久化到配置。
     fn sidebar_collapse_toggle(&self, collapsed: bool, cx: &Context<Self>) -> Button {
-        Button::new("sidebar-collapse-toggle")
-            .icon(if collapsed {
+        icon_button(
+            "sidebar-collapse-toggle",
+            if collapsed {
                 KitIcon::PanelLeftOpen
             } else {
                 KitIcon::PanelLeftClose
-            })
-            .tooltip(if collapsed {
+            },
+            if collapsed {
                 t!("Expand sidebar")
             } else {
                 t!("Collapse sidebar")
-            })
-            .ghost()
-            .small()
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.config.sidebar_collapsed = !this.config.sidebar_collapsed;
-                if let Err(error) = config::save(&this.config) {
-                    this.notify_error(t!(
-                        "Settings save failed: %{error}",
-                        error = format!("{error:#}")
-                    ));
-                }
-                cx.notify();
-            }))
+            },
+            tokens::ICON_BUTTON_SM,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.config.sidebar_collapsed = !this.config.sidebar_collapsed;
+            if let Err(error) = config::save(&this.config) {
+                this.notify_error(t!(
+                    "Settings save failed: %{error}",
+                    error = format!("{error:#}")
+                ));
+            }
+            cx.notify();
+        }))
     }
 
     pub(in crate::app) fn nav_button(
@@ -171,7 +172,8 @@ impl NavidromeApp {
                         .tooltip(label)
                         .custom(soft_toggle_style(selected, cx))
                         .selected(selected)
-                        .rounded(px(tokens::radius::CONTROL))
+                        .rounded(px(tokens::radius::BUTTON))
+                        .cursor_pointer()
                         .w_full()
                         .h(px(34.0)),
                 )
@@ -291,7 +293,8 @@ impl NavidromeApp {
                         .tooltip(tooltip)
                         .custom(soft_toggle_style(self.state.settings.open, cx))
                         .selected(self.state.settings.open)
-                        .rounded(px(tokens::radius::CONTROL))
+                        .rounded(px(tokens::radius::BUTTON))
+                        .cursor_pointer()
                         .w_full()
                         .h(px(34.0))
                         .on_click(cx.listener(|this, _, _, cx| {
