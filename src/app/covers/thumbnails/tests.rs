@@ -195,7 +195,8 @@ fn insert(cache: &mut CoverThumbnails, source: u64, side: u32) -> Key {
 #[test]
 fn byte_budget_keeps_scene_textures_and_releases_only_unused_sizes() {
     let mut cache = CoverThumbnails::default();
-    let keys: Vec<_> = (0..9)
+    let count = (BYTE_BUDGET / (1024 * 1024 * 4)) + 1;
+    let keys: Vec<_> = (0..count as u64)
         .map(|source| insert(&mut cache, source, 1024))
         .collect();
     assert!(cache.bytes > BYTE_BUDGET);

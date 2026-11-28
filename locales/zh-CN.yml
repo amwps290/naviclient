@@ -809,7 +809,7 @@
 "Process memory (RSS): %{rss}": "进程物理内存 (RSS)：%{rss}"
 "Peak: %{size}": "峰值：%{size}"
 "Private: %{size}": "私有：%{size}"
-"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}": "封面原图缓存：%{count} 张 (%{size}) · 已解码纹理：%{tex}/%{tex_cap}"
+"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap} (%{decoded})": "封面原图缓存：%{count} 张 (%{size}) · 已解码纹理：%{tex}/%{tex_cap} (%{decoded})"
 "Cover thumbnails: %{count} (%{size}) · Default & vinyl: %{extra}": "封面缩略图：%{count} 张 (%{size}) · 默认封面与黑胶：%{extra}"
 "Lyrics cache: %{count} entries (%{size}) · Log buffer: %{logs}": "歌词缓存：%{count} 条 (%{size}) · 日志缓冲：%{logs}"
 "Library & lists: %{library} items · Queue: %{queue} · Playlist: %{playlist} (index %{index})": "媒体库条目：%{library} · 队列：%{queue} · 歌单曲目：%{playlist}（索引 %{index}）"

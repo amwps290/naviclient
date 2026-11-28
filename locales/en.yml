@@ -809,7 +809,7 @@
 "Process memory (RSS): %{rss}": "Process memory (RSS): %{rss}"
 "Peak: %{size}": "Peak: %{size}"
 "Private: %{size}": "Private: %{size}"
-"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}": "Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}"
+"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap} (%{decoded})": "Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap} (%{decoded})"
 "Cover thumbnails: %{count} (%{size}) · Default & vinyl: %{extra}": "Cover thumbnails: %{count} (%{size}) · Default & vinyl: %{extra}"
 "Lyrics cache: %{count} entries (%{size}) · Log buffer: %{logs}": "Lyrics cache: %{count} entries (%{size}) · Log buffer: %{logs}"
 "Library & lists: %{library} items · Queue: %{queue} · Playlist: %{playlist} (index %{index})": "Library & lists: %{library} items · Queue: %{queue} · Playlist: %{playlist} (index %{index})"

@@ -43,8 +43,11 @@ use gpui_kit::*;
 use crate::models::ThemePreference;
 
 /// 渲染函数在 Debug 构建下会占用大量栈空间（`render_content` 单帧约 700 KB），
-/// 默认 1 MB 的主线程栈会在首次渲染时溢出。把应用跑在带大栈的专用线程上。
+/// 默认 1 MB 的主线程栈会在首次渲染时溢出。Debug 保留 32 MB 栈，Release 下收紧到 8 MB。
+#[cfg(debug_assertions)]
 const APP_STACK_BYTES: usize = 32 * 1024 * 1024;
+#[cfg(not(debug_assertions))]
+const APP_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 fn main() {
     if bilibili_check::try_run() {

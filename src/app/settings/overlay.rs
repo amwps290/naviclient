@@ -76,6 +76,7 @@ impl NavidromeApp {
                         .h_full()
                         .flex_none()
                         .bg(rail_bg)
+                        .rounded_l(px(tokens::radius::LARGE - 1.0))
                         .border_r_1()
                         .border_color(hairline)
                         .child(

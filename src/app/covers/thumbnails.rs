@@ -2,19 +2,21 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use gpui_kit::{
-    img, App, Image, ImageSource, IntoElement, ObjectFit, RenderImage, RenderOnce, Task, Window,
+    img, App, Image, ImageFormat, ImageSource, IntoElement, ObjectFit, RenderImage, RenderOnce,
+    Task, Window,
 };
-use image::{imageops, imageops::FilterType, Frame, ImageBuffer, Rgba};
+use image::{imageops, imageops::FilterType, DynamicImage, Frame, ImageBuffer, ImageDecoder, ImageReader, Rgba, RgbaImage};
 
 use crate::app::prelude::*;
 
-const CAPACITY: usize = 192;
-const BYTE_BUDGET: usize = 32 * 1024 * 1024;
+const CAPACITY: usize = 160;
+const BYTE_BUDGET: usize = 24 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Key {
@@ -88,17 +90,19 @@ impl CoverThumbnails {
                 return image;
             }
         }
-        // GPUI decodes source bytes asynchronously and preserves EXIF orientation.
-        let decoded = source.clone().get_render_image(window, cx)?;
-        // Retain Img's frame clock and animation behavior for animated artwork.
-        if decoded.frame_count() != 1 {
+        // Retain GPUI's native animated-image path for GIF artwork.
+        if source.format == ImageFormat::Gif {
             return None;
         }
+        // Decode & filter directly from the compressed cover bytes on a background thread
+        // without populating GPUI's global AssetCache or uploading the full-size source to the GPU atlas.
+        let source_image = source.clone();
         let worker = cx.background_executor().spawn(async move {
+            let decoded = decode_bgra(&source_image)?;
             let pixels = if key.wide {
-                filter_wide(&decoded, key.side)
+                filter_wide_rgba(&decoded, key.side)
             } else {
-                filter(&decoded, key.side)
+                filter_rgba(&decoded, key.side)
             };
             pixels.map(|pixels| Arc::new(RenderImage::new(vec![pixels])))
         });
@@ -178,18 +182,50 @@ impl CoverThumbnails {
     }
 }
 
+fn decode_bgra(source: &Image) -> anyhow::Result<RgbaImage> {
+    let mut decoder = ImageReader::new(Cursor::new(&source.bytes))
+        .with_guessed_format()
+        .context("failed to detect cover image format")?
+        .into_decoder()
+        .context("failed to initialize cover image decoder")?;
+    let orientation = decoder.orientation().ok();
+    let mut decoded = DynamicImage::from_decoder(decoder).context("failed to decode cover")?;
+    if let Some(orientation) = orientation {
+        decoded.apply_orientation(orientation);
+    }
+    let mut pixels = decoded.into_rgba8();
+    // GPUI's RenderImage & sprite atlases store BGRA pixel order.
+    for pixel in pixels.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
+    Ok(pixels)
+}
+
+#[cfg(test)]
 fn filter(source: &RenderImage, side: u32) -> anyhow::Result<Frame> {
     let size = source.size(0);
     let width = u32::try_from(size.width.0)?;
     let height = u32::try_from(size.height.0)?;
     anyhow::ensure!(width > 0 && height > 0, "empty cover image");
     let bytes = source.as_bytes(0).context("missing cover pixels")?;
-    // Borrow the decoded BGRA pixels; filtering must not clone the large source.
     let image = ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(width, height, bytes)
         .context("invalid cover pixels")?;
+    filter_buffer(&image, side)
+}
+
+fn filter_rgba(image: &RgbaImage, side: u32) -> anyhow::Result<Frame> {
+    filter_buffer(image, side)
+}
+
+fn filter_buffer<C: std::ops::Deref<Target = [u8]>>(
+    image: &ImageBuffer<Rgba<u8>, C>,
+    side: u32,
+) -> anyhow::Result<Frame> {
+    let (width, height) = image.dimensions();
+    anyhow::ensure!(width > 0 && height > 0, "empty cover image");
     let crop_side = width.min(height);
     let crop = imageops::crop_imm(
-        &image,
+        image,
         (width - crop_side).div_ceil(2),
         (height - crop_side).div_ceil(2),
         crop_side,
@@ -215,23 +251,50 @@ pub(in crate::app) struct FilteredCover {
     pub(in crate::app) shadows: Vec<gpui_kit::BoxShadow>,
 }
 
-impl RenderOnce for FilteredCover {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let side = (self.size * window.scale_factor()).round().max(1.0) as u32;
-        let image = CoverThumbnails::image(&self.cache, &self.source, side, window, cx)
-            .map(ImageSource::Render)
-            // Preserve the existing image while its filtered replacement loads.
-            .unwrap_or_else(|| self.source.into());
-        img(image)
-            .size(px(self.size))
-            .aspect_square()
-            .object_fit(ObjectFit::Cover)
-            .flex_none()
-            .rounded(px(self.radius))
-            .shadow(self.shadows)
+fn placeholder_bg(cx: &App) -> Hsla {
+    if cx.has_global::<gpui_kit::component::Theme>() {
+        palette(cx).sunken
+    } else {
+        hsla(0.0, 0.0, 0.5, 0.12)
     }
 }
 
+impl RenderOnce for FilteredCover {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let side = (self.size * window.scale_factor()).round().max(1.0) as u32;
+        if let Some(image) = CoverThumbnails::image(&self.cache, &self.source, side, window, cx) {
+            return img(ImageSource::Render(image))
+                .size(px(self.size))
+                .aspect_square()
+                .object_fit(ObjectFit::Cover)
+                .flex_none()
+                .rounded(px(self.radius))
+                .shadow(self.shadows)
+                .into_any_element();
+        }
+        if self.source.format == ImageFormat::Gif {
+            return img(self.source)
+                .size(px(self.size))
+                .aspect_square()
+                .object_fit(ObjectFit::Cover)
+                .flex_none()
+                .rounded(px(self.radius))
+                .shadow(self.shadows)
+                .into_any_element();
+        }
+        // While the filtered thumbnail is decoding in the background, paint a lightweight
+        // placeholder instead of uploading the full-resolution source into GPUI's GPU atlas.
+        div()
+            .size(px(self.size))
+            .flex_none()
+            .rounded(px(self.radius))
+            .bg(placeholder_bg(cx))
+            .shadow(self.shadows)
+            .into_any_element()
+    }
+}
+
+#[cfg(test)]
 fn filter_wide(source: &RenderImage, side: u32) -> anyhow::Result<Frame> {
     let size = source.size(0);
     let width = u32::try_from(size.width.0)?;
@@ -243,10 +306,23 @@ fn filter_wide(source: &RenderImage, side: u32) -> anyhow::Result<Frame> {
         source.as_bytes(0).context("missing video artwork pixels")?,
     )
     .context("invalid video artwork pixels")?;
+    filter_wide_buffer(&image, side)
+}
+
+fn filter_wide_rgba(image: &RgbaImage, side: u32) -> anyhow::Result<Frame> {
+    filter_wide_buffer(image, side)
+}
+
+fn filter_wide_buffer<C: std::ops::Deref<Target = [u8]>>(
+    image: &ImageBuffer<Rgba<u8>, C>,
+    side: u32,
+) -> anyhow::Result<Frame> {
+    let (width, height) = image.dimensions();
+    anyhow::ensure!(width > 0 && height > 0, "empty video artwork");
     let crop_width = width.min(height.saturating_mul(16) / 9).max(1);
     let crop_height = height.min(crop_width.saturating_mul(9) / 16).max(1);
     let crop = imageops::crop_imm(
-        &image,
+        image,
         (width - crop_width).div_ceil(2),
         (height - crop_height).div_ceil(2),
         crop_width,
@@ -276,16 +352,36 @@ pub(in crate::app) struct FilteredVideoCover {
 impl RenderOnce for FilteredVideoCover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let side = (self.width * window.scale_factor()).round().max(1.0) as u32;
-        let image = CoverThumbnails::image_shape(&self.cache, &self.source, side, true, window, cx)
-            .map(ImageSource::Render)
-            .unwrap_or_else(|| self.source.into());
-        img(image)
+        if let Some(image) =
+            CoverThumbnails::image_shape(&self.cache, &self.source, side, true, window, cx)
+        {
+            return img(ImageSource::Render(image))
+                .w(px(self.width))
+                .h(px(self.width * 9.0 / 16.0))
+                .object_fit(ObjectFit::Cover)
+                .flex_none()
+                .rounded(px(self.radius))
+                .shadow(self.shadows)
+                .into_any_element();
+        }
+        if self.source.format == ImageFormat::Gif {
+            return img(self.source)
+                .w(px(self.width))
+                .h(px(self.width * 9.0 / 16.0))
+                .object_fit(ObjectFit::Cover)
+                .flex_none()
+                .rounded(px(self.radius))
+                .shadow(self.shadows)
+                .into_any_element();
+        }
+        div()
             .w(px(self.width))
             .h(px(self.width * 9.0 / 16.0))
-            .object_fit(ObjectFit::Cover)
             .flex_none()
             .rounded(px(self.radius))
+            .bg(placeholder_bg(cx))
             .shadow(self.shadows)
+            .into_any_element()
     }
 }
 

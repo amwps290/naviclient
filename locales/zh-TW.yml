@@ -809,7 +809,7 @@
 "Process memory (RSS): %{rss}": "處理程序實體記憶體 (RSS)：%{rss}"
 "Peak: %{size}": "峰值：%{size}"
 "Private: %{size}": "私有：%{size}"
-"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}": "封面原圖快取：%{count} 張 (%{size}) · 已解碼紋理：%{tex}/%{tex_cap}"
+"Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap} (%{decoded})": "封面原圖快取：%{count} 張 (%{size}) · 已解碼紋理：%{tex}/%{tex_cap} (%{decoded})"
 "Cover thumbnails: %{count} (%{size}) · Default & vinyl: %{extra}": "封面縮圖：%{count} 張 (%{size}) · 預設封面與黑膠：%{extra}"
 "Lyrics cache: %{count} entries (%{size}) · Log buffer: %{logs}": "歌詞快取：%{count} 筆 (%{size}) · 日誌緩衝：%{logs}"
 "Library & lists: %{library} items · Queue: %{queue} · Playlist: %{playlist} (index %{index})": "媒體庫項目：%{library} · 佇列：%{queue} · 歌單曲目：%{playlist}（索引 %{index}）"

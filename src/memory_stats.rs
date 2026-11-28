@@ -18,6 +18,7 @@ pub(crate) struct AppMemoryBreakdown {
     pub cover_source_bytes: u64,
     pub cover_texture_count: usize,
     pub cover_texture_capacity: usize,
+    pub cover_decoded_bytes: u64,
     pub cover_thumbnail_count: usize,
     pub cover_thumbnail_bytes: u64,
     pub default_cover_bytes: u64,
@@ -35,6 +36,7 @@ impl AppMemoryBreakdown {
     /// Sum of all directly measured byte caches (excluding OS/GPU/allocator overhead).
     pub(crate) fn tracked_bytes(&self) -> u64 {
         self.cover_source_bytes
+            .saturating_add(self.cover_decoded_bytes)
             .saturating_add(self.cover_thumbnail_bytes)
             .saturating_add(self.default_cover_bytes)
             .saturating_add(self.vinyl_bytes)

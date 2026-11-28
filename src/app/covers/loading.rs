@@ -1,6 +1,6 @@
 //! 封面加载：按需请求封面图、提取调色板、批量预取。
 
-use super::artwork::decode_cover;
+use super::artwork::{decode_cover, normalize_cover_bytes};
 use crate::app::prelude::*;
 
 /// 384 px 足够覆盖当前最大 180 logical-px 的网格封面（含 2x DPI 余量），
@@ -60,13 +60,21 @@ impl NavidromeApp {
             // 整条加载管线限流，而不只是解码：大收藏库若同时下载几百张封面，
             // 每个任务都会在等待解码许可时持有完整字节，造成明显瞬时内存峰值。
             let _permit = cover_slots.acquire_owned().await;
-            // 先查磁盘缓存，命中跳过网络；未命中走网络并回写缓存。
+            // 先查磁盘缓存，命中跳过网络；若旧磁盘缓存是超大原图，顺带降采样并回写。
             let result = match config::read_source_cover_cache(&config, &source, &id) {
-                Some(bytes) => Ok(bytes),
+                Some(bytes) => {
+                    let original_len = bytes.len();
+                    let normalized = normalize_cover_bytes(bytes);
+                    if normalized.len() < original_len {
+                        config::write_source_cover_cache(&config, &source, &id, &normalized);
+                    }
+                    Ok(normalized)
+                }
                 None => match api.get_bytes(&url).await {
                     Ok(bytes) => {
-                        config::write_source_cover_cache(&config, &source, &id, &bytes);
-                        Ok(bytes)
+                        let normalized = normalize_cover_bytes(bytes);
+                        config::write_source_cover_cache(&config, &source, &id, &normalized);
+                        Ok(normalized)
                     }
                     Err(error) => Err(error_message(error)),
                 },

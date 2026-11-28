@@ -136,7 +136,7 @@ impl NavidromeApp {
                     self.logs.error = None;
                     self.logs.updated_at = Some(Local::now());
                     self.logs.playback = self.audio.state();
-                    self.logs.memory = self.sample_memory_snapshot();
+                    self.logs.memory = self.sample_memory_snapshot(window, cx);
                     self.logs.file_error = crate::logging::file_error();
                     self.logs.dirty = true;
                 }
@@ -176,9 +176,22 @@ impl NavidromeApp {
         changed
     }
 
-    fn sample_memory_snapshot(&self) -> MemorySnapshot {
+    fn sample_memory_snapshot(&self, window: &mut Window, cx: &mut App) -> MemorySnapshot {
         let (cover_source_count, cover_source_bytes) = self.state.covers.stats();
-        let (cover_texture_count, cover_texture_capacity) = self.cover_textures.borrow().stats();
+        let (cover_texture_count, cover_texture_capacity, cover_decoded_bytes) = {
+            let textures = self.cover_textures.borrow();
+            let (count, cap) = textures.stats();
+            let decoded_bytes: u64 = textures
+                .used_images()
+                .filter_map(|image| image.clone().get_render_image(window, cx))
+                .map(|render_image| {
+                    (0..render_image.frame_count())
+                        .filter_map(|frame| render_image.as_bytes(frame).map(<[u8]>::len))
+                        .sum::<usize>() as u64
+                })
+                .sum();
+            (count, cap, decoded_bytes)
+        };
         let (cover_thumbnail_count, cover_thumbnail_bytes) = self.cover_thumbnails.borrow().stats();
         let default_cover_bytes = self.default_cover_thumbnails.borrow().memory_bytes();
         let vinyl_bytes = self.vinyl_cover.memory_bytes();
@@ -197,6 +210,7 @@ impl NavidromeApp {
                 cover_source_bytes: cover_source_bytes as u64,
                 cover_texture_count,
                 cover_texture_capacity,
+                cover_decoded_bytes,
                 cover_thumbnail_count,
                 cover_thumbnail_bytes: cover_thumbnail_bytes as u64,
                 default_cover_bytes: default_cover_bytes as u64,
@@ -238,11 +252,12 @@ impl NavidromeApp {
         }
         lines.push(
             t!(
-                "Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}",
+                "Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap} (%{decoded})",
                 count = app.cover_source_count,
                 size = format_file_size(app.cover_source_bytes),
                 tex = app.cover_texture_count,
-                tex_cap = app.cover_texture_capacity
+                tex_cap = app.cover_texture_capacity,
+                decoded = format_file_size(app.cover_decoded_bytes)
             )
             .to_string(),
         );
@@ -469,7 +484,7 @@ impl NavidromeApp {
                                 .compact_action()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     let (count, freed) = this.purge_cover_memory_cache(window, cx);
-                                    this.logs.memory = this.sample_memory_snapshot();
+                                    this.logs.memory = this.sample_memory_snapshot(window, cx);
                                     this.notify_success(t!(
                                         "Released %{count} cached covers (%{size})",
                                         count = count,

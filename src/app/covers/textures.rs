@@ -2,8 +2,8 @@
 
 use crate::app::prelude::*;
 
-/// 96 decoded 384² BGRA images use about 54 MiB; old 500² cache files can reach 92 MiB.
-pub(in crate::app) const MAX_DECODED_COVERS: usize = 96;
+/// 48 retained cover sources keeps decoded artwork bounded while avoiding re-decode churn.
+pub(in crate::app) const MAX_DECODED_COVERS: usize = 48;
 
 impl NavidromeApp {
     pub(in crate::app) fn mark_cover_image_used(&self, image: &Arc<GpuiImage>) {

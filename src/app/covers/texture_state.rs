@@ -29,6 +29,10 @@ impl CoverTextures {
         (self.used.len(), self.capacity)
     }
 
+    pub(in crate::app) fn used_images(&self) -> impl Iterator<Item = &Arc<Image>> {
+        self.used.iter()
+    }
+
     pub(in crate::app) fn evict_all_except(
         &mut self,
         protected_ids: &std::collections::HashSet<u64>,

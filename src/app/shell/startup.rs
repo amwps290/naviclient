@@ -78,7 +78,15 @@ impl NavidromeApp {
             config.playback_source = Some(api.id().clone());
         }
         let (tx, rx) = mpsc::channel();
-        let runtime = Runtime::new().expect("failed to create Tokio runtime");
+        let worker_threads = std::thread::available_parallelism()
+            .map(|count| count.get().clamp(2, 4))
+            .unwrap_or(2);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .thread_name("navidrome-tokio")
+            .enable_all()
+            .build()
+            .expect("failed to create Tokio runtime");
         let media_session = MediaSession::new(runtime.handle(), main_window_hwnd(window));
         let global_shortcuts = GlobalShortcutManager::new(&config.global_shortcuts);
         let requested_cache_dir = config::audio_cache_dir(&config);

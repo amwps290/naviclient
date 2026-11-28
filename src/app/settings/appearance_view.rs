@@ -185,9 +185,14 @@ impl NavidromeApp {
             .border_color(border)
             .overflow_hidden();
 
+        let inner_radius = px(tokens::radius::CONTROL - 1.0);
         match preference {
-            ThemePreference::Light => preview.child(mini_pane(light)).into_any_element(),
-            ThemePreference::Dark => preview.child(mini_pane(dark)).into_any_element(),
+            ThemePreference::Light => preview
+                .child(mini_pane(light).rounded(inner_radius))
+                .into_any_element(),
+            ThemePreference::Dark => preview
+                .child(mini_pane(dark).rounded(inner_radius))
+                .into_any_element(),
             ThemePreference::System => preview
                 .child(
                     h_flex()
@@ -197,14 +202,14 @@ impl NavidromeApp {
                                 .w(relative(0.5))
                                 .h_full()
                                 .overflow_hidden()
-                                .child(mini_pane(light)),
+                                .child(mini_pane(light).rounded_l(inner_radius)),
                         )
                         .child(
                             div()
                                 .w(relative(0.5))
                                 .h_full()
                                 .overflow_hidden()
-                                .child(mini_pane(dark)),
+                                .child(mini_pane(dark).rounded_r(inner_radius)),
                         ),
                 )
                 .into_any_element(),

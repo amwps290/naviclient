@@ -1,11 +1,64 @@
 //! Cover decoding and palette/color helpers.
 
+use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::{hsla, Hsla, Image as GpuiImage, ImageFormat as GpuiImageFormat};
+use image::{imageops::FilterType, ImageDecoder, ImageReader};
 
 use crate::msg::DecodedCover;
+
+/// 封面缓存允许保留的最大长边像素数。
+/// 界面中最大封面位（详情页 264pt 宽视频封面 / 220pt 专辑封面，2x DPI）均在 512px 内；
+/// 对 Bilibili 等直接返回 1920x1080/4K 原图的音源在后台统一降采样，可将单张解码内存降低 85%+。
+pub(in crate::app) const MAX_COVER_EDGE: u32 = 512;
+const REENCODED_JPEG_QUALITY: u8 = 86;
+
+/// 若原图任意一边超过 `MAX_COVER_EDGE`（非动图），在后台按比例降采样并重新编码为轻量字节。
+/// 既减小内存中的原图体积，也让磁盘缓存不再保存动辄 600KB–2MB 的高清大图。
+pub(in crate::app) fn normalize_cover_bytes(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(format) = image::guess_format(&bytes) else {
+        return bytes;
+    };
+    if format == image::ImageFormat::Gif {
+        return bytes;
+    }
+    let Ok((width, height)) = ImageReader::with_format(Cursor::new(&bytes), format).into_dimensions()
+    else {
+        return bytes;
+    };
+    if width == 0 || height == 0 || width.max(height) <= MAX_COVER_EDGE {
+        return bytes;
+    }
+    let Ok(mut decoder) = ImageReader::with_format(Cursor::new(&bytes), format).into_decoder()
+    else {
+        return bytes;
+    };
+    let orientation = decoder.orientation().ok();
+    let Ok(mut decoded) = image::DynamicImage::from_decoder(decoder) else {
+        return bytes;
+    };
+    if let Some(orientation) = orientation {
+        decoded.apply_orientation(orientation);
+    }
+    let resized = decoded.resize(MAX_COVER_EDGE, MAX_COVER_EDGE, FilterType::Triangle);
+    let mut encoded = Vec::new();
+    let ok = if resized.color().has_alpha() {
+        resized
+            .write_to(&mut Cursor::new(&mut encoded), image::ImageFormat::Png)
+            .is_ok()
+    } else {
+        let mut encoder =
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, REENCODED_JPEG_QUALITY);
+        encoder.encode_image(&resized.to_rgb8()).is_ok()
+    };
+    if ok && !encoded.is_empty() && encoded.len() < bytes.len() {
+        encoded
+    } else {
+        bytes
+    }
+}
 
 /// 封面是否需要发起请求：
 /// - 已有图像且这次不需要调色板 → 不需要（网格/队列预取的常规情形）；
@@ -25,9 +78,10 @@ pub(in crate::app) fn cover_request_needed(
     !(have_image && (!want_palette || have_palette))
 }
 
-/// 在后台线程解码封面：按需提取调色板并构造 GPUI 图片对象，避免阻塞 UI 线程。
+/// 在后台线程解码封面：按需提取调色板、对超大原图降采样并构造 GPUI 图片对象，避免阻塞 UI 线程。
 pub(in crate::app) fn decode_cover(bytes: Vec<u8>, want_palette: bool) -> DecodedCover {
     let decode_start = std::time::Instant::now();
+    let bytes = normalize_cover_bytes(bytes);
     let palette = if want_palette {
         extract_cover_palette(&bytes)
     } else {
