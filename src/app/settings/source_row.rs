@@ -226,6 +226,60 @@ impl SourceRow {
                     busy: false,
                 })
             }
+            SourceProfile::WebDav {
+                name,
+                base_url,
+                root_path,
+                ..
+            } => {
+                let label = if name.trim().is_empty() {
+                    "WebDAV".to_string()
+                } else {
+                    name.trim().to_string()
+                };
+                let host_summary = url::Url::parse(base_url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_string))
+                    .map(|host| {
+                        if root_path.trim().is_empty() || root_path.trim() == "/" {
+                            host
+                        } else {
+                            format!("{host}{root_path}")
+                        }
+                    })
+                    .unwrap_or_else(|| base_url.clone());
+                let (health, detail, action) = if base_url.trim().is_empty() {
+                    (
+                        SourceHealth::Idle,
+                        t!("Not configured yet").to_string(),
+                        Some(SourceAction::SetUp),
+                    )
+                } else if !connection.current {
+                    (SourceHealth::Idle, host_summary, Some(SourceAction::Switch))
+                } else if connection.loading {
+                    (
+                        SourceHealth::Busy,
+                        t!("Scanning WebDAV library…").to_string(),
+                        None,
+                    )
+                } else if let Some(summary) = connection.connected {
+                    (SourceHealth::Connected, summary, None)
+                } else {
+                    (
+                        SourceHealth::Problem,
+                        t!("Not connected").to_string(),
+                        Some(SourceAction::Retry),
+                    )
+                };
+                Some(Self {
+                    label,
+                    provider: ProviderKind::WebDav,
+                    detail,
+                    health,
+                    action,
+                    busy: false,
+                })
+            }
         }
     }
 }

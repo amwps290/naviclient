@@ -56,6 +56,11 @@ pub struct NavidromeApp {
     proxy_name_input: Entity<InputState>,
     local_folder_name_input: Entity<InputState>,
     local_folder_path_input: Entity<InputState>,
+    webdav_name_input: Entity<InputState>,
+    webdav_url_input: Entity<InputState>,
+    webdav_root_input: Entity<InputState>,
+    webdav_username_input: Entity<InputState>,
+    webdav_password_input: Entity<InputState>,
     runtime: Runtime,
     api: Option<MusicSource>,
     /// Browsing requests use `api`; transport and reporting retain this handle.

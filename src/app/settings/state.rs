@@ -56,6 +56,14 @@ pub(in crate::app) struct LocalFolderDialog {
     pub(in crate::app) error: Option<String>,
 }
 
+/// Adding or editing a WebDAV / Alist storage source.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct WebDavDialog {
+    pub(in crate::app) target: Option<String>,
+    pub(in crate::app) connection: SourceConnection,
+    pub(in crate::app) error: Option<String>,
+}
+
 /// The one settings dialog that may be open. The window owns the dialog
 /// itself; this state decides its content and whether it should stay open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +74,8 @@ pub(in crate::app) enum SettingsDialog {
     RemoveBilibili(SourceId),
     LocalFolder(LocalFolderDialog),
     RemoveLocalFolder(SourceId),
+    WebDav(WebDavDialog),
+    RemoveWebDav(SourceId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

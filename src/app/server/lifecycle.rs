@@ -74,6 +74,37 @@ impl NavidromeApp {
             return;
         }
 
+        if self.browsing_webdav() {
+            let Some(active_id) = self.config.active_source.clone() else {
+                return;
+            };
+            if self.config.route_for(&active_id).is_err() {
+                self.api = None;
+                self.notify_error(t!(
+                    "The selected proxy is missing. Choose a proxy or direct connection."
+                ));
+                self.state.settings.open = true;
+                return;
+            }
+            self.api = crate::app::playback::source_context::configured_source(
+                &self.config,
+                &active_id,
+            );
+            self.prune_source_covers();
+            if self.api.is_some() {
+                if self.playback_source.is_none() {
+                    self.playback_source = self.api.clone();
+                    self.load_playback_source_cache();
+                }
+                self.load_browsing_source_cache();
+                self.refresh_library();
+            } else {
+                self.state.status = t!("Enter a valid WebDAV server address").to_string();
+                self.state.settings.open = true;
+            }
+            return;
+        }
+
         // 空白条目（刚新增还没填）不是错误：只清空连接，等用户保存地址。
         let configured = self
             .config

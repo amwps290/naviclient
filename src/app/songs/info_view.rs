@@ -419,6 +419,10 @@ impl NavidromeApp {
                                         source.provider == crate::source::ProviderKind::LocalFolder
                                     }) {
                                         t!("Metadata from local file.")
+                                    } else if song.source.as_ref().is_some_and(|source| {
+                                        source.provider == crate::source::ProviderKind::WebDav
+                                    }) {
+                                        t!("Metadata from WebDAV storage.")
                                     } else {
                                         t!("Metadata from the Navidrome server.")
                                     }),

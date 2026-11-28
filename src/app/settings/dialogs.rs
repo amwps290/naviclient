@@ -90,6 +90,10 @@ impl NavidromeApp {
             Some(SettingsDialog::RemoveLocalFolder(source)) => {
                 self.render_remove_local_folder_dialog(dialog, source, cx)
             }
+            Some(SettingsDialog::WebDav(webdav)) => self.render_webdav_dialog(dialog, webdav, cx),
+            Some(SettingsDialog::RemoveWebDav(source)) => {
+                self.render_remove_webdav_dialog(dialog, source, cx)
+            }
             None => dialog,
         }
     }

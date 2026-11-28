@@ -140,6 +140,26 @@ impl NavidromeApp {
                 })
                 .unwrap_or_else(|| t!("Local music").to_string());
         }
+        if self.browsing_webdav() {
+            return self
+                .config
+                .sources
+                .iter()
+                .find(|profile| Some(profile.id()) == self.config.active_source)
+                .and_then(|profile| match profile {
+                    crate::source::SourceProfile::WebDav { name, base_url, .. } => {
+                        if !name.trim().is_empty() {
+                            Some(name.trim().to_string())
+                        } else if !base_url.trim().is_empty() {
+                            Some(base_url.trim().to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "WebDAV".to_string());
+        }
         self.config
             .active_profile()
             .map(|profile| profile.label())

@@ -199,6 +199,16 @@ impl NavidromeApp {
                 .new(|cx| InputState::new(window, cx).placeholder(t!("Local music"))),
             local_folder_path_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("/path/to/music"))),
+            webdav_name_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Home NAS / Alist"))),
+            webdav_url_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("https://nas.local:5244/dav")),
+            webdav_root_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("/Music")),
+            webdav_username_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Username"))),
+            webdav_password_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Password")).masked(true)),
             runtime,
             playback_source,
             playback_server: None,

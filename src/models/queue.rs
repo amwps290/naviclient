@@ -242,7 +242,7 @@ impl PlaybackSession {
         }
         match source.provider {
             ProviderKind::OpenSubsonic => server_url.is_some_and(|url| self.matches_server(url)),
-            ProviderKind::Bilibili | ProviderKind::LocalFolder => {
+            ProviderKind::Bilibili | ProviderKind::LocalFolder | ProviderKind::WebDav => {
                 self.source.as_ref() == Some(source)
             }
         }

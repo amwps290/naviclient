@@ -20,3 +20,4 @@ pub(in crate::app) mod source_row;
 pub(in crate::app) mod sources_view;
 pub(in crate::app) mod state;
 pub(in crate::app) mod view;
+pub(in crate::app) mod webdav_dialog;

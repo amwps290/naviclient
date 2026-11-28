@@ -34,6 +34,36 @@ pub(in crate::app) fn configured_source(config: &Config, id: &SourceId) -> Optio
                 roots.clone(),
             ))
         }
+        crate::source::ProviderKind::WebDav => {
+            let crate::source::SourceProfile::WebDav {
+                id: profile_id,
+                name,
+                base_url,
+                root_path,
+                username,
+                password,
+                password_in_keyring,
+            } = config.sources.iter().find(|profile| profile.id() == *id)?
+            else {
+                return None;
+            };
+            if base_url.trim().is_empty() {
+                return None;
+            }
+            let route = config.route_for(id).ok()?;
+            let resolved_pw =
+                crate::source::webdav::resolve_webdav_password(profile_id, password, *password_in_keyring);
+            MusicSource::webdav(
+                profile_id.clone(),
+                name.clone(),
+                base_url.clone(),
+                root_path.clone(),
+                username.clone(),
+                resolved_pw,
+                route,
+            )
+            .ok()
+        }
     }
 }
 
@@ -42,7 +72,10 @@ impl NavidromeApp {
         if id.provider == crate::source::ProviderKind::OpenSubsonic {
             return configured_source(&self.config, id);
         }
-        if id.provider == crate::source::ProviderKind::LocalFolder {
+        if matches!(
+            id.provider,
+            crate::source::ProviderKind::LocalFolder | crate::source::ProviderKind::WebDav
+        ) {
             if let Some(existing) = self.source_by_id(id) {
                 return Some(existing.clone());
             }
@@ -88,6 +121,13 @@ impl NavidromeApp {
             .active_source
             .as_ref()
             .is_some_and(|id| id.provider == crate::source::ProviderKind::LocalFolder)
+    }
+
+    pub(in crate::app) fn browsing_webdav(&self) -> bool {
+        self.config
+            .active_source
+            .as_ref()
+            .is_some_and(|id| id.provider == crate::source::ProviderKind::WebDav)
     }
 
     pub(in crate::app) fn switch_bilibili_source(&mut self, id: &SourceId) {
@@ -173,6 +213,20 @@ impl NavidromeApp {
                     _ => None,
                 })
                 .unwrap_or_else(|| t!("Local music").to_string()),
+            crate::source::ProviderKind::WebDav => self
+                .config
+                .sources
+                .iter()
+                .find(|profile| profile.id() == *api.id())
+                .and_then(|profile| match profile {
+                    crate::source::SourceProfile::WebDav { name, .. }
+                        if !name.trim().is_empty() =>
+                    {
+                        Some(name.trim().to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "WebDAV".to_string()),
         }
     }
 

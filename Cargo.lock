@@ -4800,6 +4800,7 @@ dependencies = [
  "raw-window-handle",
  "reqwest",
  "rodio",
+ "roxmltree 0.21.1",
  "rust-i18n",
  "secret-service",
  "serde",

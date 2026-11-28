@@ -7,6 +7,7 @@ pub(crate) mod playback;
 mod queries;
 pub mod resource;
 pub(crate) mod route_probe;
+pub mod webdav;
 
 pub use crate::models::source::{
     MediaKey, PlaybackPolicy, ProviderKind, SourceCapabilities, SourceId, SourceProfile,
@@ -24,6 +25,7 @@ pub enum MusicSource {
     OpenSubsonic(OpenSubsonicAdapter),
     Bilibili(bilibili::BilibiliProvider),
     LocalFolder(local::LocalFolderProvider),
+    WebDav(webdav::WebDavProvider),
 }
 
 impl MusicSource {
@@ -50,11 +52,33 @@ impl MusicSource {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn webdav(
+        profile_id: impl Into<String>,
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        root_path: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        route: NetworkRoute,
+    ) -> Result<Self> {
+        Ok(Self::WebDav(webdav::WebDavProvider::new(
+            SourceId::new(ProviderKind::WebDav, profile_id),
+            name.into(),
+            base_url.into(),
+            root_path.into(),
+            username.into(),
+            password.into(),
+            route,
+        )?))
+    }
+
     pub fn id(&self) -> &SourceId {
         match self {
             Self::OpenSubsonic(adapter) => adapter.id(),
             Self::Bilibili(provider) => provider.id(),
             Self::LocalFolder(provider) => provider.id(),
+            Self::WebDav(provider) => provider.id(),
         }
     }
 
@@ -85,6 +109,7 @@ impl MusicSource {
             Self::OpenSubsonic(adapter) => adapter.provider().base_url(),
             Self::Bilibili(_) => "https://www.bilibili.com",
             Self::LocalFolder(_) => "local://folder",
+            Self::WebDav(provider) => provider.base_url(),
         }
     }
 
@@ -94,7 +119,9 @@ impl MusicSource {
         configured: TranscodingQuality,
     ) -> Result<PlaybackResource> {
         match self {
-            Self::OpenSubsonic(_) | Self::LocalFolder(_) => self.resolve_immediate(song, configured),
+            Self::OpenSubsonic(_) | Self::LocalFolder(_) | Self::WebDav(_) => {
+                self.resolve_immediate(song, configured)
+            }
             Self::Bilibili(provider) => Ok(provider.resolve_playback(song).await?),
         }
     }
@@ -107,7 +134,7 @@ impl MusicSource {
         configured: TranscodingQuality,
     ) -> Option<Result<PlaybackResource>> {
         match self {
-            Self::OpenSubsonic(_) | Self::LocalFolder(_) => {
+            Self::OpenSubsonic(_) | Self::LocalFolder(_) | Self::WebDav(_) => {
                 Some(self.resolve_immediate(song, configured))
             }
             Self::Bilibili(_) => None,
@@ -125,6 +152,7 @@ impl MusicSource {
         match self {
             Self::OpenSubsonic(adapter) => adapter.resolve_playback(song, configured),
             Self::LocalFolder(provider) => provider.resolve_playback(song),
+            Self::WebDav(provider) => provider.resolve_playback(song),
             Self::Bilibili(_) => anyhow::bail!("Bilibili audio must be resolved asynchronously"),
         }
     }

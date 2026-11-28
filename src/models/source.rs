@@ -14,6 +14,7 @@ pub enum ProviderKind {
     OpenSubsonic,
     Bilibili,
     LocalFolder,
+    WebDav,
 }
 
 /// The provider is part of identity, so equal profile IDs cannot cross sources.
@@ -50,6 +51,7 @@ impl SourceId {
             ProviderKind::OpenSubsonic => 0,
             ProviderKind::Bilibili => 1,
             ProviderKind::LocalFolder => 2,
+            ProviderKind::WebDav => 3,
         }]);
         hash.update((self.profile_id.len() as u64).to_le_bytes());
         hash.update(self.profile_id.as_bytes());
@@ -107,6 +109,22 @@ pub enum SourceProfile {
         #[serde(default)]
         roots: Vec<PathBuf>,
     },
+    WebDav {
+        id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        base_url: String,
+        #[serde(default)]
+        root_path: String,
+        #[serde(default)]
+        username: String,
+        /// Plaintext fallback when OS credential store is unavailable.
+        #[serde(default)]
+        password: String,
+        #[serde(default)]
+        password_in_keyring: bool,
+    },
 }
 
 impl SourceProfile {
@@ -117,6 +135,7 @@ impl SourceProfile {
             }
             Self::Bilibili { id, .. } => SourceId::new(ProviderKind::Bilibili, id),
             Self::LocalFolder { id, .. } => SourceId::new(ProviderKind::LocalFolder, id),
+            Self::WebDav { id, .. } => SourceId::new(ProviderKind::WebDav, id),
         }
     }
 }
@@ -151,7 +170,7 @@ pub struct PlaybackPolicy {
 impl ProviderKind {
     pub fn playback_policy(self) -> PlaybackPolicy {
         match self {
-            Self::OpenSubsonic | Self::LocalFolder => PlaybackPolicy::default(),
+            Self::OpenSubsonic | Self::LocalFolder | Self::WebDav => PlaybackPolicy::default(),
             Self::Bilibili => PlaybackPolicy {
                 refreshable_addresses: true,
                 authorized_session: true,
@@ -183,7 +202,7 @@ impl ProviderKind {
                 playlist_read: true,
                 ..SourceCapabilities::default()
             },
-            Self::LocalFolder => SourceCapabilities {
+            Self::LocalFolder | Self::WebDav => SourceCapabilities {
                 library: true,
                 search: true,
                 favorite_read: true,

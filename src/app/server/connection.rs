@@ -41,8 +41,8 @@ impl NavidromeApp {
         match result {
             Ok(discovery) => {
                 self.update_connection_status();
-                if self.browsing_local_folder() {
-                    // Ping completed the incremental folder scan; reload library views with fresh data.
+                if self.browsing_local_folder() || self.browsing_webdav() {
+                    // Ping completed the incremental scan; reload library views with fresh data.
                     self.load_artists();
                     self.load_albums();
                     self.load_genres();

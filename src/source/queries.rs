@@ -24,7 +24,7 @@ impl MusicSource {
     fn subsonic(&self) -> Result<&OpenSubsonicProvider> {
         match self {
             Self::OpenSubsonic(adapter) => Ok(adapter.provider()),
-            Self::Bilibili(_) | Self::LocalFolder(_) => {
+            Self::Bilibili(_) | Self::LocalFolder(_) | Self::WebDav(_) => {
                 anyhow::bail!("This source does not support this operation")
             }
         }
@@ -45,6 +45,7 @@ impl MusicSource {
                 Ok(info)
             }
             Self::LocalFolder(provider) => provider.ping().await,
+            Self::WebDav(provider) => provider.ping().await,
         }
     }
 
@@ -55,6 +56,7 @@ impl MusicSource {
     pub async fn artists(&self) -> Result<Vec<Artist>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.artists()),
+            Self::WebDav(provider) => Ok(provider.artists()),
             _ => self.subsonic()?.artists().await,
         }
     }
@@ -62,6 +64,7 @@ impl MusicSource {
     pub async fn artist_albums(&self, id: &str) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.artist_albums(id)),
+            Self::WebDav(provider) => Ok(provider.artist_albums(id)),
             _ => self.subsonic()?.artist_albums(id).await,
         }
     }
@@ -74,6 +77,7 @@ impl MusicSource {
     ) -> Result<Vec<Song>> {
         let songs = match self {
             Self::LocalFolder(provider) => provider.artist_top_songs(artist, count),
+            Self::WebDav(provider) => provider.artist_top_songs(artist, count),
             _ => self
                 .subsonic()?
                 .artist_top_songs(artist, count, support)
@@ -85,6 +89,7 @@ impl MusicSource {
     pub async fn albums(&self, size: u32, offset: u32, sort: AlbumSort) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums(size, offset, sort)),
+            Self::WebDav(provider) => Ok(provider.albums(size, offset, sort)),
             _ => self.subsonic()?.albums(size, offset, sort).await,
         }
     }
@@ -92,6 +97,7 @@ impl MusicSource {
     pub async fn albums_newest(&self, size: u32) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums_newest(size)),
+            Self::WebDav(provider) => Ok(provider.albums_newest(size)),
             _ => self.subsonic()?.albums_newest(size).await,
         }
     }
@@ -99,6 +105,7 @@ impl MusicSource {
     pub async fn albums_recent(&self, size: u32) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums_recent(size)),
+            Self::WebDav(provider) => Ok(provider.albums_recent(size)),
             _ => self.subsonic()?.albums_recent(size).await,
         }
     }
@@ -106,6 +113,7 @@ impl MusicSource {
     pub async fn albums_frequent(&self, size: u32) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums_frequent(size)),
+            Self::WebDav(provider) => Ok(provider.albums_frequent(size)),
             _ => self.subsonic()?.albums_frequent(size).await,
         }
     }
@@ -113,6 +121,7 @@ impl MusicSource {
     pub async fn albums_random(&self, size: u32) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums_random(size)),
+            Self::WebDav(provider) => Ok(provider.albums_random(size)),
             _ => self.subsonic()?.albums_random(size).await,
         }
     }
@@ -120,6 +129,7 @@ impl MusicSource {
     pub async fn genres(&self) -> Result<Vec<Genre>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.genres()),
+            Self::WebDav(provider) => Ok(provider.genres()),
             _ => self.subsonic()?.genres().await,
         }
     }
@@ -127,6 +137,7 @@ impl MusicSource {
     pub async fn albums_by_genre(&self, genre: &str, size: u32, offset: u32) -> Result<Vec<Album>> {
         match self {
             Self::LocalFolder(provider) => Ok(provider.albums_by_genre(genre, size, offset)),
+            Self::WebDav(provider) => Ok(provider.albums_by_genre(genre, size, offset)),
             _ => self.subsonic()?.albums_by_genre(genre, size, offset).await,
         }
     }
@@ -134,6 +145,7 @@ impl MusicSource {
     pub async fn album_songs(&self, id: &str) -> Result<Vec<Song>> {
         let songs = match self {
             Self::LocalFolder(provider) => provider.album_songs(id),
+            Self::WebDav(provider) => provider.album_songs(id),
             _ => self.subsonic()?.album_songs(id).await?,
         };
         Ok(self.bind_songs(songs))
@@ -146,6 +158,7 @@ impl MusicSource {
     pub async fn songs_by_genre(&self, genre: &str, count: u32, offset: u32) -> Result<Vec<Song>> {
         let songs = match self {
             Self::LocalFolder(provider) => provider.songs_by_genre(genre, count, offset),
+            Self::WebDav(provider) => provider.songs_by_genre(genre, count, offset),
             _ => self
                 .subsonic()?
                 .songs_by_genre(genre, count, offset)
@@ -157,6 +170,7 @@ impl MusicSource {
     pub async fn favorites(&self) -> Result<Favorites> {
         let mut favorites = match self {
             Self::LocalFolder(provider) => provider.favorites(),
+            Self::WebDav(provider) => provider.favorites(),
             _ => self.subsonic()?.favorites().await?,
         };
         favorites.songs = self.bind_songs(favorites.songs);
@@ -166,6 +180,7 @@ impl MusicSource {
     pub async fn set_favorite(&self, key: &FavoriteKey, starred: bool) -> Result<()> {
         match self {
             Self::LocalFolder(provider) => provider.set_favorite(key, starred),
+            Self::WebDav(provider) => provider.set_favorite(key, starred),
             _ => self.subsonic()?.set_favorite(key, starred).await,
         }
     }
@@ -179,6 +194,7 @@ impl MusicSource {
     ) -> Result<SearchResults> {
         let mut result = match self {
             Self::LocalFolder(provider) => provider.search(query, songs, albums, artists),
+            Self::WebDav(provider) => provider.search(query, songs, albums, artists),
             _ => self
                 .subsonic()?
                 .search(query, songs, albums, artists)
@@ -244,7 +260,7 @@ impl MusicSource {
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         match self {
             Self::OpenSubsonic(_) => self.subsonic()?.playlists().await,
-            Self::LocalFolder(_) => Ok(Vec::new()),
+            Self::LocalFolder(_) | Self::WebDav(_) => Ok(Vec::new()),
             Self::Bilibili(provider) => Ok(provider
                 .favorite_folders()
                 .await?
@@ -266,8 +282,8 @@ impl MusicSource {
     pub async fn playlist(&self, id: &str) -> Result<PlaylistDetails> {
         let mut playlist = match self {
             Self::OpenSubsonic(_) => self.subsonic()?.playlist(id).await?,
-            Self::LocalFolder(_) => {
-                anyhow::bail!("Local folder playlists are not available yet")
+            Self::LocalFolder(_) | Self::WebDav(_) => {
+                anyhow::bail!("Playlists are not available for this source yet")
             }
             Self::Bilibili(provider) => {
                 let id = id
@@ -320,6 +336,7 @@ impl MusicSource {
                     .await
                     .map_err(|error| anyhow::anyhow!("Local lyrics lookup interrupted: {error}"))?
             }
+            Self::WebDav(provider) => provider.lyrics(song).await,
             _ => self.subsonic()?.lyrics(song, support).await,
         }
     }
@@ -337,6 +354,7 @@ impl MusicSource {
             Self::OpenSubsonic(_) => self.subsonic()?.cover_url(id, size),
             Self::Bilibili(provider) => Ok(provider.cover_url(id)?),
             Self::LocalFolder(provider) => provider.cover_url(id),
+            Self::WebDav(provider) => provider.cover_url(id),
         }
     }
 
@@ -351,6 +369,7 @@ impl MusicSource {
                     .await
                     .map_err(|error| anyhow::anyhow!("Local cover read interrupted: {error}"))?
             }
+            Self::WebDav(provider) => provider.cover_bytes(url).await,
         }
     }
 }

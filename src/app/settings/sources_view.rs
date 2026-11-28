@@ -87,6 +87,13 @@ impl NavidromeApp {
                                             this.open_local_folder_dialog(None, window, cx);
                                         })),
                                 )
+                                .item(
+                                    PopupMenuItem::new(t!("WebDAV / Alist storage"))
+                                        .icon(AppIcon::Cloud)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_webdav_dialog(None, window, cx);
+                                        })),
+                                )
                             })
                             .expect("app owns source menu")
                         }),
@@ -115,6 +122,15 @@ impl NavidromeApp {
                         )
                         .to_string(),
                     )
+                }
+                _ => None,
+            },
+            SourceProfile::WebDav { .. } => match self.api.as_ref() {
+                Some(MusicSource::WebDav(provider))
+                    if current && self.state.connection.server().is_some() =>
+                {
+                    let tracks = provider.track_count();
+                    Some(t!("Connected · %{count} tracks", count = tracks).to_string())
                 }
                 _ => None,
             },
@@ -220,6 +236,7 @@ impl NavidromeApp {
                             ProviderKind::OpenSubsonic => AppIcon::Server,
                             ProviderKind::Bilibili => AppIcon::Video,
                             ProviderKind::LocalFolder => AppIcon::Folder,
+                            ProviderKind::WebDav => AppIcon::Cloud,
                         })
                         .with_size(px(17.0))
                         .text_color(if current {
@@ -332,6 +349,14 @@ impl NavidromeApp {
                 self.switch_local_folder_source(source);
                 self.state.settings.open = true;
             }
+            (ProviderKind::WebDav, SourceAction::SetUp | SourceAction::SignIn) => {
+                self.open_webdav_dialog(Some(&source.profile_id), window, cx)
+            }
+            (ProviderKind::WebDav, SourceAction::Retry) => self.reconnect_active_server(),
+            (ProviderKind::WebDav, SourceAction::Switch) => {
+                self.switch_webdav_source(source);
+                self.state.settings.open = true;
+            }
         }
     }
 
@@ -361,6 +386,7 @@ impl NavidromeApp {
                             ProviderKind::OpenSubsonic => t!("Edit connection"),
                             ProviderKind::Bilibili => t!("Sign in again"),
                             ProviderKind::LocalFolder => t!("Edit folders"),
+                            ProviderKind::WebDav => t!("Edit connection"),
                         })
                         .icon(AppIcon::Pencil)
                         .on_click(cx.listener(
@@ -374,6 +400,9 @@ impl NavidromeApp {
                                 ProviderKind::LocalFolder => {
                                     this.open_local_folder_dialog(Some(&edit.profile_id), window, cx)
                                 }
+                                ProviderKind::WebDav => {
+                                    this.open_webdav_dialog(Some(&edit.profile_id), window, cx)
+                                }
                             },
                         )),
                     );
@@ -384,6 +413,16 @@ impl NavidromeApp {
                                 .icon(AppIcon::Refresh)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.rescan_local_folder_source(&rescan);
+                                    cx.notify();
+                                })),
+                        )
+                    } else if head.provider == ProviderKind::WebDav {
+                        let rescan = head.clone();
+                        menu.item(
+                            PopupMenuItem::new(t!("Rescan WebDAV"))
+                                .icon(AppIcon::Refresh)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.rescan_webdav_source(&rescan);
                                     cx.notify();
                                 })),
                         )
@@ -429,6 +468,9 @@ impl NavidromeApp {
                                 }
                                 ProviderKind::LocalFolder => {
                                     this.confirm_remove_local_folder(remove.clone(), window, cx)
+                                }
+                                ProviderKind::WebDav => {
+                                    this.confirm_remove_webdav(remove.clone(), window, cx)
                                 }
                             }),
                         ),

@@ -189,3 +189,33 @@ fn local_folder_rows_report_setup_switch_scanning_and_connected() {
     let row = SourceRow::derive(&config, &populated, None, connected).unwrap();
     assert_eq!((row.health, row.action), (SourceHealth::Connected, None));
 }
+
+#[test]
+fn webdav_rows_report_setup_switch_and_connected() {
+    let config = Config::default();
+    let unconfigured = SourceProfile::WebDav {
+        id: "webdav-1".into(),
+        name: "NAS".into(),
+        base_url: String::new(),
+        root_path: "/".into(),
+        username: String::new(),
+        password: String::new(),
+        password_in_keyring: false,
+    };
+    let row = SourceRow::derive(&config, &unconfigured, None, IDLE).unwrap();
+    assert_eq!(row.provider, ProviderKind::WebDav);
+    assert_eq!(row.action, Some(SourceAction::SetUp));
+
+    let configured = SourceProfile::WebDav {
+        id: "webdav-1".into(),
+        name: "NAS".into(),
+        base_url: "https://nas.local:5244/dav".into(),
+        root_path: "/Music".into(),
+        username: "alice".into(),
+        password: String::new(),
+        password_in_keyring: true,
+    };
+    let row = SourceRow::derive(&config, &configured, None, IDLE).unwrap();
+    assert_eq!(row.action, Some(SourceAction::Switch));
+    assert!(row.detail.contains("nas.local/Music"));
+}
