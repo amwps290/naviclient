@@ -25,7 +25,13 @@ impl NavidromeApp {
         let random_preview = &random[..random.len().min(columns)];
         let mut cards = Vec::with_capacity(2);
         cards.extend(self.render_home_feature(compact, cx));
-        cards.push(self.render_daily_mix_card(compact, cx));
+        if self
+            .api
+            .as_ref()
+            .is_none_or(|api| api.capabilities().recommendations)
+        {
+            cards.push(self.render_daily_mix_card(compact, cx));
+        }
 
         v_flex()
             .gap(px(tokens::SECTION_GAP))

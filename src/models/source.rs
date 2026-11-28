@@ -1,5 +1,7 @@
 //! Provider identity and source profiles, independent of transport credentials.
 
+use std::path::PathBuf;
+
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,7 @@ pub enum ProviderKind {
     #[default]
     OpenSubsonic,
     Bilibili,
+    LocalFolder,
 }
 
 /// The provider is part of identity, so equal profile IDs cannot cross sources.
@@ -46,6 +49,7 @@ impl SourceId {
         hash.update([match self.provider {
             ProviderKind::OpenSubsonic => 0,
             ProviderKind::Bilibili => 1,
+            ProviderKind::LocalFolder => 2,
         }]);
         hash.update((self.profile_id.len() as u64).to_le_bytes());
         hash.update(self.profile_id.as_bytes());
@@ -96,6 +100,13 @@ pub enum SourceProfile {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         proxy: Option<String>,
     },
+    LocalFolder {
+        id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        roots: Vec<PathBuf>,
+    },
 }
 
 impl SourceProfile {
@@ -105,6 +116,7 @@ impl SourceProfile {
                 SourceId::new(ProviderKind::OpenSubsonic, server_id)
             }
             Self::Bilibili { id, .. } => SourceId::new(ProviderKind::Bilibili, id),
+            Self::LocalFolder { id, .. } => SourceId::new(ProviderKind::LocalFolder, id),
         }
     }
 }
@@ -139,7 +151,7 @@ pub struct PlaybackPolicy {
 impl ProviderKind {
     pub fn playback_policy(self) -> PlaybackPolicy {
         match self {
-            Self::OpenSubsonic => PlaybackPolicy::default(),
+            Self::OpenSubsonic | Self::LocalFolder => PlaybackPolicy::default(),
             Self::Bilibili => PlaybackPolicy {
                 refreshable_addresses: true,
                 authorized_session: true,
@@ -169,6 +181,14 @@ impl ProviderKind {
                 video_favorite_write: true,
                 favorite_read: true,
                 playlist_read: true,
+                ..SourceCapabilities::default()
+            },
+            Self::LocalFolder => SourceCapabilities {
+                library: true,
+                search: true,
+                favorite_read: true,
+                favorite_write: true,
+                lyrics: true,
                 ..SourceCapabilities::default()
             },
         }

@@ -49,7 +49,7 @@ impl SessionState {
     pub(in crate::app) fn bind_source(&mut self, source: SourceId, server_url: Option<&str>) {
         let id = match source.provider {
             ProviderKind::OpenSubsonic => source.profile_id.clone(),
-            ProviderKind::Bilibili => source.cache_namespace(),
+            ProviderKind::Bilibili | ProviderKind::LocalFolder => source.cache_namespace(),
         };
         self.server = Some(SessionServer {
             id: Some(id),

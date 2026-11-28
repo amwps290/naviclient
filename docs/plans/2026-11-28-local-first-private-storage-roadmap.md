@@ -22,20 +22,20 @@
 
 遵循「**先夯实本地存储与离线底座 → 再扩展私有存储接入 → 再沉淀个人资产 → 最后补齐高频体验**」的顺序，拆分为 4 个阶段、12 个可独立交付的模块：
 
-| 阶段 | 编号 | 模块 | 优先级 | 依赖 |
-| :--- | :--- | :--- | :--- | :--- |
-| **Phase 1：本地优先底座** | LP-01 | 本地音乐文件夹音源（`ProviderKind::LocalFolder`） | P0 | 无（直接复用 `MusicSource`） |
-| | LP-02 | 主动离线下载（Pin）与离线可浏览/播放模式 | P0 | 无 |
-| **Phase 2：私有存储扩展** | LP-03 | WebDAV / Alist 私有存储音源（`ProviderKind::WebDav`） | P1 | 复用 LP-01 索引器与标签解析 |
-| | LP-04 | 文件夹目录视图（Folder Browse） | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
-| **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | P1 | 建议在 LP-01 后，也可独立先行 |
-| | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | P2 | 复用现有 `ListeningHistory` |
-| | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | P2 | 无 |
-| **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
-| | LP-09 | 歌曲列表多列排序与局部过滤 | P2 | 无 |
-| | LP-10 | 睡眠定时器（Sleep Timer） | P2 | 无 |
-| | LP-11 | 切歌淡入淡出（Crossfade）与倍速播放 | P2 | Audio Worker 管线扩展 |
-| | LP-12 | 单曲另存到本地 & 本地库标签/封面轻编辑 | P3 | LP-01 / LP-02 |
+| 阶段 | 编号 | 模块 | 状态 | 优先级 | 依赖 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Phase 1：本地优先底座** | LP-01 | 本地音乐文件夹音源（`ProviderKind::LocalFolder`） | ✅ 已完成 | P0 | 无（直接复用 `MusicSource`） |
+| | LP-02 | 主动离线下载（Pin）与离线可浏览/播放模式 | ⬜ 待开发 | P0 | 无 |
+| **Phase 2：私有存储扩展** | LP-03 | WebDAV / Alist 私有存储音源（`ProviderKind::WebDav`） | ⬜ 待开发 | P1 | 复用 LP-01 索引器与标签解析 |
+| | LP-04 | 文件夹目录视图（Folder Browse） | ⬜ 待开发 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
+| **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ⬜ 待开发 | P1 | 建议在 LP-01 后，也可独立先行 |
+| | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ⬜ 待开发 | P2 | 复用现有 `ListeningHistory` |
+| | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ⬜ 待开发 | P2 | 无 |
+| **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ⬜ 待开发 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
+| | LP-09 | 歌曲列表多列排序与局部过滤 | ⬜ 待开发 | P2 | 无 |
+| | LP-10 | 睡眠定时器（Sleep Timer） | ⬜ 待开发 | P2 | 无 |
+| | LP-11 | 切歌淡入淡出（Crossfade）与倍速播放 | ⬜ 待开发 | P2 | Audio Worker 管线扩展 |
+| | LP-12 | 单曲另存到本地 & 本地库标签/封面轻编辑 | ⬜ 待开发 | P3 | LP-01 / LP-02 |
 
 ---
 
@@ -43,7 +43,9 @@
 
 ---
 
-### LP-01：本地音乐文件夹音源（`ProviderKind::LocalFolder`）
+### LP-01：本地音乐文件夹音源（`ProviderKind::LocalFolder`） ✅ 已完成
+
+> **完成说明（2026-11-28）**：已完成 `ProviderKind::LocalFolder`、`src/source/local/` 递归增量扫描与持久化索引（`lofty` 标签/ReplayGain/内嵌封面/内嵌与同目录 `.lrc` 歌词 + 本地收藏持久化）、`HttpResource::local_file` 与 `audio::decoder` 零拷贝本地文件直读/Seek、设置页「本地音乐文件夹」增删改/目录选择器/重扫 UI 及三语 i18n。后续可选增强（文件变更自动监听）可在有需要时叠加。
 
 #### 目标
 让用户无需搭建任何服务器，直接将一个或多个本地目录（含外置硬盘 / 挂载的 SMB 目录）添加为标准音乐源，享有与 OpenSubsonic 一致的专辑/艺术家/流派/搜索/播放/歌词体验。

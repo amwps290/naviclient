@@ -192,6 +192,10 @@ impl NavidromeApp {
                 .new(|cx| InputState::new(window, cx).placeholder("http://127.0.0.1:7890")),
             proxy_name_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("Proxy name (optional)"))),
+            local_folder_name_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Local music"))),
+            local_folder_path_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("/path/to/music"))),
             runtime,
             playback_source,
             playback_server: None,

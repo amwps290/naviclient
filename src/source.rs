@@ -1,6 +1,7 @@
 //! Provider dispatch and resolved media, independent of the application UI.
 
 pub mod bilibili;
+pub mod local;
 mod opensubsonic;
 pub(crate) mod playback;
 mod queries;
@@ -22,6 +23,7 @@ use anyhow::Result;
 pub enum MusicSource {
     OpenSubsonic(OpenSubsonicAdapter),
     Bilibili(bilibili::BilibiliProvider),
+    LocalFolder(local::LocalFolderProvider),
 }
 
 impl MusicSource {
@@ -36,10 +38,23 @@ impl MusicSource {
         )?))
     }
 
+    pub fn local_folder(
+        profile_id: impl Into<String>,
+        name: impl Into<String>,
+        roots: Vec<std::path::PathBuf>,
+    ) -> Self {
+        Self::LocalFolder(local::LocalFolderProvider::new(
+            SourceId::new(ProviderKind::LocalFolder, profile_id),
+            name.into(),
+            roots,
+        ))
+    }
+
     pub fn id(&self) -> &SourceId {
         match self {
             Self::OpenSubsonic(adapter) => adapter.id(),
             Self::Bilibili(provider) => provider.id(),
+            Self::LocalFolder(provider) => provider.id(),
         }
     }
 
@@ -69,6 +84,7 @@ impl MusicSource {
         match self {
             Self::OpenSubsonic(adapter) => adapter.provider().base_url(),
             Self::Bilibili(_) => "https://www.bilibili.com",
+            Self::LocalFolder(_) => "local://folder",
         }
     }
 
@@ -78,7 +94,7 @@ impl MusicSource {
         configured: TranscodingQuality,
     ) -> Result<PlaybackResource> {
         match self {
-            Self::OpenSubsonic(_) => self.resolve_immediate(song, configured),
+            Self::OpenSubsonic(_) | Self::LocalFolder(_) => self.resolve_immediate(song, configured),
             Self::Bilibili(provider) => Ok(provider.resolve_playback(song).await?),
         }
     }
@@ -91,7 +107,9 @@ impl MusicSource {
         configured: TranscodingQuality,
     ) -> Option<Result<PlaybackResource>> {
         match self {
-            Self::OpenSubsonic(_) => Some(self.resolve_immediate(song, configured)),
+            Self::OpenSubsonic(_) | Self::LocalFolder(_) => {
+                Some(self.resolve_immediate(song, configured))
+            }
             Self::Bilibili(_) => None,
         }
     }
@@ -106,6 +124,7 @@ impl MusicSource {
     ) -> Result<PlaybackResource> {
         match self {
             Self::OpenSubsonic(adapter) => adapter.resolve_playback(song, configured),
+            Self::LocalFolder(provider) => provider.resolve_playback(song),
             Self::Bilibili(_) => anyhow::bail!("Bilibili audio must be resolved asynchronously"),
         }
     }

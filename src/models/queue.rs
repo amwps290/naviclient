@@ -242,7 +242,9 @@ impl PlaybackSession {
         }
         match source.provider {
             ProviderKind::OpenSubsonic => server_url.is_some_and(|url| self.matches_server(url)),
-            ProviderKind::Bilibili => self.source.as_ref() == Some(source),
+            ProviderKind::Bilibili | ProviderKind::LocalFolder => {
+                self.source.as_ref() == Some(source)
+            }
         }
     }
     /// Session loading and legacy adoption share the same server identity.

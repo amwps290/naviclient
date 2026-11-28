@@ -14,6 +14,17 @@ impl NavidromeApp {
             self.load_bilibili_home();
             return;
         }
+        if self.browsing_local_folder() {
+            // Load cached index immediately; finish_ping reloads after incremental rescan completes.
+            self.load_artists();
+            self.load_albums();
+            self.load_genres();
+            self.load_favorites();
+            for section in HomeAlbumSection::ALL {
+                self.load_home_albums(section);
+            }
+            return;
+        }
         self.load_artists();
         self.load_albums();
         self.load_genres();

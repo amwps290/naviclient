@@ -84,6 +84,12 @@ impl NavidromeApp {
             Some(SettingsDialog::RemoveBilibili(source)) => {
                 self.render_remove_bilibili_dialog(dialog, source, cx)
             }
+            Some(SettingsDialog::LocalFolder(local)) => {
+                self.render_local_folder_dialog(dialog, local, cx)
+            }
+            Some(SettingsDialog::RemoveLocalFolder(source)) => {
+                self.render_remove_local_folder_dialog(dialog, source, cx)
+            }
             None => dialog,
         }
     }

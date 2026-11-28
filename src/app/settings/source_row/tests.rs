@@ -159,3 +159,33 @@ fn a_profile_for_a_missing_server_has_no_row() {
     };
     assert!(SourceRow::derive(&Config::default(), &profile, None, IDLE).is_none());
 }
+
+#[test]
+fn local_folder_rows_report_setup_switch_scanning_and_connected() {
+    let config = Config::default();
+    let empty = SourceProfile::LocalFolder {
+        id: "local-1".into(),
+        name: "My FLAC".into(),
+        roots: vec![],
+    };
+    let row = SourceRow::derive(&config, &empty, None, IDLE).unwrap();
+    assert_eq!(row.provider, ProviderKind::LocalFolder);
+    assert_eq!(row.action, Some(SourceAction::SetUp));
+
+    let populated = SourceProfile::LocalFolder {
+        id: "local-1".into(),
+        name: "My FLAC".into(),
+        roots: vec![std::path::PathBuf::from("/music/flac")],
+    };
+    let row = SourceRow::derive(&config, &populated, None, IDLE).unwrap();
+    assert_eq!(row.action, Some(SourceAction::Switch));
+    assert!(row.detail.contains("/music/flac"));
+
+    let connected = Connection {
+        current: true,
+        loading: false,
+        connected: Some("42 tracks · 1 folders".into()),
+    };
+    let row = SourceRow::derive(&config, &populated, None, connected).unwrap();
+    assert_eq!((row.health, row.action), (SourceHealth::Connected, None));
+}

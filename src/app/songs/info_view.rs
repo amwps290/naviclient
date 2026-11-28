@@ -415,6 +415,10 @@ impl NavidromeApp {
                                     .text_color(p.text_muted)
                                     .child(if song.bilibili_part.is_some() {
                                         t!("Metadata from Bilibili.")
+                                    } else if song.source.as_ref().is_some_and(|source| {
+                                        source.provider == crate::source::ProviderKind::LocalFolder
+                                    }) {
+                                        t!("Metadata from local file.")
                                     } else {
                                         t!("Metadata from the Navidrome server.")
                                     }),

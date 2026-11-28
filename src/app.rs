@@ -53,6 +53,8 @@ pub struct NavidromeApp {
     bilibili_accounts: HashMap<crate::source::SourceId, settings::bilibili_state::AccountStatus>,
     proxy_url_input: Entity<InputState>,
     proxy_name_input: Entity<InputState>,
+    local_folder_name_input: Entity<InputState>,
+    local_folder_path_input: Entity<InputState>,
     runtime: Runtime,
     api: Option<MusicSource>,
     /// Browsing requests use `api`; transport and reporting retain this handle.

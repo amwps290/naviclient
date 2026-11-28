@@ -1,5 +1,6 @@
 //! Decoder construction, bounded PCM production, and terminal-result classification.
 
+use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
@@ -55,6 +56,15 @@ pub(super) fn play_resource(
     start_position: Duration,
     control: Arc<StreamControl>,
 ) -> Result<PreparedStream> {
+    if let Some(local_path) = resource.local_path() {
+        return play_local_file(
+            local_path,
+            resource.mime_hint(),
+            duration_hint,
+            start_position,
+            control,
+        );
+    }
     log::debug!(
         "preparing audio stream; endpoint={} start_ms={}",
         stream_endpoint(&resource),
@@ -80,12 +90,86 @@ pub(super) fn play_resource(
         builder = builder.with_mime_type(mime_type);
     }
 
-    let mut decoder = builder.build().map_err(|error| {
+    let decoder = builder.build().map_err(|error| {
         log::error!(
             "audio decoder initialization failed; byte_len={byte_len:?} seekable={seekable} mime={mime_type:?}: {error}"
         );
         decoder_failure(&control, format!("unsupported audio format: {error}"))
     })?;
+    finish_prepared_stream(
+        decoder,
+        buffer_progress,
+        duration_hint,
+        start_position,
+        control,
+    )
+}
+
+fn play_local_file(
+    path: &Path,
+    mime_hint: Option<&str>,
+    duration_hint: Option<Duration>,
+    start_position: Duration,
+    control: Arc<StreamControl>,
+) -> Result<PreparedStream> {
+    log::debug!(
+        "preparing local audio file; path={} start_ms={}",
+        path.display(),
+        start_position.as_millis()
+    );
+    control.check()?;
+    let file = File::open(path).map_err(|error| {
+        anyhow!(FailureError::new(
+            StreamFailure::Preparation,
+            format!("failed to open local audio file {}: {error}", path.display())
+        ))
+    })?;
+    let byte_len = file
+        .metadata()
+        .map_err(|error| {
+            anyhow!(FailureError::new(
+                StreamFailure::Preparation,
+                format!("failed to stat local audio file {}: {error}", path.display())
+            ))
+        })?
+        .len();
+    let buffer_progress = Arc::new(BufferProgress::new(byte_len, Some(byte_len)));
+    let buffered = BufReader::with_capacity(STREAM_BUFFER_BYTES.min(256 * 1024), file);
+    let mut builder = Decoder::builder()
+        .with_data(buffered)
+        .with_byte_len(byte_len)
+        .with_seekable(true)
+        .with_gapless(true);
+    let mime = mime_hint.or_else(|| crate::source::local::mime_for_path(path));
+    if let Some(mime) = mime {
+        builder = builder.with_mime_type(mime);
+    }
+    let decoder = builder.build().map_err(|error| {
+        log::error!(
+            "local audio decoder initialization failed; path={} byte_len={byte_len} mime={mime:?}: {error}",
+            path.display()
+        );
+        decoder_failure(&control, format!("unsupported audio format: {error}"))
+    })?;
+    finish_prepared_stream(
+        decoder,
+        buffer_progress,
+        duration_hint,
+        start_position,
+        control,
+    )
+}
+
+fn finish_prepared_stream<R>(
+    mut decoder: Decoder<R>,
+    buffer_progress: Arc<BufferProgress>,
+    duration_hint: Option<Duration>,
+    start_position: Duration,
+    control: Arc<StreamControl>,
+) -> Result<PreparedStream>
+where
+    R: io::Read + io::Seek + Send + Sync + 'static,
+{
     let duration = decoder.total_duration().or(duration_hint);
     log::info!(
         "audio decoder ready; channels={} sample_rate={} duration_ms={:?}",

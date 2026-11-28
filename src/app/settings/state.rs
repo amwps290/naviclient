@@ -1,6 +1,7 @@
 //! Settings overlay state and mutually exclusive shortcut recording sessions.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use crate::global_shortcuts::ValidationError;
 use crate::models::network::{NetworkError, SourceConnection};
@@ -47,6 +48,14 @@ pub(in crate::app) struct ProxyDialog {
     pub(in crate::app) error: Option<NetworkError>,
 }
 
+/// Adding or editing a local music folder source.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct LocalFolderDialog {
+    pub(in crate::app) target: Option<String>,
+    pub(in crate::app) roots: Vec<PathBuf>,
+    pub(in crate::app) error: Option<String>,
+}
+
 /// The one settings dialog that may be open. The window owns the dialog
 /// itself; this state decides its content and whether it should stay open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +64,8 @@ pub(in crate::app) enum SettingsDialog {
     Proxy(ProxyDialog),
     BilibiliLogin,
     RemoveBilibili(SourceId),
+    LocalFolder(LocalFolderDialog),
+    RemoveLocalFolder(SourceId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

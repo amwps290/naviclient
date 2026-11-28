@@ -18,7 +18,9 @@ pub use covers::{
     cache_usage, clear_audio_cache, clear_cover_cache, prune_cover_cache, read_source_cover_cache,
     source_cover_cache_path, write_source_cover_cache, CacheUsage,
 };
-pub use paths::{audio_cache_dir, log_path, prepare_audio_cache_dir, server_scope, source_scope};
+pub use paths::{
+    audio_cache_dir, log_path, prepare_audio_cache_dir, server_scope, source_data_dir, source_scope,
+};
 pub use preferences::{load, save};
 pub use server_cache::{
     load_daily_mix, load_genres_cache, load_source_history, load_source_loudness,

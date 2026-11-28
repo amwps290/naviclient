@@ -100,12 +100,19 @@ impl NavidromeApp {
                 ),
             )
             .child(self.nav_button(View::Genres, Some(self.state.genres.len()), collapsed, cx))
-            .child(self.nav_button(
-                View::Playlists,
-                Some(self.state.playlists.items().len()),
-                collapsed,
-                cx,
-            ))
+            .when(
+                self.api
+                    .as_ref()
+                    .is_none_or(|api| api.capabilities().playlist_read),
+                |this| {
+                    this.child(self.nav_button(
+                        View::Playlists,
+                        Some(self.state.playlists.items().len()),
+                        collapsed,
+                        cx,
+                    ))
+                },
+            )
             .child(self.nav_button(View::Search, None, collapsed, cx))
             .child(footer)
             .into_any_element()

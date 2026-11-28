@@ -53,6 +53,27 @@ impl NavidromeApp {
             return;
         }
 
+        if self.browsing_local_folder() {
+            self.api = self
+                .config
+                .active_source
+                .as_ref()
+                .and_then(|id| crate::app::playback::source_context::configured_source(&self.config, id));
+            self.prune_source_covers();
+            if self.api.is_some() {
+                if self.playback_source.is_none() {
+                    self.playback_source = self.api.clone();
+                    self.load_playback_source_cache();
+                }
+                self.load_browsing_source_cache();
+                self.refresh_library();
+            } else {
+                self.state.status = t!("Add folders to this local music source").to_string();
+                self.state.settings.open = true;
+            }
+            return;
+        }
+
         // 空白条目（刚新增还没填）不是错误：只清空连接，等用户保存地址。
         let configured = self
             .config

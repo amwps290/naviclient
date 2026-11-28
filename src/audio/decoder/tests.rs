@@ -7,6 +7,35 @@ use crate::audio::stream_cache::cache_paths;
 use std::fs;
 
 #[test]
+fn local_file_resource_decodes_and_seeks_directly_without_http_or_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let audio_path = dir.path().join("sample.wav");
+    fs::write(&audio_path, wav()).unwrap();
+    let cache = TestCache::new();
+    let resource = HttpResource::local_file(&audio_path).with_mime_hint(Some("audio/wav".into()));
+
+    let control = StreamControl::new(false);
+    let prepared = play_resource(
+        client(),
+        resource.clone(),
+        &cache.0,
+        "local-key",
+        None,
+        Duration::from_secs(2),
+        control.clone(),
+    )
+    .unwrap();
+    let error = prepared.error.clone();
+    wait_for(|| Arc::strong_count(&control) == 2);
+    // 12s wav seeked to 2s leaves ~10s of 48kHz stereo PCM.
+    let decoded_samples = prepared.source.count();
+    assert!((9 * 48_000 * 2..=11 * 48_000 * 2).contains(&decoded_samples));
+    assert!(control.fully_decoded());
+    assert!(error.lock().unwrap().is_none());
+    assert_eq!(fs::read_dir(&cache.0).unwrap().count(), 0);
+}
+
+#[test]
 fn header_resource_decodes_pcm_with_a_bounded_temporary_cache() {
     use crate::audio::http_stream::resource_tests::{resource, Fixture};
     let cache = TestCache::new();

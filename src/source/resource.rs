@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -58,6 +59,7 @@ pub struct HttpResource {
 #[derive(Clone)]
 struct HttpResourceData {
     url: String,
+    local_path: Option<PathBuf>,
     headers: HeaderMap,
     cache_policy: CachePolicy,
     mime_hint: Option<String>,
@@ -72,6 +74,7 @@ impl HttpResource {
         Self {
             inner: Arc::new(HttpResourceData {
                 url: url.into(),
+                local_path: None,
                 headers: HeaderMap::new(),
                 cache_policy: CachePolicy::Persistent,
                 mime_hint: None,
@@ -81,6 +84,28 @@ impl HttpResource {
                 expires_at: None,
             }),
         }
+    }
+
+    pub fn local_file(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let url = format!("file://{}", path.to_string_lossy());
+        Self {
+            inner: Arc::new(HttpResourceData {
+                url,
+                local_path: Some(path),
+                headers: HeaderMap::new(),
+                cache_policy: CachePolicy::Persistent,
+                mime_hint: None,
+                length_is_estimate: false,
+                route: NetworkRoute::Direct,
+                backups: Vec::new(),
+                expires_at: None,
+            }),
+        }
+    }
+
+    pub fn local_path(&self) -> Option<&Path> {
+        self.inner.local_path.as_deref()
     }
 
     pub fn with_headers(mut self, headers: HeaderMap) -> Self {

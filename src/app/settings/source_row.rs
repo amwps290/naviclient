@@ -183,6 +183,49 @@ impl SourceRow {
                     busy,
                 })
             }
+            SourceProfile::LocalFolder { name, roots, .. } => {
+                let label = if name.trim().is_empty() {
+                    t!("Local music").to_string()
+                } else {
+                    name.trim().to_string()
+                };
+                let folder_summary = match roots.as_slice() {
+                    [] => t!("No folders configured").to_string(),
+                    [single] => single.display().to_string(),
+                    [first, ..] => format!("{} (+{})", first.display(), roots.len() - 1),
+                };
+                let (health, detail, action) = if roots.is_empty() {
+                    (
+                        SourceHealth::Idle,
+                        folder_summary,
+                        Some(SourceAction::SetUp),
+                    )
+                } else if !connection.current {
+                    (
+                        SourceHealth::Idle,
+                        folder_summary,
+                        Some(SourceAction::Switch),
+                    )
+                } else if connection.loading {
+                    (SourceHealth::Busy, t!("Scanning folders…").to_string(), None)
+                } else if let Some(summary) = connection.connected {
+                    (SourceHealth::Connected, summary, None)
+                } else {
+                    (
+                        SourceHealth::Problem,
+                        t!("Folder unavailable").to_string(),
+                        Some(SourceAction::Retry),
+                    )
+                };
+                Some(Self {
+                    label,
+                    provider: ProviderKind::LocalFolder,
+                    detail,
+                    health,
+                    action,
+                    busy: false,
+                })
+            }
         }
     }
 }

@@ -41,7 +41,18 @@ impl NavidromeApp {
         match result {
             Ok(discovery) => {
                 self.update_connection_status();
-                self.load_open_subsonic_info(discovery);
+                if self.browsing_local_folder() {
+                    // Ping completed the incremental folder scan; reload library views with fresh data.
+                    self.load_artists();
+                    self.load_albums();
+                    self.load_genres();
+                    self.load_favorites();
+                    for section in HomeAlbumSection::ALL {
+                        self.load_home_albums(section);
+                    }
+                } else {
+                    self.load_open_subsonic_info(discovery);
+                }
             }
             Err(error) => {
                 let notification = t!("Connection failed: %{error}", error = error).to_string();

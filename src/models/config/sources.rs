@@ -44,7 +44,9 @@ impl Config {
                 SourceProfile::OpenSubsonic { server_id } => {
                     self.servers.iter().any(|server| &server.id == server_id)
                 }
-                SourceProfile::Bilibili { id, .. } => !id.trim().is_empty(),
+                SourceProfile::Bilibili { id, .. } | SourceProfile::LocalFolder { id, .. } => {
+                    !id.trim().is_empty()
+                }
             };
             valid && identities.insert(id)
         });

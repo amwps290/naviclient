@@ -124,6 +124,22 @@ impl NavidromeApp {
                 })
                 .unwrap_or_else(|| "Bilibili".into());
         }
+        if self.browsing_local_folder() {
+            return self
+                .config
+                .sources
+                .iter()
+                .find(|profile| Some(profile.id()) == self.config.active_source)
+                .and_then(|profile| match profile {
+                    crate::source::SourceProfile::LocalFolder { name, .. }
+                        if !name.trim().is_empty() =>
+                    {
+                        Some(name.trim().to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| t!("Local music").to_string());
+        }
         self.config
             .active_profile()
             .map(|profile| profile.label())

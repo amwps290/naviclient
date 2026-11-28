@@ -24,6 +24,9 @@ impl MusicSource {
                     opensubsonic::load(adapter.provider(), self.id().clone(), id, updates.clone())
                         .await
                 }
+                Self::LocalFolder(_) => {
+                    anyhow::bail!("Local folder playlists are not available yet")
+                }
             }
         }
         .await;

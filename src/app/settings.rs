@@ -7,6 +7,7 @@ pub(in crate::app) mod bilibili_view;
 pub(in crate::app) mod components;
 pub(in crate::app) mod desktop_view;
 pub(in crate::app) mod dialogs;
+pub(in crate::app) mod local_folder_dialog;
 pub(in crate::app) mod logs;
 pub(in crate::app) mod lyrics_view;
 pub(in crate::app) mod navigation_view;

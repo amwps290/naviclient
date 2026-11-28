@@ -20,12 +20,32 @@ pub(in crate::app) fn configured_source(config: &Config, id: &SourceId) -> Optio
             .ok()
         }
         crate::source::ProviderKind::Bilibili => None,
+        crate::source::ProviderKind::LocalFolder => {
+            let crate::source::SourceProfile::LocalFolder { id: profile_id, name, roots } = config
+                .sources
+                .iter()
+                .find(|profile| profile.id() == *id)?
+            else {
+                return None;
+            };
+            Some(MusicSource::local_folder(
+                profile_id.clone(),
+                name.clone(),
+                roots.clone(),
+            ))
+        }
     }
 }
 
 impl NavidromeApp {
     pub(in crate::app) fn available_source(&self, id: &SourceId) -> Option<MusicSource> {
         if id.provider == crate::source::ProviderKind::OpenSubsonic {
+            return configured_source(&self.config, id);
+        }
+        if id.provider == crate::source::ProviderKind::LocalFolder {
+            if let Some(existing) = self.source_by_id(id) {
+                return Some(existing.clone());
+            }
             return configured_source(&self.config, id);
         }
         let crate::source::SourceProfile::Bilibili { account_id, .. } = self
@@ -61,6 +81,13 @@ impl NavidromeApp {
             .active_source
             .as_ref()
             .is_some_and(|id| id.provider == crate::source::ProviderKind::Bilibili)
+    }
+
+    pub(in crate::app) fn browsing_local_folder(&self) -> bool {
+        self.config
+            .active_source
+            .as_ref()
+            .is_some_and(|id| id.provider == crate::source::ProviderKind::LocalFolder)
     }
 
     pub(in crate::app) fn switch_bilibili_source(&mut self, id: &SourceId) {
@@ -132,6 +159,20 @@ impl NavidromeApp {
                 .map(ServerProfile::label)
                 .unwrap_or_else(|| "OpenSubsonic".to_string()),
             crate::source::ProviderKind::Bilibili => "Bilibili".to_string(),
+            crate::source::ProviderKind::LocalFolder => self
+                .config
+                .sources
+                .iter()
+                .find(|profile| profile.id() == *api.id())
+                .and_then(|profile| match profile {
+                    crate::source::SourceProfile::LocalFolder { name, .. }
+                        if !name.trim().is_empty() =>
+                    {
+                        Some(name.trim().to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| t!("Local music").to_string()),
         }
     }
 

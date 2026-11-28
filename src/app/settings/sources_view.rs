@@ -80,6 +80,13 @@ impl NavidromeApp {
                                             this.open_bilibili_login(None, window, cx);
                                         })),
                                 )
+                                .item(
+                                    PopupMenuItem::new(t!("Local music folder"))
+                                        .icon(AppIcon::Folder)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_local_folder_dialog(None, window, cx);
+                                        })),
+                                )
                             })
                             .expect("app owns source menu")
                         }),
@@ -96,6 +103,21 @@ impl NavidromeApp {
         let connected = match profile {
             SourceProfile::OpenSubsonic { .. } => summary.map(|(name, _)| name),
             SourceProfile::Bilibili { .. } => self.api.is_some().then(|| "Bilibili".into()),
+            SourceProfile::LocalFolder { roots, .. } => match self.api.as_ref() {
+                Some(MusicSource::LocalFolder(provider)) if current => {
+                    let tracks = provider.track_count();
+                    let folders = roots.len();
+                    Some(
+                        t!(
+                            "%{tracks} tracks · %{folders} folders",
+                            tracks = tracks,
+                            folders = folders
+                        )
+                        .to_string(),
+                    )
+                }
+                _ => None,
+            },
         }
         .filter(|_| current);
         SourceRow::derive(
@@ -132,6 +154,11 @@ impl NavidromeApp {
             .flatten()
             .map(|(_, details)| details);
         let connection = self.connection_label(&self.config.source_connection(&source));
+        let detail_line = if row.provider == ProviderKind::LocalFolder {
+            row.detail.clone()
+        } else {
+            format!("{} · {}", row.detail, connection)
+        };
         let action = row.action.map(|action| {
             let target = source.clone();
             let id = SharedString::from(format!("source-action-{key}"));
@@ -192,6 +219,7 @@ impl NavidromeApp {
                         Icon::new(match row.provider {
                             ProviderKind::OpenSubsonic => AppIcon::Server,
                             ProviderKind::Bilibili => AppIcon::Video,
+                            ProviderKind::LocalFolder => AppIcon::Folder,
                         })
                         .with_size(px(17.0))
                         .text_color(if current {
@@ -240,12 +268,7 @@ impl NavidromeApp {
                             .text_xs()
                             .text_color(p.text_secondary)
                             .child(div().size(px(7.0)).flex_none().rounded_full().bg(dot))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(format!("{} · {}", row.detail, connection)),
-                            )
+                            .child(div().min_w_0().truncate().child(detail_line))
                             .when_some(details, |line, details| {
                                 line.child(
                                     div()
@@ -301,6 +324,14 @@ impl NavidromeApp {
                 // Switching from settings keeps settings open, as for servers.
                 self.state.settings.open = true;
             }
+            (ProviderKind::LocalFolder, SourceAction::SetUp | SourceAction::SignIn) => {
+                self.open_local_folder_dialog(Some(&source.profile_id), window, cx)
+            }
+            (ProviderKind::LocalFolder, SourceAction::Retry) => self.reconnect_active_server(),
+            (ProviderKind::LocalFolder, SourceAction::Switch) => {
+                self.switch_local_folder_source(source);
+                self.state.settings.open = true;
+            }
         }
     }
 
@@ -329,6 +360,7 @@ impl NavidromeApp {
                         PopupMenuItem::new(match head.provider {
                             ProviderKind::OpenSubsonic => t!("Edit connection"),
                             ProviderKind::Bilibili => t!("Sign in again"),
+                            ProviderKind::LocalFolder => t!("Edit folders"),
                         })
                         .icon(AppIcon::Pencil)
                         .on_click(cx.listener(
@@ -339,28 +371,48 @@ impl NavidromeApp {
                                 ProviderKind::Bilibili => {
                                     this.open_bilibili_login(Some(edit.clone()), window, cx)
                                 }
+                                ProviderKind::LocalFolder => {
+                                    this.open_local_folder_dialog(Some(&edit.profile_id), window, cx)
+                                }
                             },
                         )),
                     );
+                    let menu = if head.provider == ProviderKind::LocalFolder {
+                        let rescan = head.clone();
+                        menu.item(
+                            PopupMenuItem::new(t!("Rescan folders"))
+                                .icon(AppIcon::Refresh)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.rescan_local_folder_source(&rescan);
+                                    cx.notify();
+                                })),
+                        )
+                    } else {
+                        menu
+                    };
                     (menu, can_remove)
                 })
                 .expect("app owns source menu");
             let (menu, can_remove) = menu;
-            let sub_app = app.clone();
-            let sub_source = source.clone();
-            let menu = menu.submenu_with_icon(
-                Some(Icon::new(AppIcon::Globe)),
-                t!("Connection"),
-                window,
-                cx,
-                move |submenu, _, cx| {
-                    sub_app
-                        .update(cx, |this, cx| {
-                            this.connection_menu(submenu, &sub_source, cx)
-                        })
-                        .expect("app owns connection menu")
-                },
-            );
+            let menu = if source.provider == ProviderKind::LocalFolder {
+                menu
+            } else {
+                let sub_app = app.clone();
+                let sub_source = source.clone();
+                menu.submenu_with_icon(
+                    Some(Icon::new(AppIcon::Globe)),
+                    t!("Connection"),
+                    window,
+                    cx,
+                    move |submenu, _, cx| {
+                        sub_app
+                            .update(cx, |this, cx| {
+                                this.connection_menu(submenu, &sub_source, cx)
+                            })
+                            .expect("app owns connection menu")
+                    },
+                )
+            };
             let remove = source.clone();
             app.update(cx, move |_, cx| {
                 menu.separator().item(
@@ -374,6 +426,9 @@ impl NavidromeApp {
                                 }
                                 ProviderKind::Bilibili => {
                                     this.confirm_remove_bilibili(remove.clone(), window, cx)
+                                }
+                                ProviderKind::LocalFolder => {
+                                    this.confirm_remove_local_folder(remove.clone(), window, cx)
                                 }
                             }),
                         ),

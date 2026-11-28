@@ -14,8 +14,13 @@ pub(super) fn config_path() -> PathBuf {
 }
 
 /// 配置目录（会话、响度、流派缓存都放在这里）；不可用时退回当前目录。
-pub(super) fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     project_config_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// 单个非 OpenSubsonic 音乐源的持久化数据目录。
+pub fn source_data_dir(source: &SourceId) -> PathBuf {
+    config_dir().join("sources").join(source.cache_namespace())
 }
 
 fn project_config_dir() -> Option<PathBuf> {

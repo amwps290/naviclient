@@ -35,6 +35,8 @@ url = "2"
 unicode-normalization = "0.1"
 biquad = "0.6.0"
 base64 = "0.22"
+lofty = "0.25"
+walkdir = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # 系统通知：D-Bus org.freedesktop.Notifications（服务器端显示封面图）。
