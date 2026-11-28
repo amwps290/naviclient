@@ -1,17 +1,161 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-      <defs>
-        <linearGradient id="sky" x1=".1" y1="0" x2=".95" y2="1"><stop stop-color="#f4eadc"/><stop offset=".55" stop-color="#e5d7d6"/><stop offset="1" stop-color="#c6c5d9"/></linearGradient>
-        <radialGradient id="glow" cx=".8" cy=".17" r=".7"><stop stop-color="#fff7df" stop-opacity=".9"/><stop offset="1" stop-color="#fff7df" stop-opacity="0"/></radialGradient>
-        <linearGradient id="violet" x1=".08" y1=".3" x2=".9" y2=".8"><stop stop-color="#555575"/><stop offset=".38" stop-color="#777da6"/><stop offset=".71" stop-color="#9295b8"/><stop offset="1" stop-color="#b3b1c6"/></linearGradient>
-        <linearGradient id="cream" x1=".06" y1="1" x2=".9" y2=".16"><stop stop-color="#cf9788"/><stop offset=".45" stop-color="#e5c0ab"/><stop offset=".8" stop-color="#f6e5cb"/><stop offset="1" stop-color="#fdf2d9"/></linearGradient>
-        <linearGradient id="edge" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#fff6e9" stop-opacity="0"/><stop offset=".68" stop-color="#fff6e9" stop-opacity=".5"/><stop offset="1" stop-color="#fff6e9" stop-opacity=".1"/></linearGradient>
-        <radialGradient id="orb" cx=".28" cy=".26" r=".8"><stop stop-color="#e9b99e"/><stop offset="1" stop-color="#c58b87"/></radialGradient>
-        <filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#605279" flood-opacity=".15"/></filter>
-        <filter id="orb-shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="-2" dy="8" stdDeviation="7" flood-color="#8d6c7d" flood-opacity=".12"/></filter>
-      </defs>
-      <path fill="url(#sky)" d="M0 0h512v512H0z"/><path fill="url(#glow)" d="M0 0h512v512H0z"/>
-      <circle cx="377" cy="129" r="49" fill="url(#orb)" filter="url(#orb-shadow)"/>
-      <path d="M-71 355C32 117 171 134 242 278S425 383 573 156" fill="none" stroke="url(#violet)" stroke-width="126" stroke-linecap="round" filter="url(#soft)"/>
-      <path d="M-49 460C8 288 112 331 193 371S419 311 558 94" fill="none" stroke="url(#cream)" stroke-width="78" stroke-linecap="round" filter="url(#soft)"/>
-      <path d="M-43 423C18 262 122 297 209 335S432 275 548 78" fill="none" stroke="url(#edge)" stroke-width="1.7" stroke-linecap="round"/>
-    </svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Warm fine-art cotton paper backdrop -->
+    <linearGradient id="paper-bg" x1="0.06" y1="0.02" x2="0.94" y2="0.98">
+      <stop offset="0%" stop-color="#F7EFE4"/>
+      <stop offset="52%" stop-color="#EFE3D6"/>
+      <stop offset="100%" stop-color="#E2D1C4"/>
+    </linearGradient>
+
+    <!-- Soft gallery top-right warm sunlight -->
+    <radialGradient id="gallery-light" cx="0.78" cy="0.18" r="0.78">
+      <stop offset="0%" stop-color="#FFF9EE" stop-opacity="0.92"/>
+      <stop offset="58%" stop-color="#F9E5D2" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#E4CFC1" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle warm rose wash in lower-left -->
+    <radialGradient id="rose-wash" cx="0.20" cy="0.84" r="0.68">
+      <stop offset="0%" stop-color="#D98B98" stop-opacity="0.34"/>
+      <stop offset="60%" stop-color="#C97383" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#E2D1C4" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Deep espresso-charcoal vinyl disc -->
+    <radialGradient id="charcoal-disc" cx="0.34" cy="0.30" r="0.76">
+      <stop offset="0%" stop-color="#37302D"/>
+      <stop offset="52%" stop-color="#221D1B"/>
+      <stop offset="100%" stop-color="#14100F"/>
+    </radialGradient>
+
+    <!-- Velvety rose-burgundy sculptural wave -->
+    <linearGradient id="burgundy-arc" x1="0.10" y1="0.12" x2="0.90" y2="0.88">
+      <stop offset="0%" stop-color="#D9527D"/>
+      <stop offset="48%" stop-color="#B53660"/>
+      <stop offset="100%" stop-color="#832142"/>
+    </linearGradient>
+
+    <!-- Dusty blush-to-champagne acoustic ribbon -->
+    <linearGradient id="blush-wave" x1="0.05" y1="0.88" x2="0.92" y2="0.15">
+      <stop offset="0%" stop-color="#C86D7C"/>
+      <stop offset="50%" stop-color="#DFA294"/>
+      <stop offset="100%" stop-color="#F3D2A9"/>
+    </linearGradient>
+
+    <!-- Luminous champagne-amber sun orb -->
+    <radialGradient id="amber-orb" cx="0.32" cy="0.28" r="0.78">
+      <stop offset="0%" stop-color="#FDEBC8"/>
+      <stop offset="50%" stop-color="#E8BA7E"/>
+      <stop offset="100%" stop-color="#C68652"/>
+    </radialGradient>
+
+    <!-- Warm cream label gradient -->
+    <radialGradient id="medallion-cream" cx="0.32" cy="0.28" r="0.82">
+      <stop offset="0%" stop-color="#FFF8EE"/>
+      <stop offset="60%" stop-color="#F5E9DA"/>
+      <stop offset="100%" stop-color="#E8D6C3"/>
+    </radialGradient>
+
+    <!-- Fine gold hairline -->
+    <linearGradient id="gold-line" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFF6E6" stop-opacity="0.85"/>
+      <stop offset="50%" stop-color="#E6BA82" stop-opacity="0.90"/>
+      <stop offset="100%" stop-color="#B53660" stop-opacity="0.45"/>
+    </linearGradient>
+
+    <filter id="sheen-blur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="32"/>
+    </filter>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#3A2227" flood-opacity="0.22"/>
+    </filter>
+    <filter id="orb-shadow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="-4" dy="14" stdDeviation="16" flood-color="#582633" flood-opacity="0.24"/>
+    </filter>
+    <filter id="disc-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#1E1315" flood-opacity="0.28"/>
+    </filter>
+
+    <clipPath id="inner-disc-clip">
+      <circle cx="512" cy="512" r="338"/>
+    </clipPath>
+    <clipPath id="medallion-clip">
+      <circle cx="512" cy="512" r="132"/>
+    </clipPath>
+  </defs>
+
+  <!-- Opaque warm cotton-paper background -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#paper-bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#gallery-light)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#rose-wash)"/>
+
+  <!-- Subtle outer editorial compass rings -->
+  <circle cx="512" cy="512" r="446" fill="none" stroke="#8C6E63" stroke-opacity="0.15" stroke-width="2"/>
+  <circle cx="512" cy="512" r="392" fill="none" stroke="#B53660" stroke-opacity="0.12" stroke-width="1.6"/>
+
+  <!-- Sweeping soft blush acoustic wave behind the disc -->
+  <path d="M -80 738 C 145 556, 310 696, 512 512 C 714 328, 860 444, 1104 262"
+        fill="none" stroke="url(#blush-wave)" stroke-width="132" stroke-linecap="round" opacity="0.64" filter="url(#soft-shadow)"/>
+
+  <!-- Luminous warm amber sun orb placed cleanly in the upper-right composition -->
+  <g filter="url(#orb-shadow)">
+    <circle cx="806" cy="218" r="70" fill="url(#amber-orb)"/>
+    <circle cx="806" cy="218" r="69" fill="none" stroke="#FFF6E6" stroke-opacity="0.55" stroke-width="2"/>
+  </g>
+
+  <!-- Centered matte charcoal vinyl disc (aligned with center for circular turntable crop) -->
+  <g filter="url(#disc-shadow)">
+    <circle cx="512" cy="512" r="338" fill="url(#charcoal-disc)"/>
+  </g>
+
+  <g clip-path="url(#inner-disc-clip)">
+    <!-- Soft blurred diagonal warm studio sheen on the matte charcoal vinyl -->
+    <g filter="url(#sheen-blur)">
+      <path d="M 512 512 L 120 220 L 340 110 Z" fill="#FFF3E5" fill-opacity="0.24"/>
+      <path d="M 512 512 L 904 804 L 684 914 Z" fill="#FFF3E5" fill-opacity="0.18"/>
+    </g>
+
+    <!-- Whisper-fine concentric vinyl grooves -->
+    <g fill="none">
+      <circle cx="512" cy="512" r="318" stroke="#FAF0E4" stroke-opacity="0.13" stroke-width="2"/>
+      <circle cx="512" cy="512" r="294" stroke="#FAF0E4" stroke-opacity="0.075" stroke-width="1.6"/>
+      <circle cx="512" cy="512" r="270" stroke="#FAF0E4" stroke-opacity="0.11" stroke-width="1.8"/>
+      <circle cx="512" cy="512" r="246" stroke="#FAF0E4" stroke-opacity="0.07" stroke-width="1.6"/>
+      <circle cx="512" cy="512" r="222" stroke="#FAF0E4" stroke-opacity="0.095" stroke-width="1.8"/>
+      <circle cx="512" cy="512" r="198" stroke="#FAF0E4" stroke-opacity="0.07" stroke-width="1.6"/>
+    </g>
+
+    <!-- Sculptural rose-burgundy crescent sweeping across the lower-right half of the vinyl -->
+    <path d="M 242 746 C 362 572, 540 536, 714 370 C 788 300, 860 318, 888 438 C 920 574, 840 766, 684 844 C 514 928, 314 880, 242 746 Z"
+          fill="url(#burgundy-arc)" opacity="0.93" filter="url(#soft-shadow)"/>
+
+    <!-- Fine luminous champagne-gold acoustic arc accent -->
+    <path d="M 218 688 C 344 514, 526 486, 718 318"
+          fill="none" stroke="url(#gold-line)" stroke-width="4.5" stroke-linecap="round"/>
+
+    <!-- Outer matte rim -->
+    <circle cx="512" cy="512" r="336" fill="none" stroke="#FFF4E8" stroke-opacity="0.18" stroke-width="3"/>
+  </g>
+
+  <!-- Central warm-cream vinyl medallion (clean dual-tone split, zero element collision) -->
+  <g filter="url(#orb-shadow)">
+    <circle cx="512" cy="512" r="132" fill="url(#medallion-cream)"/>
+  </g>
+  <g clip-path="url(#medallion-clip)">
+    <!-- Graceful rose-burgundy lower-right sweep echoing the outer vinyl wave -->
+    <path d="M 370 598 C 446 530, 526 518, 636 410 L 670 670 L 370 670 Z"
+          fill="url(#burgundy-arc)" opacity="0.92"/>
+    <!-- Delicate inner editorial gold arc -->
+    <path d="M 374 590 C 448 522, 528 510, 636 404"
+          fill="none" stroke="#F8E0BC" stroke-opacity="0.80" stroke-width="3"/>
+    <!-- Subtle inner hairline ring -->
+    <circle cx="512" cy="512" r="102" fill="none" stroke="#8C6E63" stroke-opacity="0.20" stroke-width="1.8"/>
+  </g>
+
+  <!-- Crisp champagne-gold outer ring around medallion -->
+  <circle cx="512" cy="512" r="132" fill="none" stroke="url(#gold-line)" stroke-width="4.5"/>
+
+  <!-- Clean centered spindle -->
+  <circle cx="512" cy="512" r="25" fill="#1E1917" stroke="#F8E7D2" stroke-opacity="0.45" stroke-width="2.5"/>
+  <circle cx="512" cy="512" r="9.5" fill="url(#amber-orb)"/>
+</svg>
