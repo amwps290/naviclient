@@ -353,7 +353,6 @@ impl NavidromeApp {
                         )
                         .disabled(!self.state.song_scope_ready(scope))
                         .text_color(if current { p.brand } else { p.text_secondary })
-                        .hover(move |style| style.text_color(p.brand))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.click_song_row(target, SongRowClickAction::Play);

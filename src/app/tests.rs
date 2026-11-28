@@ -61,3 +61,106 @@ fn applying_theme_twice_changes_nothing(cx: &mut gpui_kit::TestAppContext) {
         assert_eq!(cx.theme().primary, first);
     });
 }
+
+#[gpui_pre::test]
+fn button_recipes_render_without_duplicate_hover_styles(cx: &mut gpui_kit::TestAppContext) {
+    use crate::app::style::buttons::{
+        capsule_button, capsule_button_sm, capsule_icon_button, danger_button,
+        danger_surface_button, ghost_button, icon_button, pill_filter_button, primary_button,
+        round_play_button, surface_button, toggle_icon_button, ButtonExt,
+    };
+    use crate::assets::{AppIcon, PlayerIcon};
+    use gpui_kit::component::Disableable;
+    use gpui_kit::prelude::ParentElement;
+    use gpui_kit::{div, Context, IntoElement, Render, Window};
+
+    struct ButtonShowcase;
+    impl Render for ButtonShowcase {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .child(round_play_button("rp", PlayerIcon::Play, "Play", 40.0, cx))
+                .child(icon_button("ic", PlayerIcon::Play, "Play", 28.0))
+                .child(icon_button("ic-dis", PlayerIcon::Play, "Play", 28.0).disabled(true))
+                .child(toggle_icon_button(
+                    "tg-off",
+                    AppIcon::Shuffle,
+                    "Shuffle",
+                    false,
+                    32.0,
+                    cx,
+                ))
+                .child(toggle_icon_button(
+                    "tg-on",
+                    AppIcon::Shuffle,
+                    "Shuffle",
+                    true,
+                    32.0,
+                    cx,
+                ))
+                .child(capsule_button("cap").label("Append"))
+                .child(capsule_button_sm("cap-sm").label("Append"))
+                .child(capsule_icon_button("cap-ic", AppIcon::Queue, "Queue", 32.0))
+                .child(pill_filter_button("pill-off", "All", false, cx))
+                .child(pill_filter_button("pill-on", "All", true, cx))
+                .child(primary_button("pri").label("Save").compact_action())
+                .child(surface_button("sur").label("Open").compact_action())
+                .child(ghost_button("gho").label("Delete").compact_action())
+                .child(danger_button("dan").label("Remove").compact_action())
+                .child(
+                    danger_surface_button("dsur")
+                        .label("Clear")
+                        .compact_action(),
+                )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        Theme::change(ThemeMode::Light, None, cx);
+        crate::app::apply_app_theme(cx);
+    });
+    let (_, window) = cx.add_window_view(|_, _| ButtonShowcase);
+    window.update(|window, cx| {
+        window.draw(cx).clear(cx);
+    });
+}
+
+#[gpui_pre::test]
+fn song_row_and_playlist_buttons_render_without_hover_panic(cx: &mut gpui_kit::TestAppContext) {
+    use crate::app::style::buttons::{ghost_button, icon_button, ButtonExt};
+    use crate::assets::PlayerIcon;
+    use gpui_kit::component::Disableable;
+    use gpui_kit::prelude::{ParentElement, Styled};
+    use gpui_kit::{div, px, Context, IntoElement, Render, Window};
+
+    struct RowButtonsProbe;
+    impl Render for RowButtonsProbe {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let p = palette(cx);
+            div()
+                .child(
+                    icon_button("play-song-row", PlayerIcon::Play, "Play", 26.0)
+                        .disabled(false)
+                        .text_color(p.text_secondary),
+                )
+                .child(
+                    ghost_button("delete-playlist")
+                        .label("Delete")
+                        .rounded(px(9999.0))
+                        .compact_action()
+                        .text_color(cx.theme().danger)
+                        .disabled(false),
+                )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        Theme::change(ThemeMode::Light, None, cx);
+        crate::app::apply_app_theme(cx);
+    });
+    let (_, window) = cx.add_window_view(|_, _| RowButtonsProbe);
+    window.update(|window, cx| {
+        window.draw(cx).clear(cx);
+    });
+}

@@ -442,8 +442,7 @@ impl NavidromeApp {
                                 .label(t!("Delete"))
                                 .rounded(px(tokens::radius::FULL))
                                 .compact_action()
-                                .text_color(palette(cx).text_secondary)
-                                .hover(|style| style.text_color(cx.theme().danger))
+                                .text_color(cx.theme().danger)
                                 .disabled(edit_disabled)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.delete_playlist(delete.clone(), window, cx)

@@ -10,8 +10,7 @@ use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::{box_shadow, ActiveTheme, Disableable, Icon, Selectable, Sizable};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    hsla, px, App, BoxShadow, ElementId, FontWeight, InteractiveElement, ParentElement,
-    SharedString, Styled,
+    hsla, px, App, BoxShadow, ElementId, FontWeight, ParentElement, SharedString, Styled,
 };
 
 use super::tokens::{palette, radius};
@@ -189,7 +188,6 @@ pub(in crate::app) fn toggle_icon_button(
     button.w(px(size)).h(px(size)).when(active, |this| {
         this.border_1()
             .border_color(p.brand.opacity(if dark { 0.30 } else { 0.20 }))
-            .hover(move |style| style.bg(p.brand_soft_hover).text_color(p.brand_hover))
     })
 }
 
@@ -259,7 +257,6 @@ pub(in crate::app) fn pill_filter_button(
         .when(active, |this| {
             this.border_1()
                 .border_color(p.brand.opacity(if dark { 0.28 } else { 0.18 }))
-                .hover(move |style| style.bg(p.brand_soft_hover).text_color(p.brand_hover))
         })
 }
 

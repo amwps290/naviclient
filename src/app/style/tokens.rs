@@ -104,6 +104,7 @@ pub(in crate::app) struct Palette {
     pub(in crate::app) text_secondary: Hsla,
     pub(in crate::app) text_muted: Hsla,
     pub(in crate::app) brand: Hsla,
+    #[allow(dead_code)]
     pub(in crate::app) brand_hover: Hsla,
     pub(in crate::app) brand_soft: Hsla,
     pub(in crate::app) brand_soft_hover: Hsla,
