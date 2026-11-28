@@ -10,6 +10,7 @@ pub(in crate::app) enum SongScope {
     AlbumDetail,
     ArtistTop,
     PlaylistDetail,
+    LocalPlaylist,
     Favorites,
     Folder,
     Search,
@@ -23,6 +24,7 @@ impl SongScope {
             Self::AlbumDetail => "album-detail",
             Self::ArtistTop => "artist-top",
             Self::PlaylistDetail => "playlist-detail",
+            Self::LocalPlaylist => "local-playlist",
             Self::Favorites => "favorites",
             Self::Folder => "folder",
             Self::Search => "search",
@@ -46,6 +48,7 @@ impl SongScope {
             View::AlbumDetail => Some(Self::AlbumDetail),
             View::ArtistDetail => Some(Self::ArtistTop),
             View::PlaylistDetail => Some(Self::PlaylistDetail),
+            View::LocalPlaylistDetail => Some(Self::LocalPlaylist),
             View::Favorites => Some(Self::Favorites),
             View::Folders => Some(Self::Folder),
             View::Search => Some(Self::Search),
@@ -65,22 +68,27 @@ impl SongScope {
     pub(in crate::app) fn fills_viewport(self) -> bool {
         matches!(
             self,
-            Self::AlbumDetail | Self::PlaylistDetail | Self::Queue | Self::History
+            Self::AlbumDetail
+                | Self::PlaylistDetail
+                | Self::LocalPlaylist
+                | Self::Queue
+                | Self::History
         )
     }
 
     pub(in crate::app) fn queue_origin(self) -> QueueOrigin {
         match self {
-            Self::PlaylistDetail => QueueOrigin::Playlist,
+            Self::PlaylistDetail | Self::LocalPlaylist => QueueOrigin::Playlist,
             _ => QueueOrigin::Manual,
         }
     }
 
     #[cfg(test)]
-    pub(in crate::app) const ALL: [Self; 8] = [
+    pub(in crate::app) const ALL: [Self; 9] = [
         Self::AlbumDetail,
         Self::ArtistTop,
         Self::PlaylistDetail,
+        Self::LocalPlaylist,
         Self::Favorites,
         Self::Folder,
         Self::Search,

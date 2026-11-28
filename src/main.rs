@@ -16,6 +16,7 @@ mod global_shortcuts;
 #[cfg(test)]
 mod i18n_tests;
 mod import;
+mod local_playlists;
 mod logging;
 mod lyrics;
 mod media_session;

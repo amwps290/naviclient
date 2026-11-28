@@ -13,7 +13,7 @@ impl View {
             Self::Albums | Self::AlbumDetail => (t!("Albums"), Icon::new(AppIcon::Albums)),
             Self::Genres | Self::GenreDetail => (t!("Genres"), Icon::new(AppIcon::Genres)),
             Self::Folders => (t!("Folders"), Icon::new(AppIcon::Folder)),
-            Self::Playlists | Self::PlaylistDetail => {
+            Self::Playlists | Self::PlaylistDetail | Self::LocalPlaylistDetail => {
                 (t!("Playlists"), Icon::new(AppIcon::Playlists))
             }
             Self::Search => (t!("Search"), Icon::new(KitIcon::Search)),
@@ -107,19 +107,12 @@ impl NavidromeApp {
                     .is_none_or(|api| api.capabilities().folders),
                 |this| this.child(self.nav_button(View::Folders, None, collapsed, cx)),
             )
-            .when(
-                self.api
-                    .as_ref()
-                    .is_none_or(|api| api.capabilities().playlist_read),
-                |this| {
-                    this.child(self.nav_button(
-                        View::Playlists,
-                        Some(self.state.playlists.items().len()),
-                        collapsed,
-                        cx,
-                    ))
-                },
-            )
+            .child(self.nav_button(
+                View::Playlists,
+                Some(self.state.playlists.items().len() + self.local_playlists.list().len()),
+                collapsed,
+                cx,
+            ))
             .child(self.nav_button(View::Search, None, collapsed, cx))
             .child(footer)
             .into_any_element()

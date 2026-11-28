@@ -82,6 +82,29 @@ impl PlaybackQueue {
         }
         true
     }
+
+    /// Fill in `source` only for legacy entries without an explicit owner,
+    /// preserving heterogeneous owners for cross-source playlists.
+    pub fn bind_missing_sources(&mut self, default_source: &SourceId) {
+        for entry in &mut self.entries {
+            if entry.song.source.is_none() {
+                entry.song.source = Some(default_source.clone());
+            }
+        }
+    }
+
+    /// Returns whether the queue contains tracks explicitly owned by more than one source.
+    pub fn has_mixed_sources(&self) -> bool {
+        let mut first: Option<&SourceId> = None;
+        for source in self.songs().filter_map(|song| song.source.as_ref()) {
+            match first {
+                None => first = Some(source),
+                Some(existing) if existing != source => return true,
+                _ => {}
+            }
+        }
+        false
+    }
     pub fn from_songs(songs: Vec<Song>, origin: QueueOrigin) -> Self {
         Self {
             entries: songs

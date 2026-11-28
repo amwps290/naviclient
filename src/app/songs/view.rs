@@ -249,6 +249,15 @@ impl NavidromeApp {
                 cx.notify();
             })),
         )
+        .child(
+            ghost_button(SharedString::from(format!("multi-local-playlist-{scope}")))
+                .label(t!("Add to local playlist…"))
+                .compact_action()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let songs = this.selected_songs(scope);
+                    this.choose_local_playlist(songs, window, cx);
+                })),
+        )
         .when(capabilities.playlist_write, |this| {
             this.child(
                 ghost_button(SharedString::from(format!("multi-playlist-{scope}")))

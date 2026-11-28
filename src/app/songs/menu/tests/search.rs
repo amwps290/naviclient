@@ -39,6 +39,7 @@ fn filtered_menu_captures_full_order_and_original_duplicate_position() {
         index,
         playlist,
         playlist_target,
+        ..
     } = context.source
     else {
         panic!("library menu expected")

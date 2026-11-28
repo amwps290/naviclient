@@ -21,6 +21,13 @@ pub(in crate::app) fn configured_source(config: &Config, id: &SourceId) -> Optio
         }
         crate::source::ProviderKind::Bilibili => None,
         crate::source::ProviderKind::LocalFolder => {
+            if id.profile_id == crate::local_playlists::EXTERNAL_FILES_PROFILE_ID {
+                return Some(MusicSource::local_folder(
+                    id.profile_id.clone(),
+                    "Local files".to_string(),
+                    Vec::new(),
+                ));
+            }
             let crate::source::SourceProfile::LocalFolder { id: profile_id, name, roots } = config
                 .sources
                 .iter()

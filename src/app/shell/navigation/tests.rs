@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{LyricLine, Lyrics};
 
-const VIEWS: [View; 12] = [
+const VIEWS: [View; 13] = [
     View::Home,
     View::Favorites,
     View::Artists,
@@ -13,6 +13,7 @@ const VIEWS: [View; 12] = [
     View::ArtistDetail,
     View::AlbumDetail,
     View::PlaylistDetail,
+    View::LocalPlaylistDetail,
     View::NowPlaying,
 ];
 
@@ -178,7 +179,7 @@ fn escape_closes_exactly_one_layer_for_every_view_scope_and_overlay_combination(
                         View::ArtistDetail => View::Artists,
                         View::AlbumDetail => View::Albums,
                         View::GenreDetail => View::Genres,
-                        View::PlaylistDetail => View::Playlists,
+                        View::PlaylistDetail | View::LocalPlaylistDetail => View::Playlists,
                         View::NowPlaying => View::GenreDetail,
                         _ => view,
                     }

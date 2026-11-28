@@ -69,6 +69,11 @@ impl NavidromeApp {
         let Some(api) = self.playback_source.as_ref() else {
             return;
         };
+        // Cross-source handoffs switch `playback_source` cleanly at track end
+        // rather than gaplessly preloading under the previous source's handle.
+        if !song.belongs_to(api.id()) {
+            return;
+        }
         let media = crate::source::MediaKey::new(api.id().clone(), &song.id);
         if self
             .preload_resolution

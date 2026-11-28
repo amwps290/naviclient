@@ -154,7 +154,7 @@ fn row_requests_preserve_each_scopes_queue_extent_start_index_and_origin() {
                     playback,
                     &songs,
                     index,
-                    if scope == SongScope::PlaylistDetail {
+                    if matches!(scope, SongScope::PlaylistDetail | SongScope::LocalPlaylist) {
                         QueueOrigin::Playlist
                     } else {
                         QueueOrigin::Manual
@@ -199,7 +199,7 @@ fn selection_requests_keep_row_order_duplicates_and_filter_every_shrinking_list_
                         playback.unwrap(),
                         &expected,
                         0,
-                        if scope == SongScope::PlaylistDetail {
+                        if matches!(scope, SongScope::PlaylistDetail | SongScope::LocalPlaylist) {
                             QueueOrigin::Playlist
                         } else {
                             QueueOrigin::Manual

@@ -58,6 +58,7 @@ impl NavidromeApp {
                 View::Home
                     | View::Playlists
                     | View::PlaylistDetail
+                    | View::LocalPlaylistDetail
                     | View::Search
                     | View::NowPlaying
             ) {
@@ -81,7 +82,15 @@ impl NavidromeApp {
             View::Albums if self.state.albums.is_empty() => self.load_albums(),
             View::Genres if self.state.genres.is_empty() => self.load_genres(),
             View::Folders if !self.state.folders.loaded_once() => self.load_current_folder(),
-            View::Playlists if self.state.playlists.items().is_empty() => self.load_playlists(),
+            View::Playlists
+                if self.state.playlists.items().is_empty()
+                    && self
+                        .api
+                        .as_ref()
+                        .is_some_and(|api| api.capabilities().playlist_read) =>
+            {
+                self.load_playlists()
+            }
             View::Favorites => self.load_favorites(),
             _ => {}
         }
@@ -162,6 +171,9 @@ impl NavidromeApp {
                 } else {
                     self.open_playlist_without_history(playlist);
                 }
+            }
+            NavLocation::LocalPlaylistDetail { id } => {
+                self.open_local_playlist_without_history(&id);
             }
         }
         self.content_scroll_handle

@@ -24,6 +24,7 @@ impl NavidromeApp {
             View::ArtistDetail => self.render_artist_detail(window, cx),
             View::AlbumDetail => self.render_album_detail(window, cx),
             View::PlaylistDetail => self.render_playlist_detail(window, cx),
+            View::LocalPlaylistDetail => self.render_local_playlist_detail(window, cx),
             View::NowPlaying => self.render_now_playing(window, cx),
         }
     }

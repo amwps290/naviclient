@@ -15,7 +15,10 @@ impl NavidromeApp {
     }
 
     pub(in crate::app) fn ensure_song_cover(&mut self, song: &Song, want_palette: bool) {
-        let source = self.source_for_song(song).cloned();
+        let source = self
+            .source_for_song(song)
+            .cloned()
+            .or_else(|| song.source.as_ref().and_then(|id| self.available_source(id)));
         self.ensure_source_cover(source, song.cover_art.as_deref(), want_palette);
     }
 

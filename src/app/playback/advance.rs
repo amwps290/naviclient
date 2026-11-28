@@ -50,6 +50,11 @@ impl NavidromeApp {
         let mut source = target
             .source(self.api.as_ref(), self.playback_source.as_ref())
             .cloned();
+        if let Some(song_source) = target.song().source.as_ref() {
+            if source.as_ref().is_none_or(|api| api.id() != song_source) {
+                source = self.available_source(song_source);
+            }
+        }
         if let Some(api) = source
             .as_ref()
             .filter(|api| api.playback_policy().authorized_session)
@@ -83,6 +88,16 @@ impl NavidromeApp {
         // Prefer protected offline copy when available (zero network I/O, works offline).
         if let Some(offline_resource) = self.offline_playback_resource(start.song(), &start.source) {
             return match start.finish(offline_resource) {
+                Ok(start) => self.commit_playback_start(start),
+                Err(error) => {
+                    self.report_start_error(error);
+                    false
+                }
+            };
+        }
+        // Standalone local audio files imported via `.m3u8` carry their disk path directly.
+        if let Some(direct_local) = direct_local_file_resource(start.song()) {
+            return match start.finish(direct_local) {
                 Ok(start) => self.commit_playback_start(start),
                 Err(error) => {
                     self.report_start_error(error);
@@ -412,4 +427,39 @@ impl NavidromeApp {
             self.seek_playback(target);
         }
     }
+}
+
+fn direct_local_file_resource(song: &Song) -> Option<crate::source::PlaybackResource> {
+    let source = song.source.as_ref()?;
+    if source.provider != crate::source::ProviderKind::LocalFolder {
+        return None;
+    }
+    let path_str = song.path.as_deref()?;
+    let path = std::path::Path::new(path_str);
+    if !path.is_file() {
+        return None;
+    }
+    let mime_hint = crate::source::local::mime_for_path(path)
+        .map(str::to_string)
+        .or_else(|| song.content_type.clone());
+    let http = crate::source::HttpResource::local_file(path).with_mime_hint(mime_hint);
+    Some(crate::source::PlaybackResource {
+        media: crate::source::MediaKey::new(source.clone(), &song.id),
+        representation: "local".to_string(),
+        http,
+        backups: Vec::new(),
+        duration: song
+            .duration
+            .filter(|d| *d > 0)
+            .map(|d| Duration::from_secs(d as u64)),
+        quality: crate::source::AudioQuality {
+            codec: song.suffix.as_deref().map(|s| s.to_ascii_uppercase()),
+            bandwidth: song
+                .bit_rate
+                .and_then(|b| u64::try_from(b).ok())
+                .map(|b| b.saturating_mul(1_000)),
+            sample_rate: None,
+            channels: None,
+        },
+    })
 }

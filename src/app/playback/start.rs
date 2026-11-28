@@ -42,9 +42,14 @@ pub(in crate::app) struct StartTarget {
     entry: QueueEntryId,
     song: Song,
     change: QueueChange,
+    allow_mixed_sources: bool,
 }
 
 impl StartTarget {
+    pub(in crate::app) fn song(&self) -> &Song {
+        &self.song
+    }
+
     pub(in crate::app) fn source<'a>(
         &self,
         browsing: Option<&'a MusicSource>,
@@ -59,16 +64,27 @@ impl StartTarget {
     }
 
     pub(in crate::app) fn existing(queue: &PlaybackQueue, index: usize) -> Option<Self> {
+        let song = queue.song(index)?.clone();
+        let allow_mixed_sources = queue.has_mixed_sources();
         Some(Self {
             index,
             entry: queue.entry_id(index)?,
-            song: queue.song(index)?.clone(),
+            song,
             change: QueueChange::Keep,
+            allow_mixed_sources,
         })
     }
 
     pub(in crate::app) fn replacement(queue: PlaybackQueue, index: usize) -> Option<Self> {
         let mut target = Self::existing(&queue, index)?;
+        target.allow_mixed_sources = false;
+        target.change = QueueChange::Replace(queue);
+        Some(target)
+    }
+
+    pub(in crate::app) fn mixed_replacement(queue: PlaybackQueue, index: usize) -> Option<Self> {
+        let mut target = Self::existing(&queue, index)?;
+        target.allow_mixed_sources = true;
         target.change = QueueChange::Replace(queue);
         Some(target)
     }
@@ -87,6 +103,7 @@ impl StartTarget {
                     .collect(),
                 entries,
             },
+            allow_mixed_sources: false,
         })
     }
 
@@ -108,7 +125,14 @@ impl StartTarget {
         }
         let valid = match &mut self.change {
             QueueChange::Keep => true,
-            QueueChange::Replace(queue) => queue.bind_source(source),
+            QueueChange::Replace(queue) => {
+                if self.allow_mixed_sources {
+                    queue.bind_missing_sources(source);
+                    true
+                } else {
+                    queue.bind_source(source)
+                }
+            }
             QueueChange::Append {
                 entries, owners, ..
             } => {
@@ -447,7 +471,8 @@ impl PreparedStart {
         if !self.target.matches(&state.queue) {
             return Err(StartError::Stale);
         }
-        if !matches!(self.target.change, QueueChange::Replace(_))
+        if !self.target.allow_mixed_sources
+            && !matches!(self.target.change, QueueChange::Replace(_))
             && state
                 .queue
                 .songs()

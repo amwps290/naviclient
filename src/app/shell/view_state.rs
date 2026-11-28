@@ -16,6 +16,7 @@ pub(in crate::app) enum View {
     ArtistDetail,
     AlbumDetail,
     PlaylistDetail,
+    LocalPlaylistDetail,
     NowPlaying,
 }
 
@@ -25,7 +26,7 @@ impl View {
             Self::ArtistDetail => Some(Self::Artists),
             Self::AlbumDetail => Some(Self::Albums),
             Self::GenreDetail => Some(Self::Genres),
-            Self::PlaylistDetail => Some(Self::Playlists),
+            Self::PlaylistDetail | Self::LocalPlaylistDetail => Some(Self::Playlists),
             _ => None,
         }
     }
@@ -39,7 +40,10 @@ impl View {
     pub(in crate::app) fn has_detail_hero(self) -> bool {
         matches!(
             self,
-            Self::ArtistDetail | Self::AlbumDetail | Self::PlaylistDetail
+            Self::ArtistDetail
+                | Self::AlbumDetail
+                | Self::PlaylistDetail
+                | Self::LocalPlaylistDetail
         )
     }
 
@@ -53,7 +57,7 @@ impl View {
             Self::Albums | Self::AlbumDetail => "albums",
             Self::Genres | Self::GenreDetail => "genres",
             Self::Folders => "folders",
-            Self::Playlists | Self::PlaylistDetail => "playlists",
+            Self::Playlists | Self::PlaylistDetail | Self::LocalPlaylistDetail => "playlists",
             Self::Search => "search",
             Self::NowPlaying => "now-playing",
         }

@@ -126,6 +126,11 @@ impl AppState {
                 },
                 None => SongList::Songs(self.playlists.songs()),
             }),
+            SongScope::LocalPlaylist => Some(SongList::Songs(
+                self.active_local_playlist
+                    .as_ref()
+                    .map_or(&[], |playlist| playlist.songs.as_slice()),
+            )),
             SongScope::Favorites => Some(SongList::Songs(&self.favorites.items().songs)),
             SongScope::Folder => Some(SongList::Songs(self.folders.songs())),
             SongScope::Search => Some(SongList::Songs(&self.search.results()?.songs)),

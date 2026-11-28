@@ -14,7 +14,7 @@ pub(super) fn config_path() -> PathBuf {
 }
 
 /// 配置目录（会话、响度、流派缓存都放在这里）；不可用时退回当前目录。
-pub(crate) fn config_dir() -> PathBuf {
+pub fn config_dir() -> PathBuf {
     project_config_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 

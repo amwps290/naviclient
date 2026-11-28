@@ -32,11 +32,27 @@ impl NavidromeApp {
         index: usize,
         origin: QueueOrigin,
     ) -> bool {
-        let Some(target) =
-            StartTarget::replacement(PlaybackQueue::from_songs(songs, origin), index)
-        else {
+        let queue = PlaybackQueue::from_songs(songs, origin);
+        let Some(target) = StartTarget::replacement(queue, index) else {
             return false;
         };
+        self.start_queue_replacement(target, index)
+    }
+
+    pub(in crate::app) fn replace_queue_and_play_mixed(
+        &mut self,
+        songs: Vec<Song>,
+        index: usize,
+        origin: QueueOrigin,
+    ) -> bool {
+        let queue = PlaybackQueue::from_songs(songs, origin);
+        let Some(target) = StartTarget::mixed_replacement(queue, index) else {
+            return false;
+        };
+        self.start_queue_replacement(target, index)
+    }
+
+    fn start_queue_replacement(&mut self, target: StartTarget, index: usize) -> bool {
         let Some(start) = self.prepare_playback_start(target, Duration::ZERO, Selection::New)
         else {
             return false;

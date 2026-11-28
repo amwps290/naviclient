@@ -771,6 +771,7 @@ impl NavidromeApp {
                     ),
                 )
             })
+            .child(self.render_local_playlists_section(window, cx))
             .into_any_element()
     }
 }

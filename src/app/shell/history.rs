@@ -18,6 +18,7 @@ pub(in crate::app) enum NavLocation {
     AlbumDetail { id: String, album: Album },
     GenreDetail(String),
     PlaylistDetail { id: String, playlist: Playlist },
+    LocalPlaylistDetail { id: String },
 }
 
 impl NavLocation {
@@ -42,6 +43,10 @@ impl NavLocation {
         }
     }
 
+    pub(in crate::app) fn local_playlist(id: impl Into<String>) -> Self {
+        Self::LocalPlaylistDetail { id: id.into() }
+    }
+
     fn same_target(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Home, Self::Home)
@@ -55,6 +60,7 @@ impl NavLocation {
             (Self::ArtistDetail { id: a, .. }, Self::ArtistDetail { id: b, .. })
             | (Self::AlbumDetail { id: a, .. }, Self::AlbumDetail { id: b, .. })
             | (Self::PlaylistDetail { id: a, .. }, Self::PlaylistDetail { id: b, .. })
+            | (Self::LocalPlaylistDetail { id: a }, Self::LocalPlaylistDetail { id: b })
             | (Self::GenreDetail(a), Self::GenreDetail(b)) => a == b,
             _ => false,
         }

@@ -1,6 +1,6 @@
 use super::*;
 
-const VIEWS: [View; 12] = [
+const VIEWS: [View; 13] = [
     View::Home,
     View::Favorites,
     View::Artists,
@@ -13,6 +13,7 @@ const VIEWS: [View; 12] = [
     View::AlbumDetail,
     View::GenreDetail,
     View::PlaylistDetail,
+    View::LocalPlaylistDetail,
 ];
 
 #[test]
@@ -22,6 +23,7 @@ fn detail_views_return_to_their_own_library_section() {
         (View::AlbumDetail, View::Albums),
         (View::GenreDetail, View::Genres),
         (View::PlaylistDetail, View::Playlists),
+        (View::LocalPlaylistDetail, View::Playlists),
     ] {
         assert_eq!(detail.detail_parent(), Some(parent));
         assert_eq!(detail.nav_id(), parent.nav_id());
@@ -52,6 +54,7 @@ fn sidebar_selection_keeps_detail_pages_in_their_own_section() {
             View::AlbumDetail => &[View::AlbumDetail, View::Albums],
             View::GenreDetail => &[View::GenreDetail, View::Genres],
             View::PlaylistDetail => &[View::PlaylistDetail, View::Playlists],
+            View::LocalPlaylistDetail => &[View::LocalPlaylistDetail, View::Playlists],
             _ => std::slice::from_ref(&current),
         };
         for candidate in VIEWS {
@@ -85,7 +88,10 @@ fn only_album_artist_and_playlist_details_have_a_hero() {
     for view in VIEWS {
         let expected = matches!(
             view,
-            View::ArtistDetail | View::AlbumDetail | View::PlaylistDetail
+            View::ArtistDetail
+                | View::AlbumDetail
+                | View::PlaylistDetail
+                | View::LocalPlaylistDetail
         );
         assert_eq!(view.has_detail_hero(), expected, "{view:?}");
     }

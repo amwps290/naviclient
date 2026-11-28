@@ -28,7 +28,7 @@
 | | LP-02 | 主动离线下载（Pin）与离线可浏览/播放模式 | ✅ 已完成 | P0 | 无 |
 | **Phase 2：私有存储扩展** | LP-03 | WebDAV / Alist 私有存储音源（`ProviderKind::WebDav`） | ✅ 已完成 | P1 | 复用 LP-01 索引器与标签解析 |
 | | LP-04 | 文件夹目录视图（Folder Browse） | ✅ 已完成 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
-| **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ⬜ 待开发 | P1 | 建议在 LP-01 后，也可独立先行 |
+| **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ✅ 已完成 | P1 | 建议在 LP-01 后，也可独立先行 |
 | | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ⬜ 待开发 | P2 | 复用现有 `ListeningHistory` |
 | | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ⬜ 待开发 | P2 | 无 |
 | **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ⬜ 待开发 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
@@ -166,7 +166,9 @@
 
 ---
 
-### LP-05：跨源本地歌单与 `.m3u8` 导入/导出
+### LP-05：跨源本地歌单与 `.m3u8` 导入/导出 ✅ 已完成
+
+> **完成说明（2026-11-28）**：已实现跨源本地歌单持久化存储（`src/local_playlists/`，保存于 `<config_dir>/local-playlists/<id>.json` 原子写入）、完整 `.m3u8` / `.m3u` 导入导出编解码器（支持 `#EXTM3U`、`#PLAYLIST:`、`#EXTINF:`、`#EXT-X-NAVICLIENT:` 跨源元数据、本地/离线文件路径与 `naviclient://` URI，导入外部本地音频路径时自动调用 `lofty` 解析标签并归属到对应 `LocalFolder` 或独立本地文件源）；打通跨源队列播放与切歌时按曲目自身 `SourceId` 动态解析音源句柄与封面；在侧边栏全音源开放「歌单」入口，于歌单页集成「本地歌单」分区、本地歌单详情页（`View::LocalPlaylistDetail`、`SongScope::LocalPlaylist`）、新建/重命名/删除/选择歌单弹窗、单曲与多选「添加到本地歌单…」、曲目上移/下移/移除及三语 i18n。
 
 #### 目标
 解除歌单对单一 Navidrome 服务端的强绑定，允许用户创建属于客户端本地的自由歌单，支持把 **本地文件 + Navidrome + WebDAV + Bilibili** 曲目混编在一起，并可随时导出/导入标准 `.m3u8`。

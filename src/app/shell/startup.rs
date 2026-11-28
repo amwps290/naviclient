@@ -103,6 +103,9 @@ impl NavidromeApp {
         let offline_dir = config::offline_audio_dir(&config);
         let offline_store = crate::offline::OfflineStore::open(offline_dir.clone());
         let offline_outbox = crate::offline::OfflineOutbox::open(&offline_dir);
+        let local_playlists = crate::local_playlists::LocalPlaylistStore::open(
+            crate::local_playlists::default_playlists_dir(),
+        );
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
         audio.set_equalizer(config.equalizer.clone());
@@ -265,6 +268,8 @@ impl NavidromeApp {
             offline_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             offline_store,
             offline_outbox,
+            local_playlists,
+            local_playlist_ui: crate::app::playlists::local::LocalPlaylistUi::default(),
             cover_textures: RefCell::new(cover_textures),
             text_width_cache: RefCell::new(TextWidthCache::default()),
             tray_rx: mpsc::channel().1,

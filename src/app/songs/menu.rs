@@ -21,6 +21,7 @@ enum SongMenuSource {
         index: usize,
         playlist: Option<Playlist>,
         playlist_target: Option<PlaylistMenuTarget>,
+        local_playlist_id: Option<String>,
     },
 }
 
@@ -102,6 +103,9 @@ impl SongMenuContext {
                         filtered: state.playlists.search.filtered(),
                     },
                 ),
+                local_playlist_id: (scope == SongScope::LocalPlaylist)
+                    .then(|| state.active_local_playlist.as_ref().map(|p| p.id.clone()))
+                    .flatten(),
             }
         };
         Some(Self { song, source })
@@ -156,14 +160,23 @@ impl NavidromeApp {
                             songs,
                             index,
                             playlist,
+                            local_playlist_id,
                             ..
                         } => {
-                            let origin = if playlist.is_some() {
+                            let origin = if playlist.is_some() || local_playlist_id.is_some() {
                                 QueueOrigin::Playlist
                             } else {
                                 QueueOrigin::Manual
                             };
-                            this.replace_queue_and_play(songs.as_ref().clone(), *index, origin);
+                            if local_playlist_id.is_some() {
+                                this.replace_queue_and_play_mixed(
+                                    songs.as_ref().clone(),
+                                    *index,
+                                    origin,
+                                );
+                            } else {
+                                this.replace_queue_and_play(songs.as_ref().clone(), *index, origin);
+                            }
                         }
                     }
                     cx.notify();
@@ -361,6 +374,14 @@ impl NavidromeApp {
                     })),
             );
         }
+        let song_for_local = song.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t!("Add to local playlist…")).on_click(cx.listener(
+                move |this, _, window, cx| {
+                    this.choose_local_playlist(vec![song_for_local.clone()], window, cx);
+                },
+            )),
+        );
         let song_for_info = song.clone();
         menu = menu
             .separator()
@@ -372,6 +393,50 @@ impl NavidromeApp {
                     this.open_song_info(song_for_info.clone(), window, cx);
                 },
             )));
+        if let SongMenuSource::Library {
+            songs,
+            index,
+            local_playlist_id: Some(local_id),
+            ..
+        } = &context.source
+        {
+            let total = songs.len();
+            let index = *index;
+            let up_id = local_id.clone();
+            let down_id = local_id.clone();
+            let rm_id = local_id.clone();
+            menu = menu
+                .separator()
+                .item(
+                    PopupMenuItem::new(t!("Move up"))
+                        .disabled(index == 0)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(to) = index.checked_sub(1) {
+                                this.move_local_playlist_song(&up_id, index, to);
+                            }
+                            cx.notify();
+                        })),
+                )
+                .item(
+                    PopupMenuItem::new(t!("Move down"))
+                        .disabled(index + 1 >= total)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if index + 1 < total {
+                                this.move_local_playlist_song(&down_id, index, index + 1);
+                            }
+                            cx.notify();
+                        })),
+                )
+                .item(
+                    PopupMenuItem::new(t!("Remove from local playlist")).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.remove_local_playlist_song(&rm_id, index);
+                            cx.notify();
+                        },
+                    )),
+                );
+            return menu;
+        }
         if let SongMenuSource::Library {
             songs,
             index,

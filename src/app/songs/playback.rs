@@ -172,7 +172,24 @@ impl NavidromeApp {
                 index,
                 origin,
             } => {
-                self.replace_queue_and_play(songs, index, origin);
+                let is_mixed = {
+                    let mut first = None;
+                    songs
+                        .iter()
+                        .filter_map(|song| song.source.as_ref())
+                        .any(|source| match first {
+                            None => {
+                                first = Some(source);
+                                false
+                            }
+                            Some(existing) => existing != source,
+                        })
+                };
+                if is_mixed {
+                    self.replace_queue_and_play_mixed(songs, index, origin);
+                } else {
+                    self.replace_queue_and_play(songs, index, origin);
+                }
             }
         }
     }

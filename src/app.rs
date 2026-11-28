@@ -115,6 +115,8 @@ pub struct NavidromeApp {
     offline_slots: Arc<tokio::sync::Semaphore>,
     offline_store: crate::offline::OfflineStore,
     offline_outbox: crate::offline::OfflineOutbox,
+    local_playlists: crate::local_playlists::LocalPlaylistStore,
+    local_playlist_ui: playlists::local::LocalPlaylistUi,
     /// Retention and pending texture/asset releases survive server state resets.
     cover_textures: RefCell<CoverTextures>,
     text_width_cache: RefCell<TextWidthCache>,

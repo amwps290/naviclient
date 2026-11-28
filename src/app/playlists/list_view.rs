@@ -12,8 +12,26 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let bilibili = self.browsing_bilibili();
+        let supports_server_playlists = self
+            .api
+            .as_ref()
+            .is_some_and(|api| api.capabilities().playlist_read);
         let columns = self.content_columns(window);
         let p = palette(cx);
+        if !supports_server_playlists {
+            return v_flex()
+                .gap_6()
+                .child(self.page_header(
+                    t!("Playlists"),
+                    t!(
+                        "%{count} playlists",
+                        count = self.local_playlists.list().len()
+                    ),
+                    cx,
+                ))
+                .child(self.render_local_playlists_section(window, cx))
+                .into_any_element();
+        }
         let playlist_list = cover_grid(
             columns,
             self.state
@@ -283,6 +301,7 @@ impl NavidromeApp {
             .when(!self.state.playlists.items().is_empty(), |this| {
                 this.child(playlist_list)
             })
+            .child(self.render_local_playlists_section(window, cx))
             .into_any_element()
     }
 }
