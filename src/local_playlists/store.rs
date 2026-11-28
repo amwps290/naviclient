@@ -207,6 +207,42 @@ impl LocalPlaylistStore {
         Ok(updated)
     }
 
+    pub fn import_playlists(
+        &mut self,
+        incoming: Vec<LocalPlaylist>,
+        overwrite: bool,
+    ) -> Result<usize> {
+        if overwrite {
+            let existing_ids: Vec<String> = self.playlists.iter().map(|p| p.id.clone()).collect();
+            for id in existing_ids {
+                let path = self.playlist_path(&id);
+                if path.exists() {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+            self.playlists.clear();
+        }
+        let mut applied = 0usize;
+        for playlist in incoming {
+            if playlist.id.trim().is_empty() || playlist.name.trim().is_empty() {
+                continue;
+            }
+            if let Some(idx) = self.playlists.iter().position(|p| p.id == playlist.id) {
+                if overwrite || playlist.updated_at >= self.playlists[idx].updated_at {
+                    self.save_playlist(&playlist)?;
+                    self.playlists[idx] = playlist;
+                    applied += 1;
+                }
+            } else {
+                self.save_playlist(&playlist)?;
+                self.playlists.push(playlist);
+                applied += 1;
+            }
+        }
+        self.sort_playlists();
+        Ok(applied)
+    }
+
     fn playlist_path(&self, id: &str) -> PathBuf {
         let safe: String = id
             .chars()

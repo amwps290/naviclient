@@ -8,6 +8,7 @@ mod api;
 mod app;
 mod assets;
 mod audio;
+mod backup;
 mod bilibili_check;
 mod bilibili_login_web;
 mod config;

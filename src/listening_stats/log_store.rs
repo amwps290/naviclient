@@ -145,6 +145,47 @@ impl ListeningLog {
         Ok(true)
     }
 
+    pub fn export_all(&self) -> Vec<ListeningLogEntry> {
+        self.entries.clone()
+    }
+
+    pub fn import_entries(
+        &mut self,
+        incoming: Vec<ListeningLogEntry>,
+        overwrite: bool,
+    ) -> Result<usize> {
+        if overwrite {
+            self.entries.clear();
+            self.seen.clear();
+            let mut count = 0usize;
+            for entry in incoming {
+                if entry.song_id.trim().is_empty() {
+                    continue;
+                }
+                let key = (entry.ts, entry.song_id.clone());
+                if self.seen.insert(key) {
+                    self.entries.push(entry);
+                    count += 1;
+                }
+            }
+            rewrite_jsonl(&self.path, &self.entries)?;
+            return Ok(count);
+        }
+        let mut added = 0usize;
+        for entry in incoming {
+            if entry.song_id.trim().is_empty() {
+                continue;
+            }
+            let key = (entry.ts, entry.song_id.clone());
+            if self.seen.insert(key) {
+                append_jsonl(&self.path, &entry)?;
+                self.entries.push(entry);
+                added += 1;
+            }
+        }
+        Ok(added)
+    }
+
     /// Merge historical `ListeningEvent`s from server-scoped history into a combined slice
     /// without duplicating entries already persisted in `listening-log.jsonl`.
     pub fn merged_entries(&self, extra_events: &[ListeningEvent]) -> Vec<ListeningLogEntry> {
@@ -181,5 +222,24 @@ fn append_jsonl(path: &Path, entry: &ListeningLogEntry) -> Result<()> {
         .with_context(|| format!("failed to open {}", path.display()))?;
     file.write_all(line.as_bytes())
         .with_context(|| format!("failed to append {}", path.display()))?;
+    Ok(())
+}
+
+fn rewrite_jsonl(path: &Path, entries: &[ListeningLogEntry]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+    }
+    let mut buf = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry).context("failed to serialize listening entry")?;
+        buf.push_str(&line);
+        buf.push('\n');
+    }
+    let tmp = path.with_extension("jsonl.tmp");
+    fs::write(&tmp, buf.as_bytes()).with_context(|| format!("failed to write {}", tmp.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
     Ok(())
 }

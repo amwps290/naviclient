@@ -1,6 +1,7 @@
 //! Preferences and the settings overlay.
 
 pub(in crate::app) mod appearance_view;
+pub(in crate::app) mod backup_view;
 pub(in crate::app) mod bilibili_login;
 pub(crate) mod bilibili_state;
 pub(in crate::app) mod bilibili_view;

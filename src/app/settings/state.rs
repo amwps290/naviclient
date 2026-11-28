@@ -102,6 +102,7 @@ pub(in crate::app) struct SettingsUi {
     pub(in crate::app) proxy_probes: super::proxy_probe::ProxyProbes,
     pub(in crate::app) cache_usage: Option<crate::config::CacheUsage>,
     pub(in crate::app) cache_busy: bool,
+    pub(in crate::app) backup_selection: crate::backup::BackupSelection,
 }
 
 impl SettingsUi {

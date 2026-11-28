@@ -136,7 +136,58 @@ impl Default for LyricsCache {
     }
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub(crate) struct LyricsPreferencesBackup {
+    #[serde(default)]
+    pub songs: HashMap<String, Preference>,
+    #[serde(default)]
+    pub bodies: HashMap<String, Record>,
+}
+
 impl LyricsCache {
+    pub fn export_preferences(&self) -> LyricsPreferencesBackup {
+        self.writer.read(|store| {
+            let mut bodies = HashMap::new();
+            for pref in store.songs.values() {
+                if let Some(body_key) = pref.body.as_ref() {
+                    if let Some(record) = store.bodies.get(body_key) {
+                        bodies.insert(body_key.clone(), (**record).clone());
+                    }
+                }
+            }
+            LyricsPreferencesBackup {
+                songs: store.songs.clone(),
+                bodies,
+            }
+        })
+    }
+
+    pub fn import_preferences(
+        &self,
+        backup: LyricsPreferencesBackup,
+        overwrite: bool,
+    ) -> anyhow::Result<usize> {
+        let mut imported = 0usize;
+        self.change(|store| {
+            if overwrite {
+                store.songs.clear();
+            }
+            for (body_key, record) in backup.bodies {
+                if !store.bodies.contains_key(&body_key) {
+                    let bytes = serde_json::to_vec(&record).map_or(0, |body| body.len());
+                    store.insert_body(body_key, record, bytes);
+                }
+            }
+            for (song_key, pref) in backup.songs {
+                if overwrite || !store.songs.contains_key(&song_key) {
+                    store.songs.insert(song_key, pref);
+                    imported += 1;
+                }
+            }
+        })?;
+        Ok(imported)
+    }
+
     pub fn at(path: PathBuf) -> Self {
         let mut store = std::fs::read(&path)
             .ok()

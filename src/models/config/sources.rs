@@ -36,7 +36,7 @@ where
 }
 
 impl Config {
-    pub(super) fn sync_sources(&mut self) {
+    pub(crate) fn sync_sources(&mut self) {
         let mut identities = HashSet::new();
         self.sources.retain(|source| {
             let id = source.id();

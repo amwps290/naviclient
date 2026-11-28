@@ -30,7 +30,7 @@
 | | LP-04 | 文件夹目录视图（Folder Browse） | ✅ 已完成 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
 | **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ✅ 已完成 | P1 | 建议在 LP-01 后，也可独立先行 |
 | | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ✅ 已完成 | P2 | 复用现有 `ListeningHistory` |
-| | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ⬜ 待开发 | P2 | 无 |
+| | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ✅ 已完成 | P2 | 无 |
 | **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ⬜ 待开发 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
 | | LP-09 | 歌曲列表多列排序与局部过滤 | ⬜ 待开发 | P2 | 无 |
 | | LP-10 | 睡眠定时器（Sleep Timer） | ⬜ 待开发 | P2 | 无 |
@@ -203,7 +203,9 @@
 
 ---
 
-### LP-07：个人数据一键备份与迁移
+### LP-07：个人数据一键备份与迁移 ✅ 已完成
+
+> **完成说明（2026-11-28）**：已实现版本化脱敏备份包（`src/backup.rs`，`.navibackup.json`），支持按项勾选导出应用基础配置与快捷键（自动剥离 OpenSubsonic/WebDAV 密码、钥匙串标记、B 站凭据引用及代理 URL 认证信息）、自定义均衡器预设、手动选词与歌词时间校准偏好（`LyricsCache::export_preferences` / `import_preferences`）、跨源本地歌单（`LocalPlaylistStore::import_playlists`）与本地听歌日志（`ListeningLog::import_entries`）；支持「合并恢复」与「覆盖恢复」（恢复时保留本机已有服务器/源凭据，并在写入前自动在 `<config_dir>/backups/` 生成回滚快照）；在「设置 → 桌面与集成」新增「数据备份与迁移」卡片及三语 i18n。
 
 #### 目标
 解决多台电脑（如 Linux 与 Windows 双端）或重装系统时的配置、歌词校准和个人资产迁移痛点。
