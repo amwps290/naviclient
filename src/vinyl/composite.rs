@@ -30,6 +30,19 @@ struct RasterFrame {
 }
 
 impl CompositeCache {
+    pub(super) fn memory_bytes(&self) -> usize {
+        let source_bytes = self
+            .source
+            .as_ref()
+            .map_or(0, |frame| frame.pixels.as_raw().len());
+        let displayed_bytes = self
+            .displayed
+            .as_ref()
+            .and_then(|img| img.as_bytes(0).map(<[u8]>::len))
+            .unwrap_or(0);
+        source_bytes.saturating_add(displayed_bytes)
+    }
+
     pub(super) fn image(
         &mut self,
         source: &Arc<RenderImage>,

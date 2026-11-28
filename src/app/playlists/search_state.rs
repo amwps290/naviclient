@@ -168,6 +168,10 @@ impl PlaylistSearch {
         };
         (index < len).then_some(index)
     }
+
+    pub(in crate::app) fn index_bytes(&self) -> usize {
+        self.index.as_ref().map_or(0, |index| index.approx_bytes())
+    }
 }
 
 #[cfg(test)]

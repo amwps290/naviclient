@@ -11,6 +11,8 @@ use crate::msg::DecodedCover;
 use crate::source::{MediaKey, SourceId};
 
 const MAX_FAILED_COVERS: usize = 256;
+pub(in crate::app) const MAX_COVER_ENTRIES: usize = 256;
+pub(in crate::app) const MAX_COVER_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CoverRequest {
@@ -46,6 +48,8 @@ struct PendingCover {
 #[derive(Default)]
 pub(in crate::app) struct CoverCache {
     entries: HashMap<MediaKey, CoverEntry>,
+    order: VecDeque<MediaKey>,
+    image_bytes: usize,
     pending: HashMap<MediaKey, PendingCover>,
     failed: HashSet<MediaKey>,
     failed_order: VecDeque<MediaKey>,
@@ -54,10 +58,28 @@ pub(in crate::app) struct CoverCache {
 #[derive(Default)]
 pub(in crate::app) struct CoverUpdate {
     pub(in crate::app) replaced: Option<Arc<GpuiImage>>,
+    pub(in crate::app) evicted: Vec<Arc<GpuiImage>>,
     pub(in crate::app) follow_up_palette: bool,
 }
 
 impl CoverCache {
+    pub(in crate::app) fn stats(&self) -> (usize, usize) {
+        let images = self
+            .entries
+            .values()
+            .filter(|entry| entry.image.is_some())
+            .count();
+        (images, self.image_bytes)
+    }
+
+    pub(in crate::app) fn touch(&mut self, source: &SourceId, id: &str) {
+        let key = MediaKey::new(source.clone(), id);
+        if self.entries.contains_key(&key) {
+            self.order.retain(|existing| existing != &key);
+            self.order.push_front(key);
+        }
+    }
+
     pub(in crate::app) fn retain_sources(
         &mut self,
         sources: &HashSet<SourceId>,
@@ -76,11 +98,84 @@ impl CoverCache {
             .filter(|image| !retained.contains(&image.id()))
             .collect();
         self.entries.retain(|key, _| sources.contains(&key.source));
+        self.order.retain(|key| sources.contains(&key.source));
+        self.recompute_bytes();
         self.pending.retain(|key, _| sources.contains(&key.source));
         self.failed.retain(|key| sources.contains(&key.source));
         self.failed_order
             .retain(|key| sources.contains(&key.source));
         removed
+    }
+
+    /// Evict cached cover entries not in `protected`, returning detached images
+    /// whose GPUI textures/assets should be released.
+    pub(in crate::app) fn clear_except(
+        &mut self,
+        protected: &HashSet<MediaKey>,
+    ) -> Vec<Arc<GpuiImage>> {
+        let retained_ids: HashSet<_> = self
+            .entries
+            .iter()
+            .filter(|(key, _)| protected.contains(*key))
+            .filter_map(|(_, entry)| entry.image.as_ref().map(|image| image.id()))
+            .collect();
+        let removed: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(key, _)| !protected.contains(*key))
+            .filter_map(|(_, entry)| entry.image.clone())
+            .filter(|image| !retained_ids.contains(&image.id()))
+            .collect();
+        self.entries.retain(|key, _| protected.contains(key));
+        self.order.retain(|key| protected.contains(key));
+        self.recompute_bytes();
+        removed
+    }
+
+    fn recompute_bytes(&mut self) {
+        self.image_bytes = self
+            .entries
+            .values()
+            .filter_map(|entry| entry.image.as_ref())
+            .map(|image| image.bytes.len())
+            .sum();
+    }
+
+    fn evict_over_budget(&mut self, protected: &MediaKey) -> Vec<Arc<GpuiImage>> {
+        self.evict_to(MAX_COVER_ENTRIES, MAX_COVER_BYTES, protected)
+    }
+
+    fn evict_to(
+        &mut self,
+        max_entries: usize,
+        max_bytes: usize,
+        protected: &MediaKey,
+    ) -> Vec<Arc<GpuiImage>> {
+        let mut evicted = Vec::new();
+        while self.entries.len() > max_entries || self.image_bytes > max_bytes {
+            let Some(victim_pos) = self
+                .order
+                .iter()
+                .rposition(|key| key != protected && self.entries.contains_key(key))
+            else {
+                break;
+            };
+            let victim = self.order.remove(victim_pos).expect("valid victim index");
+            if let Some(entry) = self.entries.remove(&victim) {
+                if let Some(image) = entry.image {
+                    self.image_bytes = self.image_bytes.saturating_sub(image.bytes.len());
+                    let id = image.id();
+                    let still_shared = self
+                        .entries
+                        .values()
+                        .any(|other| other.image.as_ref().is_some_and(|img| img.id() == id));
+                    if !still_shared {
+                        evicted.push(image);
+                    }
+                }
+            }
+        }
+        evicted
     }
 
     pub(in crate::app) fn image(&self, source: &SourceId, id: &str) -> Option<&Arc<GpuiImage>> {
@@ -182,19 +277,34 @@ impl CoverCache {
         if let Some(palette) = decoded.palette {
             entry.palette = Some(palette);
         }
+        let mut previous_bytes = 0usize;
+        let mut new_bytes = 0usize;
         let replaced = decoded.image.and_then(|image| {
             let image_id = image.id();
-            entry
-                .image
-                .replace(image)
-                .filter(|previous| previous.id() != image_id)
+            new_bytes = image.bytes.len();
+            let old = entry.image.replace(image);
+            if let Some(prev) = &old {
+                previous_bytes = prev.bytes.len();
+            }
+            old.filter(|previous| previous.id() != image_id)
         });
+        if new_bytes > 0 || previous_bytes > 0 {
+            self.image_bytes = self
+                .image_bytes
+                .saturating_sub(previous_bytes)
+                .saturating_add(new_bytes);
+        }
+        let follow_up_palette = pending.want_palette
+            && entry.image.is_some()
+            && entry.palette.is_none()
+            && !entry.palette_attempted;
+        self.order.retain(|existing| existing != &request.key);
+        self.order.push_front(request.key.clone());
+        let evicted = self.evict_over_budget(&request.key);
         Some(CoverUpdate {
             replaced,
-            follow_up_palette: pending.want_palette
-                && entry.image.is_some()
-                && entry.palette.is_none()
-                && !entry.palette_attempted,
+            evicted,
+            follow_up_palette,
         })
     }
 

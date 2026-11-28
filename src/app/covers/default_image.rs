@@ -30,6 +30,16 @@ pub(crate) fn device_side(size: f32, scale: f32) -> u32 {
 }
 
 impl DefaultCoverThumbnails {
+    pub(crate) fn memory_bytes(&self) -> usize {
+        let levels_bytes: usize = self.levels.values().map(|img| img.as_raw().len()).sum();
+        let images_bytes: usize = self
+            .images
+            .iter()
+            .filter_map(|(_, img)| img.as_bytes(0).map(<[u8]>::len))
+            .sum();
+        levels_bytes.saturating_add(images_bytes)
+    }
+
     pub(crate) fn image(&mut self, side: u32) -> anyhow::Result<Arc<RenderImage>> {
         let side = side.clamp(1, 1024);
         self.active.insert(side);

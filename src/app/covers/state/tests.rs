@@ -276,3 +276,48 @@ fn retiring_another_source_cannot_release_a_shared_image_still_used_by_playback(
     assert!(cache.image(&playing, "same-image").is_some());
     assert!(cache.image(&other, "same-image").is_none());
 }
+
+#[test]
+fn lru_eviction_respects_entry_and_byte_budgets_and_protects_touched_entries() {
+    let mut cache = CoverCache::default();
+    let mut requests = LibraryRequests::default();
+    let src = source();
+
+    let make_img = |tag: u8, size: usize| {
+        let mut bytes = vec![tag; size];
+        bytes[0] = tag;
+        Arc::new(GpuiImage::from_bytes(ImageFormat::Png, bytes))
+    };
+
+    for (id, tag) in [("a", 1u8), ("b", 2), ("c", 3)] {
+        let req = cache.begin(&src, id, false, &mut requests).unwrap();
+        let img = make_img(tag, 100);
+        cache.complete(&req, Ok(decoded(Some(img), None)));
+    }
+    assert_eq!(cache.stats(), (3, 300));
+
+    // Touch "a" so "b" becomes least recently used.
+    cache.touch(&src, "a");
+    let protected = MediaKey::new(src.clone(), "c");
+    let evicted = cache.evict_to(2, 1000, &protected);
+    assert_eq!(evicted.len(), 1);
+    assert!(cache.image(&src, "b").is_none());
+    assert!(cache.image(&src, "a").is_some());
+    assert!(cache.image(&src, "c").is_some());
+    assert_eq!(cache.stats(), (2, 200));
+
+    // Byte budget eviction keeps only protected entry when budget is tighter.
+    let evicted = cache.evict_to(10, 150, &protected);
+    assert_eq!(evicted.len(), 1);
+    assert!(cache.image(&src, "a").is_none());
+    assert!(cache.image(&src, "c").is_some());
+    assert_eq!(cache.stats(), (1, 100));
+
+    // clear_except retains protected entries and drops everything else.
+    let keep = HashSet::from([protected]);
+    assert!(cache.clear_except(&keep).is_empty());
+    assert_eq!(cache.stats(), (1, 100));
+    let removed = cache.clear_except(&HashSet::new());
+    assert_eq!(removed.len(), 1);
+    assert_eq!(cache.stats(), (0, 0));
+}

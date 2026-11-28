@@ -74,6 +74,22 @@ impl Default for VinylCover {
 }
 
 impl VinylCover {
+    pub(crate) fn memory_bytes(&self) -> usize {
+        let source_bytes = self
+            .source
+            .as_ref()
+            .and_then(|img| img.as_bytes(0).map(<[u8]>::len))
+            .unwrap_or(0);
+        let composite_bytes = self.composite.borrow().memory_bytes();
+        let frozen_bytes = self.frozen.as_ref().map_or(0, |frozen| {
+            let src = frozen.source.as_bytes(0).map_or(0, <[u8]>::len);
+            src.saturating_add(frozen.composite.borrow().memory_bytes())
+        });
+        source_bytes
+            .saturating_add(composite_bytes)
+            .saturating_add(frozen_bytes)
+    }
+
     pub(crate) fn freeze(&mut self, window: &mut Window) {
         self.release_frozen(window);
         if let Some(source) = self.source.as_ref() {

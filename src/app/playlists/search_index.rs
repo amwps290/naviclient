@@ -98,6 +98,19 @@ impl PlaylistSearchIndex {
         self.fields.len()
     }
 
+    pub(in crate::app) fn approx_bytes(&self) -> usize {
+        let outer = self.fields.capacity() * std::mem::size_of::<Vec<String>>();
+        let inner: usize = self
+            .fields
+            .iter()
+            .map(|row| {
+                row.capacity() * std::mem::size_of::<String>()
+                    + row.iter().map(String::capacity).sum::<usize>()
+            })
+            .sum();
+        outer.saturating_add(inner)
+    }
+
     pub(in crate::app) fn matching(
         &self,
         terms: &QueryTerms,

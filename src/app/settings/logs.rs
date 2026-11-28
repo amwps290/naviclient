@@ -8,8 +8,10 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::ClipboardItem;
 
 use super::components::{settings_card, settings_divider, settings_group, settings_row};
+use crate::app::playback::display::format_file_size;
 use crate::app::prelude::*;
 use crate::diagnostics::{sanitize_urls, LogFilter, LogTail, MAX_LOG_ENTRIES};
+use crate::memory_stats::{AppMemoryBreakdown, MemorySnapshot};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -28,6 +30,7 @@ pub(in crate::app) struct LogViewer {
     rendered: String,
     matching: usize,
     playback: PlaybackState,
+    memory: MemorySnapshot,
 }
 
 impl LogViewer {
@@ -47,6 +50,7 @@ impl LogViewer {
             rendered: String::new(),
             matching: 0,
             playback: PlaybackState::default(),
+            memory: MemorySnapshot::default(),
         }
     }
 
@@ -132,6 +136,7 @@ impl NavidromeApp {
                     self.logs.error = None;
                     self.logs.updated_at = Some(Local::now());
                     self.logs.playback = self.audio.state();
+                    self.logs.memory = self.sample_memory_snapshot();
                     self.logs.file_error = crate::logging::file_error();
                     self.logs.dirty = true;
                 }
@@ -169,6 +174,117 @@ impl NavidromeApp {
             changed = true;
         }
         changed
+    }
+
+    fn sample_memory_snapshot(&self) -> MemorySnapshot {
+        let (cover_source_count, cover_source_bytes) = self.state.covers.stats();
+        let (cover_texture_count, cover_texture_capacity) = self.cover_textures.borrow().stats();
+        let (cover_thumbnail_count, cover_thumbnail_bytes) = self.cover_thumbnails.borrow().stats();
+        let default_cover_bytes = self.default_cover_thumbnails.borrow().memory_bytes();
+        let vinyl_bytes = self.vinyl_cover.memory_bytes();
+        let (lyrics_bodies, lyrics_bytes) = self.lyrics_cache.stats();
+        let playlist_songs = self.state.playlists.songs().len();
+        let playlist_search_bytes = self.state.playlists.search.index_bytes();
+        let queue_entries = self.state.queue.len();
+        let library_items =
+            self.state.artists.len() + self.state.albums.len() + self.state.playlists.items().len();
+        let log_buffer_bytes = crate::logging::memory_bytes();
+
+        MemorySnapshot {
+            process: crate::memory_stats::sample_process_memory(),
+            app: AppMemoryBreakdown {
+                cover_source_count,
+                cover_source_bytes: cover_source_bytes as u64,
+                cover_texture_count,
+                cover_texture_capacity,
+                cover_thumbnail_count,
+                cover_thumbnail_bytes: cover_thumbnail_bytes as u64,
+                default_cover_bytes: default_cover_bytes as u64,
+                vinyl_bytes: vinyl_bytes as u64,
+                lyrics_bodies,
+                lyrics_bytes: lyrics_bytes as u64,
+                playlist_songs,
+                playlist_search_bytes: playlist_search_bytes as u64,
+                queue_entries,
+                library_items,
+                log_buffer_bytes: log_buffer_bytes as u64,
+            },
+        }
+    }
+
+    fn log_memory_details(&self) -> Vec<String> {
+        let snap = &self.logs.memory;
+        let app = &snap.app;
+        let mut lines = Vec::new();
+        if let Some(proc_mem) = snap.process {
+            let mut summary = t!(
+                "Process memory (RSS): %{rss}",
+                rss = format_file_size(proc_mem.rss_bytes)
+            )
+            .to_string();
+            if let Some(peak) = proc_mem.peak_rss_bytes {
+                summary.push_str(&format!(
+                    " · {}",
+                    t!("Peak: %{size}", size = format_file_size(peak))
+                ));
+            }
+            if let Some(private) = proc_mem.private_bytes {
+                summary.push_str(&format!(
+                    " · {}",
+                    t!("Private: %{size}", size = format_file_size(private))
+                ));
+            }
+            lines.push(summary);
+        }
+        lines.push(
+            t!(
+                "Cover cache: %{count} images (%{size}) · Decoded textures: %{tex}/%{tex_cap}",
+                count = app.cover_source_count,
+                size = format_file_size(app.cover_source_bytes),
+                tex = app.cover_texture_count,
+                tex_cap = app.cover_texture_capacity
+            )
+            .to_string(),
+        );
+        lines.push(
+            t!(
+                "Cover thumbnails: %{count} (%{size}) · Default & vinyl: %{extra}",
+                count = app.cover_thumbnail_count,
+                size = format_file_size(app.cover_thumbnail_bytes),
+                extra = format_file_size(app.default_cover_bytes.saturating_add(app.vinyl_bytes))
+            )
+            .to_string(),
+        );
+        lines.push(
+            t!(
+                "Lyrics cache: %{count} entries (%{size}) · Log buffer: %{logs}",
+                count = app.lyrics_bodies,
+                size = format_file_size(app.lyrics_bytes),
+                logs = format_file_size(app.log_buffer_bytes)
+            )
+            .to_string(),
+        );
+        lines.push(
+            t!(
+                "Library & lists: %{library} items · Queue: %{queue} · Playlist: %{playlist} (index %{index})",
+                library = app.library_items,
+                queue = app.queue_entries,
+                playlist = app.playlist_songs,
+                index = format_file_size(app.playlist_search_bytes)
+            )
+            .to_string(),
+        );
+        if let Some(other) = snap.untracked_rss_bytes() {
+            lines.push(
+                t!(
+                    "Tracked caches: %{tracked} · GPU/UI & runtime overhead: %{other}",
+                    tracked = format_file_size(app.tracked_bytes()),
+                    other = format_file_size(other)
+                )
+                .to_string(),
+            );
+        }
+        lines
     }
 
     fn log_playback_details(&self) -> Vec<String> {
@@ -217,12 +333,13 @@ impl NavidromeApp {
             .unwrap_or_default();
         let playback = &self.logs.playback;
         let report = format!(
-            "Navidrome Client {} ({}/{})\nSnapshot: {time}\n{}\nactive={} paused={} ended={} worker_closed={} track_attached={} fully_buffered={} stall_ms={:?} failure={:?}\n\n{}\n{}",
+            "Navidrome Client {} ({}/{})\nSnapshot: {time}\n{}\nactive={} paused={} ended={} worker_closed={} track_attached={} fully_buffered={} stall_ms={:?} failure={:?}\n\nMemory:\n{}\n\n{}\n{}",
             env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH,
             self.log_playback_details().join("\n"), playback.active, playback.paused,
             playback.ended, playback.worker_closed, playback.output_connected,
             playback.fully_buffered, playback.stall.map(|stall| stall.as_millis()),
-            playback.failure, self.logs.filter.label(), self.logs.rendered
+            playback.failure, self.log_memory_details().join("\n"),
+            self.logs.filter.label(), self.logs.rendered
         );
         cx.write_to_clipboard(ClipboardItem::new_string(report));
         self.notify_success(t!("Log report copied."));
@@ -307,6 +424,62 @@ impl NavidromeApp {
                             .child(detail)
                     }))
                     .into_any_element()],
+                cx,
+            )
+        });
+
+        let memory_card = self.logs.updated_at.is_some().then(|| {
+            settings_group(
+                Some(t!("Memory usage").into()),
+                None,
+                vec![
+                    v_flex()
+                        .w_full()
+                        .px_4()
+                        .py_3()
+                        .gap_1()
+                        .children(self.log_memory_details().into_iter().map(|detail| {
+                            div()
+                                .text_xs()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_color(p.text_secondary)
+                                .child(detail)
+                        }))
+                        .into_any_element(),
+                    h_flex()
+                        .w_full()
+                        .px_4()
+                        .py_2p5()
+                        .justify_between()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(p.text_muted)
+                                .child(t!(
+                                    "Release cached cover images and decoded textures from memory. Covers reload from disk when scrolled back into view."
+                                )),
+                        )
+                        .child(
+                            surface_button("purge-cover-memory-cache")
+                                .label(t!("Release image memory"))
+                                .compact_action()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    let (count, freed) = this.purge_cover_memory_cache(window, cx);
+                                    this.logs.memory = this.sample_memory_snapshot();
+                                    this.notify_success(t!(
+                                        "Released %{count} cached covers (%{size})",
+                                        count = count,
+                                        size = format_file_size(freed)
+                                    ));
+                                    cx.notify();
+                                })),
+                        )
+                        .into_any_element(),
+                ],
                 cx,
             )
         });
@@ -489,6 +662,7 @@ impl NavidromeApp {
             .gap_4()
             .child(file_logging_card)
             .children(snapshot_card)
+            .children(memory_card)
             .child(viewer_card)
             .child(div().px_1().text_xs().text_color(p.text_muted).child(t!(
                 "Recent logs only (up to %{count} entries). Pause auto refresh to select text. File output can be disabled without stopping this viewer.",

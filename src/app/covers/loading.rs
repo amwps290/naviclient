@@ -27,8 +27,9 @@ impl NavidromeApp {
     ) {
         let Some(id) = cover_id else { return };
         let Some(api) = api else { return };
-        if let Some(image) = self.state.covers.image(api.id(), id) {
-            self.mark_cover_image_used(image);
+        if let Some(image) = self.state.covers.image(api.id(), id).cloned() {
+            self.state.covers.touch(api.id(), id);
+            self.mark_cover_image_used(&image);
         }
         if !self.state.covers.request_needed(api.id(), id, want_palette) {
             return;
@@ -86,9 +87,12 @@ impl NavidromeApp {
         let Some(update) = self.state.covers.complete(&request, result) else {
             return;
         };
-        // Free the replaced image's retention slot before touching its successor.
+        // Free the replaced and LRU-evicted image slots before touching the successor.
         if let Some(previous) = update.replaced {
             self.queue_cover_asset_release(previous);
+        }
+        for evicted in update.evicted {
+            self.queue_cover_asset_release(evicted);
         }
         if let Some(image) = self.state.covers.image(request.source(), request.id()) {
             self.mark_cover_image_used(image);

@@ -230,6 +230,18 @@ pub(crate) fn file_error() -> Option<String> {
     })
 }
 
+pub(crate) fn memory_bytes() -> usize {
+    OUTPUT
+        .get()
+        .map(|output| {
+            output
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .memory_bytes
+        })
+        .unwrap_or(0)
+}
+
 pub(crate) fn open_directory() -> io::Result<PathBuf> {
     let path = crate::config::log_path();
     let directory = path

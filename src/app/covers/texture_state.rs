@@ -25,6 +25,26 @@ impl CoverTextures {
         }
     }
 
+    pub(in crate::app) fn stats(&self) -> (usize, usize) {
+        (self.used.len(), self.capacity)
+    }
+
+    pub(in crate::app) fn evict_all_except(
+        &mut self,
+        protected_ids: &std::collections::HashSet<u64>,
+    ) {
+        let mut kept = VecDeque::with_capacity(self.used.len());
+        while let Some(image) = self.used.pop_front() {
+            let id = image.id();
+            if protected_ids.contains(&id) {
+                kept.push_back(image);
+            } else {
+                self.evicted.insert(id, image);
+            }
+        }
+        self.used = kept;
+    }
+
     pub(in crate::app) fn mark_used(&mut self, image: &Arc<Image>) {
         let id = image.id();
         // Stale views cannot revive a retired source before its release is applied.

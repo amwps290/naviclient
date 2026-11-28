@@ -39,6 +39,22 @@ pub(in crate::app) struct CoverThumbnails {
 }
 
 impl CoverThumbnails {
+    pub(in crate::app) fn stats(&self) -> (usize, usize) {
+        (self.entries.len(), self.bytes)
+    }
+
+    pub(in crate::app) fn clear_inactive(&mut self) {
+        let stale: Vec<_> = self
+            .recent
+            .iter()
+            .filter(|key| !self.active.contains(key))
+            .copied()
+            .collect();
+        for key in stale {
+            self.remove(key);
+        }
+    }
+
     fn image(
         cache: &Rc<RefCell<Self>>,
         source: &Arc<Image>,

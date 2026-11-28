@@ -19,6 +19,7 @@ mod import;
 mod logging;
 mod lyrics;
 mod media_session;
+mod memory_stats;
 mod models;
 mod msg;
 mod notify;
