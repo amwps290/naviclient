@@ -59,6 +59,7 @@ impl NavidromeApp {
                     | View::Playlists
                     | View::PlaylistDetail
                     | View::LocalPlaylistDetail
+                    | View::Insights
                     | View::Search
                     | View::NowPlaying
             ) {
@@ -92,6 +93,9 @@ impl NavidromeApp {
                 self.load_playlists()
             }
             View::Favorites => self.load_favorites(),
+            View::Insights if self.state.insights.needs_refresh() => {
+                self.refresh_listening_insights()
+            }
             _ => {}
         }
     }
@@ -123,6 +127,7 @@ impl NavidromeApp {
             NavLocation::Genres => self.enter_top_level_view(View::Genres),
             NavLocation::Folders => self.enter_top_level_view(View::Folders),
             NavLocation::Playlists => self.enter_top_level_view(View::Playlists),
+            NavLocation::Insights => self.enter_top_level_view(View::Insights),
             NavLocation::Search => self.enter_top_level_view(View::Search),
             NavLocation::ArtistDetail { artist, .. } => {
                 if self
@@ -198,6 +203,7 @@ fn top_level_nav_location(view: View) -> Option<NavLocation> {
         View::Genres => NavLocation::Genres,
         View::Folders => NavLocation::Folders,
         View::Playlists => NavLocation::Playlists,
+        View::Insights => NavLocation::Insights,
         View::Search => NavLocation::Search,
         _ => return None,
     })

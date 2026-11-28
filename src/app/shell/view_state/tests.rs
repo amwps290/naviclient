@@ -1,12 +1,13 @@
 use super::*;
 
-const VIEWS: [View; 13] = [
+const VIEWS: [View; 14] = [
     View::Home,
     View::Favorites,
     View::Artists,
     View::Albums,
     View::Genres,
     View::Playlists,
+    View::Insights,
     View::Search,
     View::NowPlaying,
     View::ArtistDetail,
@@ -76,6 +77,7 @@ fn navigation_ids_keep_each_section_distinct() {
         (View::Albums, "albums"),
         (View::Genres, "genres"),
         (View::Playlists, "playlists"),
+        (View::Insights, "insights"),
         (View::Search, "search"),
         (View::NowPlaying, "now-playing"),
     ] {

@@ -54,6 +54,7 @@ fn active_scopes_match_each_page_and_an_open_drawer_always_takes_priority() {
         (View::GenreDetail, None),
         (View::Folders, Some(SongScope::Folder)),
         (View::Playlists, None),
+        (View::Insights, None),
         (View::Search, Some(SongScope::Search)),
         (View::ArtistDetail, Some(SongScope::ArtistTop)),
         (View::AlbumDetail, Some(SongScope::AlbumDetail)),

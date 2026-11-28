@@ -106,6 +106,9 @@ impl NavidromeApp {
         let local_playlists = crate::local_playlists::LocalPlaylistStore::open(
             crate::local_playlists::default_playlists_dir(),
         );
+        let listening_log = crate::listening_stats::ListeningLog::open(
+            crate::listening_stats::default_log_path(),
+        );
         let audio = AudioHandle::start(audio_cache_dir, config.output_device.clone())
             .expect("failed to start audio worker");
         audio.set_equalizer(config.equalizer.clone());
@@ -270,6 +273,7 @@ impl NavidromeApp {
             offline_outbox,
             local_playlists,
             local_playlist_ui: crate::app::playlists::local::LocalPlaylistUi::default(),
+            listening_log,
             cover_textures: RefCell::new(cover_textures),
             text_width_cache: RefCell::new(TextWidthCache::default()),
             tray_rx: mpsc::channel().1,

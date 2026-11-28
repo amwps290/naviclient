@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{LyricLine, Lyrics};
 
-const VIEWS: [View; 13] = [
+const VIEWS: [View; 14] = [
     View::Home,
     View::Favorites,
     View::Artists,
@@ -9,6 +9,7 @@ const VIEWS: [View; 13] = [
     View::Genres,
     View::GenreDetail,
     View::Playlists,
+    View::Insights,
     View::Search,
     View::ArtistDetail,
     View::AlbumDetail,

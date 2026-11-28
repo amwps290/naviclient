@@ -31,6 +31,7 @@ impl NavidromeApp {
 
     pub(in crate::app) fn finish_listening_event(&mut self, completed: bool) {
         if self.state.listening.finish(completed) {
+            self.record_finished_listening_event();
             self.persist_listening_history();
         }
     }

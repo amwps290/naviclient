@@ -29,7 +29,7 @@
 | **Phase 2：私有存储扩展** | LP-03 | WebDAV / Alist 私有存储音源（`ProviderKind::WebDav`） | ✅ 已完成 | P1 | 复用 LP-01 索引器与标签解析 |
 | | LP-04 | 文件夹目录视图（Folder Browse） | ✅ 已完成 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
 | **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ✅ 已完成 | P1 | 建议在 LP-01 后，也可独立先行 |
-| | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ⬜ 待开发 | P2 | 复用现有 `ListeningHistory` |
+| | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ✅ 已完成 | P2 | 复用现有 `ListeningHistory` |
 | | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ⬜ 待开发 | P2 | 无 |
 | **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ⬜ 待开发 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
 | | LP-09 | 歌曲列表多列排序与局部过滤 | ⬜ 待开发 | P2 | 无 |
@@ -185,7 +185,9 @@
 
 ---
 
-### LP-06：本地隐私听歌统计与回顾（Listening Insights）
+### LP-06：本地隐私听歌统计与回顾（Listening Insights） ✅ 已完成
+
+> **完成说明（2026-11-28）**：已实现完全本地隐私的 JSONL 听歌日志（`src/listening_stats/`，追加写入 `<config_dir>/listening-log.jsonl`，以播放 ≥ 30 秒 / 满半首 / 完整播完为有效阈值并自动去重，同时无重复兼容融合现有分源 `ListeningHistory`）；实现近 7 天 / 近 30 天 / 今年 / 全部时间窗口聚合与侧边栏全音源「听歌统计」视图（`View::Insights`、`src/app/insights.rs`），提供总聆听时长/日均/播放次数/独立曲目与艺人专辑数/最常听歌时段 KPI 卡片、24 小时聆听时段柱状图、常听艺人/专辑/流派分布条，以及常听歌曲 Top 20 一键生成播放队列及三语 i18n。
 
 #### 目标
 完全在本地记录与汇总用户的真实聆听习惯（不上传任何外部服务），提供精致的「听歌统计」视图。

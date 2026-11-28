@@ -73,6 +73,7 @@ embedded_icons! {
     "folder.svg",
     "download.svg",
     "cloud.svg",
+    "chart-bar.svg",
 }
 
 pub struct Assets;
@@ -124,6 +125,7 @@ pub enum AppIcon {
     Folder,
     Download,
     Cloud,
+    Insights,
 }
 
 #[derive(Clone, Copy)]
@@ -184,6 +186,7 @@ impl IconNamed for AppIcon {
             Self::Folder => "icons/folder.svg",
             Self::Download => "icons/download.svg",
             Self::Cloud => "icons/cloud.svg",
+            Self::Insights => "icons/chart-bar.svg",
         }
         .into()
     }
@@ -263,6 +266,7 @@ mod tests {
             super::AppIcon::Folder,
             super::AppIcon::Download,
             super::AppIcon::Cloud,
+            super::AppIcon::Insights,
         ] {
             let path = icon.path();
             let loaded = Assets.load(&path).expect("asset lookup should not error");

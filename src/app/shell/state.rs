@@ -76,6 +76,7 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) output_devices: OutputDevices,
     /// 本地收听事件和 History 列表；与播放会话一样按服务器隔离。
     pub(in crate::app) listening: ListeningState,
+    pub(in crate::app) insights: crate::app::insights::InsightsState,
     /// 本地测量响度、所属服务器和播放增益选择。
     pub(in crate::app) loudness: LoudnessCache,
 }
@@ -155,6 +156,7 @@ impl Default for AppState {
             occurrence: PlaybackOccurrence::default(),
             output_devices: OutputDevices::default(),
             listening: ListeningState::default(),
+            insights: crate::app::insights::InsightsState::default(),
             loudness: LoudnessCache::default(),
         }
     }

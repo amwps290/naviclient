@@ -12,6 +12,7 @@ pub(in crate::app) enum View {
     GenreDetail,
     Folders,
     Playlists,
+    Insights,
     Search,
     ArtistDetail,
     AlbumDetail,
@@ -58,6 +59,7 @@ impl View {
             Self::Genres | Self::GenreDetail => "genres",
             Self::Folders => "folders",
             Self::Playlists | Self::PlaylistDetail | Self::LocalPlaylistDetail => "playlists",
+            Self::Insights => "insights",
             Self::Search => "search",
             Self::NowPlaying => "now-playing",
         }

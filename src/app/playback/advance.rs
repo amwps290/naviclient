@@ -165,6 +165,7 @@ impl NavidromeApp {
         }
         self.preload.clear();
         if effects.finished_listening {
+            self.record_finished_listening_event();
             self.persist_listening_history();
         }
         if changing_source {
@@ -313,6 +314,7 @@ impl NavidromeApp {
         selection: Selection,
     ) {
         if select_state(&mut self.state, index, song, quality, selection) {
+            self.record_finished_listening_event();
             self.persist_listening_history();
         }
         self.session.clear_position();

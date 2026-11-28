@@ -10,6 +10,7 @@ pub(crate) mod covers;
 mod desktop;
 mod home;
 mod import;
+mod insights;
 mod library;
 mod offline;
 mod playback;
@@ -117,6 +118,7 @@ pub struct NavidromeApp {
     offline_outbox: crate::offline::OfflineOutbox,
     local_playlists: crate::local_playlists::LocalPlaylistStore,
     local_playlist_ui: playlists::local::LocalPlaylistUi,
+    listening_log: crate::listening_stats::ListeningLog,
     /// Retention and pending texture/asset releases survive server state resets.
     cover_textures: RefCell<CoverTextures>,
     text_width_cache: RefCell<TextWidthCache>,

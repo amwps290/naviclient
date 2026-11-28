@@ -16,6 +16,7 @@ impl View {
             Self::Playlists | Self::PlaylistDetail | Self::LocalPlaylistDetail => {
                 (t!("Playlists"), Icon::new(AppIcon::Playlists))
             }
+            Self::Insights => (t!("Insights"), Icon::new(AppIcon::Insights)),
             Self::Search => (t!("Search"), Icon::new(KitIcon::Search)),
             Self::NowPlaying => (t!("Now Playing"), Icon::new(AppIcon::VinylGrooves)),
         };
@@ -49,6 +50,7 @@ impl NavidromeApp {
                         collapsed,
                         cx,
                     ))
+                    .child(self.nav_button(View::Insights, None, collapsed, cx))
                     .when(
                         self.api
                             .as_ref()
@@ -113,6 +115,7 @@ impl NavidromeApp {
                 collapsed,
                 cx,
             ))
+            .child(self.nav_button(View::Insights, None, collapsed, cx))
             .child(self.nav_button(View::Search, None, collapsed, cx))
             .child(footer)
             .into_any_element()
