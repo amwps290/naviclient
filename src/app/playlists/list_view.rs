@@ -22,6 +22,7 @@ impl NavidromeApp {
                 .iter()
                 .map(|playlist| {
                     let playlist_for_click = playlist.clone();
+                    let playlist_for_play = playlist.clone();
                     let playlist_for_menu = playlist.clone();
                     let menu_app = cx.entity().downgrade();
                     let hover_key = format!("playlist-row-{}", playlist.id);
@@ -52,12 +53,50 @@ impl NavidromeApp {
                         .on_hover(cx.listener(move |this, hovering, _, cx| {
                             this.set_hovered(&hover_key_for_cb, *hovering, cx);
                         }))
-                        .child(div().mb_1().child(self.render_cover_styled(
-                            playlist.cover_art.as_deref(),
-                            columns.width,
-                            tokens::radius::COVER,
-                            cover_shadow(hovered, cx),
-                        )))
+                        .child(
+                            div()
+                                .relative()
+                                .w(px(columns.width))
+                                .h(px(columns.width))
+                                .mb_1()
+                                .child(self.render_cover_styled(
+                                    playlist.cover_art.as_deref(),
+                                    columns.width,
+                                    tokens::radius::COVER,
+                                    cover_shadow(hovered, cx),
+                                ))
+                                .when(hovered, |this| {
+                                    this.child(
+                                        div()
+                                            .absolute()
+                                            .right_2()
+                                            .bottom_2()
+                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation()
+                                            })
+                                            .child(
+                                                round_play_button(
+                                                    SharedString::from(format!(
+                                                        "playlist-play-{}",
+                                                        playlist.id
+                                                    )),
+                                                    PlayerIcon::Play,
+                                                    t!("Play all"),
+                                                    tokens::HOVER_PLAY_BUTTON,
+                                                    cx,
+                                                )
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.queue_playlist(
+                                                        playlist_for_play.clone(),
+                                                        LibraryQueueAction::ReplaceAndPlay,
+                                                    );
+                                                    cx.notify();
+                                                })),
+                                            ),
+                                    )
+                                }),
+                        )
                         .child(
                             div()
                                 .text_size(px(tokens::BODY))

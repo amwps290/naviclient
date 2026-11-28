@@ -28,34 +28,66 @@ impl NavidromeApp {
                 cx,
             ))
             .content(move |_, _, popover_cx| {
-                // accent 是背景 token，做文字/进度色在亮色主题里几乎不可见。
-                let emphasis = popover_cx.theme().primary;
-                let muted = popover_cx.theme().muted_foreground;
-                let border = popover_cx.theme().border;
+                let p = palette(popover_cx);
+                let dark = popover_cx.theme().is_dark();
+                let emphasis = p.brand;
+                let muted = p.text_muted;
+                let hairline = if dark {
+                    hsla(0.0, 0.0, 1.0, 0.08)
+                } else {
+                    p.border.opacity(0.82)
+                };
+                let stage_bg = if dark {
+                    hsla(0.0, 0.0, 1.0, 0.03)
+                } else {
+                    p.sunken.opacity(0.65)
+                };
+                let chip_bg = if dark {
+                    hsla(0.0, 0.0, 1.0, 0.05)
+                } else {
+                    p.sunken.opacity(0.85)
+                };
+                let mono = popover_cx.theme().mono_font_family.clone();
+
                 v_flex()
-                    .w(px(444.0))
+                    .w(px(468.0))
                     .gap_3()
-                    .p_3()
-                    // 开关 + Reset
+                    .p_3p5()
+                    // Header: title + status dot + Flat reset + segmented On/Off
                     .child(
                         h_flex()
                             .items_center()
                             .justify_between()
+                            .gap_2()
                             .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(t!("Equalizer")),
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().size(px(7.0)).rounded_full().bg(if enabled {
+                                        emphasis
+                                    } else {
+                                        muted.opacity(0.45)
+                                    }))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(p.text)
+                                            .child(t!("Equalizer")),
+                                    ),
                             )
                             .child(
                                 h_flex()
                                     .items_center()
-                                    .gap_1()
+                                    .gap_1p5()
                                     .child({
                                         let app = app.clone();
                                         ghost_button("eq-popover-reset")
                                             .label(t!("Flat"))
-                                            .compact_action()
+                                            .rounded_full()
+                                            .h(px(28.0))
+                                            .px_2p5()
+                                            .text_xs()
                                             .on_click(move |_, window, cx| {
                                                 let _ = app.update(cx, |this, cx| {
                                                     this.set_eq_preset_with_preamp(
@@ -64,28 +96,40 @@ impl NavidromeApp {
                                                 });
                                             })
                                     })
-                                    .children([(true, t!("On")), (false, t!("Off"))].map(
-                                        |(enable, label)| {
-                                            let app = app.clone();
-                                            let active = enabled == enable;
-                                            pill_filter_button(
-                                                SharedString::from(format!("eq-popover-{enable}")),
-                                                label,
-                                                active,
-                                                popover_cx,
-                                            )
-                                            .on_click(
-                                                move |_, _, cx| {
-                                                    let _ = app.update(cx, |this, cx| {
-                                                        this.set_eq_enabled(enable, cx);
-                                                    });
+                                    .child(
+                                        h_flex()
+                                            .p_0p5()
+                                            .gap_0p5()
+                                            .rounded_full()
+                                            .bg(stage_bg)
+                                            .border_1()
+                                            .border_color(hairline)
+                                            .children([(true, t!("On")), (false, t!("Off"))].map(
+                                                |(enable, label)| {
+                                                    let app = app.clone();
+                                                    let active = enabled == enable;
+                                                    pill_filter_button(
+                                                        SharedString::from(format!(
+                                                            "eq-popover-{enable}"
+                                                        )),
+                                                        label,
+                                                        active,
+                                                        popover_cx,
+                                                    )
+                                                    .h(px(24.0))
+                                                    .px_2p5()
+                                                    .text_xs()
+                                                    .on_click(move |_, _, cx| {
+                                                        let _ = app.update(cx, |this, cx| {
+                                                            this.set_eq_enabled(enable, cx);
+                                                        });
+                                                    })
                                                 },
-                                            )
-                                        },
-                                    )),
+                                            )),
+                                    ),
                             ),
                     )
-                    // 内置预设
+                    // Built-in presets
                     .child(h_flex().gap_1p5().flex_wrap().children(presets.iter().map(
                         |(name, preset_gains)| {
                             let preset_gains = *preset_gains;
@@ -97,6 +141,9 @@ impl NavidromeApp {
                                 active,
                                 popover_cx,
                             )
+                            .h(px(26.0))
+                            .px_2p5()
+                            .text_xs()
                             .on_click(move |_, window, cx| {
                                 let _ = app.update(cx, |this, cx| {
                                     this.set_eq_preset(preset_gains, window, cx);
@@ -104,7 +151,7 @@ impl NavidromeApp {
                             })
                         },
                     )))
-                    // 自定义预设
+                    // Custom presets as unified composite chips (preset + inline delete)
                     .when(!custom_presets.is_empty(), |this| {
                         this.child(h_flex().gap_1p5().flex_wrap().children(
                             custom_presets.iter().enumerate().map(|(idx, preset)| {
@@ -118,26 +165,36 @@ impl NavidromeApp {
                                     enabled && preamp == preset_preamp && gains == preset_gains;
                                 h_flex()
                                     .items_center()
-                                    .gap_0p5()
+                                    .pl_0p5()
+                                    .pr_1()
+                                    .rounded_full()
+                                    .bg(if active { p.brand_soft } else { chip_bg })
+                                    .border_1()
+                                    .border_color(if active {
+                                        emphasis.opacity(if dark { 0.34 } else { 0.24 })
+                                    } else {
+                                        hairline
+                                    })
                                     .child(
-                                        pill_filter_button(
-                                            SharedString::from(format!("eq-custom-preset-{idx}")),
-                                            preset_name,
-                                            active,
-                                            popover_cx,
-                                        )
-                                        .on_click(
-                                            move |_, window, cx| {
-                                                let _ = app_apply.update(cx, |this, cx| {
-                                                    this.set_eq_preset_with_preamp(
-                                                        preset_preamp,
-                                                        preset_gains,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            },
-                                        ),
+                                        ghost_button(SharedString::from(format!(
+                                            "eq-custom-preset-{idx}"
+                                        )))
+                                        .label(preset_name)
+                                        .rounded_full()
+                                        .h(px(24.0))
+                                        .px_2()
+                                        .text_xs()
+                                        .text_color(if active { emphasis } else { p.text_secondary })
+                                        .on_click(move |_, window, cx| {
+                                            let _ = app_apply.update(cx, |this, cx| {
+                                                this.set_eq_preset_with_preamp(
+                                                    preset_preamp,
+                                                    preset_gains,
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                        }),
                                     )
                                     .child(
                                         icon_button(
@@ -146,84 +203,138 @@ impl NavidromeApp {
                                             )),
                                             AppIcon::Close,
                                             t!("Delete"),
-                                            20.0,
+                                            18.0,
                                         )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                let _ = app_del.update(cx, |this, cx| {
-                                                    this.delete_eq_custom_preset(&delete_name, cx);
-                                                });
-                                            },
-                                        ),
+                                        .on_click(move |_, _, cx| {
+                                            let _ = app_del.update(cx, |this, cx| {
+                                                this.delete_eq_custom_preset(&delete_name, cx);
+                                            });
+                                        }),
                                     )
                             }),
                         ))
                     })
-                    // Preamp + 10 段滑杆
+                    // Preamp + 10-band fader stage inside a recessed panel with 0 dB center guide
                     .child(
-                        h_flex()
-                            .justify_between()
+                        div()
+                            .relative()
+                            .w_full()
+                            .px_2p5()
+                            .py_3()
+                            .rounded(px(tokens::radius::COVER))
+                            .bg(stage_bg)
+                            .border_1()
+                            .border_color(hairline)
                             .child(
-                                v_flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .w(px(36.0))
-                                    .pr_1()
-                                    .mr_1()
-                                    .border_r_1()
-                                    .border_color(border.opacity(0.6))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(if enabled { emphasis } else { muted })
-                                            .child(format!("{preamp:+.0}")),
-                                    )
-                                    .child(
-                                        Slider::new(&preamp_slider)
-                                            .vertical()
-                                            .h(px(96.0))
-                                            .bg(emphasis)
-                                            .text_color(emphasis)
-                                            .rounded_full(),
-                                    )
-                                    .child(div().text_xs().text_color(muted).child(t!("Pre"))),
+                                div()
+                                    .absolute()
+                                    .left_3()
+                                    .right_3()
+                                    .top(px(78.0))
+                                    .h(px(1.0))
+                                    .bg(hairline.opacity(0.65)),
                             )
-                            .children(sliders.iter().enumerate().map(|(band, slider)| {
-                                let center_hz = EqSettings::BANDS[band];
-                                let label = if center_hz >= 1000.0 {
-                                    format!("{}k", (center_hz / 1000.0) as u32)
-                                } else {
-                                    format!("{}", center_hz as u32)
-                                };
-                                v_flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .w(px(34.0))
+                            .child(
+                                h_flex()
+                                    .relative()
+                                    .justify_between()
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(if enabled { emphasis } else { muted })
-                                            .child(format!("{:+.0}", gains[band])),
+                                        v_flex()
+                                            .items_center()
+                                            .gap_1p5()
+                                            .w(px(40.0))
+                                            .pr_1p5()
+                                            .mr_1()
+                                            .border_r_1()
+                                            .border_color(hairline)
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_family(mono.clone())
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(if enabled {
+                                                        emphasis
+                                                    } else {
+                                                        muted
+                                                    })
+                                                    .child(format!("{preamp:+.0}")),
+                                            )
+                                            .child(
+                                                Slider::new(&preamp_slider)
+                                                    .vertical()
+                                                    .h(px(104.0))
+                                                    .bg(if enabled { emphasis } else { muted })
+                                                    .text_color(if enabled {
+                                                        emphasis
+                                                    } else {
+                                                        muted
+                                                    })
+                                                    .rounded_full(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(muted)
+                                                    .child(t!("Pre")),
+                                            ),
                                     )
-                                    .child(
-                                        Slider::new(slider)
-                                            .vertical()
-                                            .h(px(96.0))
-                                            .bg(emphasis)
-                                            .text_color(emphasis)
-                                            .rounded_full(),
-                                    )
-                                    .child(div().text_xs().text_color(muted).child(label))
-                            })),
+                                    .children(sliders.iter().enumerate().map(|(band, slider)| {
+                                        let center_hz = EqSettings::BANDS[band];
+                                        let label = if center_hz >= 1000.0 {
+                                            format!("{}k", (center_hz / 1000.0) as u32)
+                                        } else {
+                                            format!("{}", center_hz as u32)
+                                        };
+                                        let gain = gains[band];
+                                        v_flex()
+                                            .items_center()
+                                            .gap_1p5()
+                                            .w(px(34.0))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_family(mono.clone())
+                                                    .font_weight(if enabled && gain.abs() >= 0.5 {
+                                                        FontWeight::SEMIBOLD
+                                                    } else {
+                                                        FontWeight::NORMAL
+                                                    })
+                                                    .text_color(if enabled && gain.abs() >= 0.5 {
+                                                        emphasis
+                                                    } else {
+                                                        muted
+                                                    })
+                                                    .child(format!("{gain:+.0}")),
+                                            )
+                                            .child(
+                                                Slider::new(slider)
+                                                    .vertical()
+                                                    .h(px(104.0))
+                                                    .bg(if enabled { emphasis } else { muted })
+                                                    .text_color(if enabled {
+                                                        emphasis
+                                                    } else {
+                                                        muted
+                                                    })
+                                                    .rounded_full(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_family(mono.clone())
+                                                    .text_color(muted)
+                                                    .child(label),
+                                            )
+                                    })),
+                            ),
                     )
-                    // 保存当前曲线为自定义预设
+                    // Save current curve as custom preset
                     .child(
                         h_flex()
                             .items_center()
                             .gap_2()
                             .pt_1()
-                            .border_t_1()
-                            .border_color(border.opacity(0.5))
                             .child(Input::new(&preset_input).flex_1().small())
                             .child({
                                 let app = app.clone();

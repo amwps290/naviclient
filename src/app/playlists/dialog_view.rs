@@ -11,6 +11,18 @@ impl NavidromeApp {
         dialog: Dialog,
         cx: &mut Context<Self>,
     ) -> Dialog {
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
+        let panel_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.035)
+        } else {
+            p.sunken.opacity(0.65)
+        };
+        let panel_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.08)
+        } else {
+            p.border.opacity(0.82)
+        };
         let busy = self.state.playlists.editing();
         let mut content = v_flex().gap_3();
         let (title, action, destructive) = match &self.playlist_ui.dialog {
@@ -19,18 +31,27 @@ impl NavidromeApp {
                 songs,
                 input,
             }) => {
+                let mut card = v_flex()
+                    .w_full()
+                    .p_3()
+                    .gap_2p5()
+                    .rounded(px(tokens::radius::COVER))
+                    .bg(panel_bg)
+                    .border_1()
+                    .border_color(panel_border);
                 if playlist.is_none() && !songs.is_empty() {
-                    content = content.child(t!(
-                        "Save %{count} tracks in their current order.",
-                        count = songs.len()
-                    ));
+                    card = card.child(
+                        div()
+                            .text_xs()
+                            .text_color(p.text_secondary)
+                            .child(t!(
+                                "Save %{count} tracks in their current order.",
+                                count = songs.len()
+                            )),
+                    );
                 }
-                content = content.child(
-                    Input::new(input)
-                        .disabled(busy)
-                        .w_full()
-                        .bg(palette(cx).sunken),
-                );
+                card = card.child(Input::new(input).disabled(busy).w_full());
+                content = content.child(card);
                 (
                     if playlist.is_some() {
                         t!("Rename playlist")
@@ -44,20 +65,39 @@ impl NavidromeApp {
             }
             Some(PlaylistDialog::Choose { songs }) => {
                 let new_songs = songs.clone();
-                content = content
-                    .child(t!(
-                        "Add %{count} tracks. Existing copies will be kept.",
-                        count = songs.len()
-                    ))
-                    .child(
-                        surface_button("new-playlist-from-songs")
-                            .label(t!("New playlist…"))
-                            .compact_action()
-                            .disabled(busy)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.name_playlist(None, new_songs.clone(), window, cx)
-                            })),
-                    );
+                content = content.child(
+                    h_flex()
+                        .w_full()
+                        .px_3()
+                        .py_2p5()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .rounded(px(tokens::radius::COVER))
+                        .bg(panel_bg)
+                        .border_1()
+                        .border_color(panel_border)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(p.text_secondary)
+                                .child(t!(
+                                    "Add %{count} tracks. Existing copies will be kept.",
+                                    count = songs.len()
+                                )),
+                        )
+                        .child(
+                            surface_button("new-playlist-from-songs")
+                                .label(t!("New playlist…"))
+                                .compact_action()
+                                .disabled(busy)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.name_playlist(None, new_songs.clone(), window, cx)
+                                })),
+                        ),
+                );
                 let mut playlists: Vec<_> = self
                     .state
                     .playlists
@@ -67,46 +107,94 @@ impl NavidromeApp {
                     .cloned()
                     .collect();
                 playlists.sort_by_key(|p| p.name.to_lowercase());
+                let mut picker = v_flex()
+                    .id("playlist-picker")
+                    .max_h(px(280.0))
+                    .overflow_y_scroll()
+                    .p_1p5()
+                    .gap_1()
+                    .rounded(px(tokens::radius::COVER))
+                    .bg(panel_bg)
+                    .border_1()
+                    .border_color(panel_border);
                 if self.state.playlists.list_loading() {
-                    content = content.child(div().text_sm().child(t!("Loading playlists…")));
-                } else if playlists.is_empty() {
-                    content = content.child(
+                    picker = picker.child(
                         div()
+                            .py_6()
+                            .text_center()
                             .text_sm()
+                            .text_color(p.text_secondary)
+                            .child(t!("Loading playlists…")),
+                    );
+                } else if playlists.is_empty() {
+                    picker = picker.child(
+                        div()
+                            .py_6()
+                            .px_4()
+                            .text_center()
+                            .text_sm()
+                            .text_color(p.text_muted)
                             .child(t!("No editable playlists yet. Create one above.")),
                     );
-                }
-                content = content.child(
-                    v_flex()
-                        .id("playlist-picker")
-                        .max_h(px(260.0))
-                        .overflow_y_scroll()
-                        .gap_1()
-                        .children(playlists.into_iter().map(|playlist| {
-                            let songs = songs.clone();
-                            ghost_button(SharedString::from(format!(
-                                "choose-playlist-{}",
-                                playlist.id
-                            )))
-                            .label(playlist.name)
-                            .compact_action()
-                            .w_full()
-                            .justify_start()
-                            .disabled(busy || self.state.playlists.list_loading())
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.start_playlist_edit(
-                                        PlaylistEdit::Append {
-                                            id: playlist.id.clone(),
-                                            songs: songs.clone(),
-                                        },
-                                        PlaylistEditOrigin::Dialog,
-                                        cx,
-                                    );
+                } else {
+                    picker = picker.children(playlists.into_iter().map(|playlist| {
+                        let songs = songs.clone();
+                        let count = playlist.song_count.unwrap_or_default();
+                        let cover = self.render_cover_styled(
+                            playlist.cover_art.as_deref(),
+                            34.0,
+                            tokens::radius::CONTROL,
+                            Vec::new(),
+                        );
+                        ghost_button(SharedString::from(format!(
+                            "choose-playlist-{}",
+                            playlist.id
+                        )))
+                        .w_full()
+                        .h(px(48.0))
+                        .px_2p5()
+                        .rounded(px(tokens::radius::ROW))
+                        .justify_start()
+                        .disabled(busy || self.state.playlists.list_loading())
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .items_center()
+                                .gap_2p5()
+                                .child(cover)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(p.text)
+                                        .truncate()
+                                        .child(playlist.name),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .text_xs()
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .text_color(p.text_muted)
+                                        .child(t!("%{count} tracks", count = count)),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_playlist_edit(
+                                PlaylistEdit::Append {
+                                    id: playlist.id.clone(),
+                                    songs: songs.clone(),
                                 },
-                            ))
-                        })),
-                );
+                                PlaylistEditOrigin::Dialog,
+                                cx,
+                            );
+                        }))
+                    }));
+                }
+                content = content.child(picker);
                 (t!("Add to playlist").to_string(), None, false)
             }
             Some(PlaylistDialog::Confirm {
@@ -115,7 +203,18 @@ impl NavidromeApp {
                 edit,
                 ..
             }) => {
-                content = content.child(div().text_sm().child(message.clone()));
+                content = content.child(
+                    div()
+                        .w_full()
+                        .p_3()
+                        .rounded(px(tokens::radius::ROW))
+                        .bg(panel_bg)
+                        .border_1()
+                        .border_color(panel_border)
+                        .text_sm()
+                        .text_color(p.text_secondary)
+                        .child(message.clone()),
+                );
                 (
                     title.clone(),
                     Some(if matches!(edit, PlaylistEdit::Delete { .. }) {
@@ -131,13 +230,24 @@ impl NavidromeApp {
         if let Some(error) = &self.playlist_ui.error {
             content = content.child(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded(px(tokens::radius::ROW))
+                    .bg(cx.theme().danger.opacity(0.09))
+                    .border_1()
+                    .border_color(cx.theme().danger.opacity(0.22))
                     .text_sm()
                     .text_color(cx.theme().danger)
                     .child(error.clone()),
             );
         }
         if busy {
-            content = content.child(div().text_sm().child(t!("Saving…")));
+            content = content.child(
+                div()
+                    .text_xs()
+                    .text_color(p.text_secondary)
+                    .child(t!("Saving…")),
+            );
         }
         let footer = h_flex()
             .justify_end()

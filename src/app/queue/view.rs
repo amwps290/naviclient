@@ -179,43 +179,67 @@ impl NavidromeApp {
         &self,
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
-        h_flex()
-            .min_h(px(52.0))
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
+        let card_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.035)
+        } else {
+            p.sunken.opacity(0.65)
+        };
+        let card_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.07)
+        } else {
+            p.border.opacity(0.75)
+        };
+        div()
             .flex_none()
-            .px_4()
-            .py_2()
-            .gap_3()
-            .items_center()
-            .justify_between()
+            .px_3()
+            .pt_2p5()
+            .pb_1()
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_0p5()
+                h_flex()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .gap_3()
+                    .items_center()
+                    .justify_between()
+                    .rounded(px(tokens::radius::COVER))
+                    .bg(card_bg)
+                    .border_1()
+                    .border_color(card_border)
                     .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(t!("Automatic continuation")),
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(p.text)
+                                    .child(t!("Automatic continuation")),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(p.text_muted)
+                                    .truncate()
+                                    .child(if self.state.auto_continue.loading() {
+                                        t!("Finding more music…")
+                                    } else {
+                                        t!("Keep playing recommendations when the queue ends")
+                                    }),
+                            ),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if self.state.auto_continue.loading() {
-                                t!("Finding more music…")
-                            } else {
-                                t!("Keep playing recommendations when the queue ends")
-                            }),
+                        Switch::new("queue-auto-continue-switch")
+                            .checked(self.config.auto_continue)
+                            .accessibility_label(t!("Automatic continuation"))
+                            .on_change(cx.listener(|this, checked, _, cx| {
+                                this.set_auto_continue(*checked, cx);
+                            })),
                     ),
-            )
-            .child(
-                Switch::new("queue-auto-continue-switch")
-                    .checked(self.config.auto_continue)
-                    .accessibility_label(t!("Automatic continuation"))
-                    .on_change(cx.listener(|this, checked, _, cx| {
-                        this.set_auto_continue(*checked, cx);
-                    })),
             )
             .into_any_element()
     }
@@ -425,11 +449,21 @@ impl NavidromeApp {
             .state
             .queue_index
             .is_some_and(|index| index + 1 < self.state.queue.len());
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
+        let divider = if dark {
+            hsla(0.0, 0.0, 1.0, 0.07)
+        } else {
+            p.border.opacity(0.65)
+        };
         h_flex()
             .flex_none()
-            .when(compact, |this| this.px_2())
-            .when(!compact, |this| this.px_3())
+            .when(compact, |this| this.px_3())
+            .when(!compact, |this| this.px_3p5())
             .py_2()
+            .mb_1()
+            .border_b_1()
+            .border_color(divider)
             .items_center()
             .gap_1()
             .child(
@@ -438,7 +472,9 @@ impl NavidromeApp {
                     .label(t!("Play all"))
                     .tooltip(t!("Play all"))
                     .rounded(px(tokens::radius::FULL))
-                    .compact_action()
+                    .h(px(30.0))
+                    .px_3()
+                    .text_xs()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.state.queue.is_empty() {
                             this.play_song_at_scope(SongScope::Queue, 0);
@@ -454,13 +490,17 @@ impl NavidromeApp {
                         t!("Clear after current")
                     })
                     .tooltip(t!("Clear after current"))
-                    .compact_action()
+                    .rounded(px(tokens::radius::FULL))
+                    .h(px(30.0))
+                    .px_2p5()
+                    .text_xs()
                     .disabled(!has_after)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.clear_queue_after_current();
                         cx.notify();
                     })),
             )
+            .child(div().flex_1())
             .child(
                 icon_button(
                     "drawer-queue-locate-current",
@@ -475,7 +515,6 @@ impl NavidromeApp {
                 })),
             )
             .child(save_button)
-            .child(div().flex_1())
             .child(
                 icon_button(
                     "drawer-queue-clear-all",

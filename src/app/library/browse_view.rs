@@ -42,10 +42,31 @@ impl NavidromeApp {
                 if total == 0 && self.state.favorites.loading() {
                     content = content.child(self.render_list_skeleton(6, cx));
                 } else if total == 0 {
-                    content =
-                        content.child(div().py_8().text_color(cx.theme().muted_foreground).child(
-                            t!("Click a heart on a song, album, or artist to add it here."),
-                        ));
+                    let p = palette(cx);
+                    content = content.child(
+                        v_flex()
+                            .w_full()
+                            .min_h(px(200.0))
+                            .items_center()
+                            .justify_center()
+                            .gap_2p5()
+                            .px_6()
+                            .text_center()
+                            .child(
+                                Icon::new(AppIcon::Heart)
+                                    .with_size(px(32.0))
+                                    .text_color(p.text_muted.opacity(0.6)),
+                            )
+                            .child(
+                                div()
+                                    .max_w(px(360.0))
+                                    .text_sm()
+                                    .text_color(p.text_secondary)
+                                    .child(t!(
+                                        "Click a heart on a song, album, or artist to add it here."
+                                    )),
+                            ),
+                    );
                 }
                 if !favorites.artists.is_empty() {
                     content = content.child(shelf_section(
@@ -177,10 +198,26 @@ impl NavidromeApp {
                         if self.state.genres.is_empty() && self.state.genres.loading() {
                             self.render_album_skeleton_grid(window, cx)
                         } else if self.state.genres.is_empty() {
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("No genres in your library yet."))
+                            let p = palette(cx);
+                            v_flex()
+                                .w_full()
+                                .min_h(px(200.0))
+                                .items_center()
+                                .justify_center()
+                                .gap_2p5()
+                                .px_6()
+                                .text_center()
+                                .child(
+                                    Icon::new(AppIcon::Genres)
+                                        .with_size(px(32.0))
+                                        .text_color(p.text_muted.opacity(0.6)),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(p.text_secondary)
+                                        .child(t!("No genres in your library yet.")),
+                                )
                                 .into_any_element()
                         } else {
                             self.render_genre_grid(window, cx)
@@ -303,15 +340,32 @@ impl NavidromeApp {
                         (None, Some(songs)) => t!("%{songs} songs", songs = songs),
                         (None, None) => t!("—"),
                     };
+                    let swatch = genre_swatch(&genre.value, dark);
+                    let highlight = if dark {
+                        swatch.blend(hsla(0.0, 0.0, 1.0, 0.09))
+                    } else {
+                        swatch.blend(hsla(0.0, 0.0, 1.0, 0.36))
+                    };
+                    let card_border = if dark {
+                        hsla(0.0, 0.0, 1.0, 0.09)
+                    } else {
+                        hsla(0.0, 0.0, 0.0, 0.07)
+                    };
                     v_flex()
                         .id(SharedString::from(format!("genre-card-{index}")))
-                        .h(px(96.0))
+                        .h(px(102.0))
                         .min_w_0()
                         .p_4()
                         .justify_end()
                         .gap_1()
                         .rounded(px(tokens::radius::COVER))
-                        .bg(genre_swatch(&genre.value, dark))
+                        .bg(linear_gradient(
+                            135.0,
+                            linear_color_stop(highlight, 0.0),
+                            linear_color_stop(swatch, 1.0),
+                        ))
+                        .border_1()
+                        .border_color(card_border)
                         .cursor_pointer()
                         .hover(|style| style.shadow(cover_shadow(true, cx)))
                         .on_click(cx.listener(move |this, _, _, cx| {
