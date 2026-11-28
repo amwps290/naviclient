@@ -28,12 +28,33 @@ pub(crate) enum LyricsPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub(crate) struct OverlayLyricsSettings {
+    pub two_line: bool,
+    pub font_size: u16,
+    pub locked: bool,
+    pub show_translation: bool,
+}
+
+impl Default for OverlayLyricsSettings {
+    fn default() -> Self {
+        Self {
+            two_line: true,
+            font_size: 24,
+            locked: false,
+            show_translation: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct LyricsSettings {
     pub enabled: bool,
     pub policy: LyricsPolicy,
     pub connection: SourceConnection,
     pub sources: Vec<ProviderId>,
     pub word_timing: bool,
+    pub overlay: OverlayLyricsSettings,
 }
 
 impl Default for LyricsSettings {
@@ -45,6 +66,7 @@ impl Default for LyricsSettings {
             // Upgrading preserves the set of services previously enabled.
             sources: vec![ProviderId::Lrclib],
             word_timing: true,
+            overlay: OverlayLyricsSettings::default(),
         }
     }
 }

@@ -71,6 +71,7 @@ impl NavidromeApp {
         changed |= self.poll_fullscreen(window, cx);
         let scrolling = self.state.lyrics.scroll_target.is_some();
         self.update_active_lyric();
+        self.sync_overlay_lyrics(cx);
         changed |= self.vinyl_cover.poll_ready();
         let playback = self.audio.state();
         self.sync_media_session(&playback);

@@ -137,6 +137,7 @@ pub struct NavidromeApp {
     reconnect: PlaybackReconnect,
     _subscriptions: Vec<Subscription>,
     mini_window: MiniWindowState,
+    overlay_lyrics: player::overlay_lyrics::OverlayLyricsState,
     fullscreen: player::fullscreen::window::FullscreenUi,
     /// 均衡器前级增益与 10 段滑杆状态。
     eq_preamp_slider: Entity<SliderState>,

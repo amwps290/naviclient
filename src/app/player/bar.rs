@@ -239,6 +239,31 @@ impl NavidromeApp {
                     cx,
                 ))
             })
+            .child(
+                toggle_icon_button(
+                    "player-overlay-lyrics",
+                    AppIcon::Translation,
+                    if self.overlay_lyrics_open() {
+                        if self.config.lyrics.overlay.locked {
+                            t!("Unlock desktop lyrics")
+                        } else {
+                            t!("Close desktop lyrics")
+                        }
+                    } else {
+                        t!("Desktop lyrics")
+                    },
+                    self.overlay_lyrics_open(),
+                    tokens::ICON_BUTTON_MD,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.overlay_lyrics_open() && this.config.lyrics.overlay.locked {
+                        this.set_overlay_lyrics_locked(false, cx);
+                    } else {
+                        this.toggle_overlay_lyrics(cx);
+                    }
+                })),
+            )
             .child(self.render_eq_popover(cx))
             .child(
                 toggle_icon_button(

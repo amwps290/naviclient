@@ -82,6 +82,34 @@ pub(in crate::app) fn set_always_on_top(window: &mut Window, on: bool) {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(in crate::app) fn set_click_through(window: &mut Window, enabled: bool) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    };
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let next = if enabled {
+            style | (WS_EX_LAYERED | WS_EX_TRANSPARENT) as isize
+        } else {
+            style & !(WS_EX_TRANSPARENT as isize)
+        };
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(in crate::app) fn set_click_through(_window: &mut Window, _enabled: bool) {}
+
 #[cfg(not(target_os = "windows"))]
 pub(in crate::app) fn set_always_on_top(_window: &mut Window, on: bool) {
     log::warn!(

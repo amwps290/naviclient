@@ -31,7 +31,7 @@
 | **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ✅ 已完成 | P1 | 建议在 LP-01 后，也可独立先行 |
 | | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ✅ 已完成 | P2 | 复用现有 `ListeningHistory` |
 | | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ✅ 已完成 | P2 | 无 |
-| **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ⬜ 待开发 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
+| **Phase 4：高频体验补齐** | LP-08 | 桌面悬浮歌词窗口（Desktop Overlay Lyrics） | ✅ 已完成 | P1 | 复用现有 `mini_window` 与 `word_lyrics` |
 | | LP-09 | 歌曲列表多列排序与局部过滤 | ⬜ 待开发 | P2 | 无 |
 | | LP-10 | 睡眠定时器（Sleep Timer） | ⬜ 待开发 | P2 | 无 |
 | | LP-11 | 切歌淡入淡出（Crossfade）与倍速播放 | ⬜ 待开发 | P2 | Audio Worker 管线扩展 |
@@ -222,7 +222,9 @@
 
 ---
 
-### LP-08：桌面悬浮歌词窗口（Desktop Overlay Lyrics）
+### LP-08：桌面悬浮歌词窗口（Desktop Overlay Lyrics） ✅ 已完成
+
+> **完成说明（2026-11-28）**：已实现独立无边框透明置顶桌面悬浮歌词窗口（`src/app/player/overlay_lyrics.rs`），实时同步逐字高亮（`WordLyrics`）、双行译文/下一句与单行极简模式、字号调整（16–44 px）、拖动定位与悬停半透明播控工具条（上一首/播放暂停/下一首/字号 ±/单双行/锁定/关闭）；新增 Windows 平台 `WS_EX_LAYERED | WS_EX_TRANSPARENT` 鼠标穿透切换（`set_click_through`）及播放栏一键开关/解锁入口，并在「设置 → 歌词」新增桌面悬浮歌词配置组与三语 i18n。
 
 #### 目标
 工作、写代码或浏览网页时，在桌面常驻一行/两行透明置顶歌词，支持逐字高亮、锁定鼠标穿透和快捷控制。

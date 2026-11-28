@@ -107,6 +107,98 @@ impl NavidromeApp {
             cx,
         );
 
+        let overlay_open = self.overlay_lyrics_open();
+        let overlay = &self.config.lyrics.overlay;
+        let overlay_group = settings_group(
+            Some(t!("Desktop overlay lyrics").into()),
+            None,
+            vec![
+                settings_row(
+                    t!("Desktop lyrics window"),
+                    Some(
+                        t!("Show a floating, always-on-top lyrics bar over other windows. Hover to reveal playback controls.")
+                            .into(),
+                    ),
+                    Switch::new("overlay-lyrics-open-switch")
+                        .checked(overlay_open)
+                        .accessibility_label(t!("Desktop lyrics window"))
+                        .on_change(cx.listener(|this, checked, _, cx| {
+                            if *checked {
+                                this.open_overlay_lyrics(cx);
+                            } else {
+                                this.close_overlay_lyrics(cx);
+                            }
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Two-line display"),
+                    Some(
+                        t!("Show translation or the next lyric line below the active line.")
+                            .into(),
+                    ),
+                    Switch::new("overlay-lyrics-two-line-switch")
+                        .checked(overlay.two_line)
+                        .accessibility_label(t!("Two-line display"))
+                        .on_change(cx.listener(|this, _, _, cx| {
+                            this.toggle_overlay_lyrics_two_line(cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Lock click-through"),
+                    Some(
+                        t!("Hide the hover toolbar and let clicks pass through. Click the lyrics button on the player bar or toggle here to unlock.")
+                            .into(),
+                    ),
+                    Switch::new("overlay-lyrics-lock-switch")
+                        .checked(overlay.locked)
+                        .accessibility_label(t!("Lock click-through"))
+                        .on_change(cx.listener(|this, checked, _, cx| {
+                            this.set_overlay_lyrics_locked(*checked, cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+                settings_row(
+                    t!("Overlay font size"),
+                    Some(t!("%{size} px", size = overlay.font_size).into()),
+                    h_flex()
+                        .items_center()
+                        .gap_1p5()
+                        .child(
+                            surface_button("settings-overlay-font-smaller")
+                                .label("A-")
+                                .compact_action()
+                                .disabled(
+                                    overlay.font_size
+                                        <= crate::app::player::overlay_lyrics::OVERLAY_MIN_FONT,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.adjust_overlay_lyrics_font(-2, cx);
+                                })),
+                        )
+                        .child(
+                            surface_button("settings-overlay-font-larger")
+                                .label("A+")
+                                .compact_action()
+                                .disabled(
+                                    overlay.font_size
+                                        >= crate::app::player::overlay_lyrics::OVERLAY_MAX_FONT,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.adjust_overlay_lyrics_font(2, cx);
+                                })),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
+            ],
+            cx,
+        );
+
         let online_group = settings_group(
             Some(t!("Online lyrics").into()),
             None,
@@ -247,6 +339,7 @@ impl NavidromeApp {
             .w_full()
             .gap_5()
             .child(display_group)
+            .child(overlay_group)
             .child(online_group)
             .child(sources_group)
             .child(cache_group)

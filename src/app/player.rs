@@ -13,5 +13,6 @@ pub(in crate::app) mod mini_view;
 pub(in crate::app) mod mini_window;
 pub(in crate::app) mod mini_window_state;
 pub(in crate::app) mod now_playing;
+pub(in crate::app) mod overlay_lyrics;
 pub(in crate::app) mod progress;
 pub(in crate::app) mod word_lyrics;

@@ -288,6 +288,7 @@ impl NavidromeApp {
             reconnect: PlaybackReconnect::default(),
             _subscriptions: Vec::new(),
             mini_window: MiniWindowState::default(),
+            overlay_lyrics: crate::app::player::overlay_lyrics::OverlayLyricsState::default(),
             fullscreen: crate::app::player::fullscreen::window::FullscreenUi::new(cx),
             eq_preamp_slider,
             eq_sliders,
