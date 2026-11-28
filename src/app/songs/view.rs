@@ -89,22 +89,39 @@ impl NavidromeApp {
                 this.child(self.render_multi_action_bar(scope, cx))
             })
             .when(!queue_drawer, |this| {
+                let p = palette(cx);
+                let dark = cx.theme().is_dark();
+                let header_border = if dark {
+                    hsla(0.0, 0.0, 1.0, 0.07)
+                } else {
+                    p.border.opacity(0.8)
+                };
                 this.child(
                     h_flex()
-                        .h(px(32.0))
+                        .h(px(34.0))
                         .flex_none()
                         .px_3()
+                        .mb_1()
                         .gap_3()
                         .items_center()
+                        .border_b_1()
+                        .border_color(header_border)
                         .text_size(px(tokens::CAPTION))
-                        .text_color(palette(cx).text_muted)
-                        .child(div().w(px(28.0)))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(p.text_muted)
+                        .child(
+                            div()
+                                .w(px(28.0))
+                                .text_center()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .child("#"),
+                        )
                         .when(scope.shows_row_cover(), |this| {
                             this.child(div().w(px(42.0)))
                         })
                         .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
                         .when(!compact_columns, |this| {
-                            this.child(div().flex_1().flex_grow(2.0).max_w(px(180.0)).child(
+                            this.child(div().flex_1().flex_grow(2.0).max_w(px(200.0)).child(
                                 if self.browsing_bilibili() {
                                     t!("Uploader")
                                 } else {

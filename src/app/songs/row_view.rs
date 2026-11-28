@@ -79,6 +79,17 @@ impl NavidromeApp {
         // uniform_list 把每行当作独立根元素布局（Definite 可用宽度），
         // 不会像普通容器那样横向拉伸，必须显式 w_full：否则行宽收缩为
         // 内容宽度，行尾按钮、悬停/正在播放高亮都无法纵向对齐。
+        let dark = cx.theme().is_dark();
+        let hover_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.045)
+        } else {
+            p.sunken.opacity(0.82)
+        };
+        let cover_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.08)
+        } else {
+            p.border.opacity(0.75)
+        };
         let row = h_flex()
             .id(SharedString::from(key.clone()))
             .w_full()
@@ -88,15 +99,15 @@ impl NavidromeApp {
             .relative()
             .rounded(px(tokens::radius::ROW))
             .when(highlighted, |this| this.bg(p.brand_soft))
-            .when(!highlighted, |this| this.hover(|style| style.bg(p.sunken)))
+            .when(!highlighted, |this| this.hover(move |style| style.bg(hover_bg)))
             // 当前播放歌曲使用内收圆角强调竖条，不破坏行容器圆角。
             .when(current, |this| {
                 this.child(
                     div()
                         .absolute()
                         .left(px(3.0))
-                        .top(px(10.0))
-                        .bottom(px(10.0))
+                        .top(px(11.0))
+                        .bottom(px(11.0))
                         .w(px(3.0))
                         .rounded_full()
                         .bg(p.brand),
@@ -130,19 +141,20 @@ impl NavidromeApp {
                         .text_color(p.on_brand),
                 )
                 .into_any_element()
-        } else if queue_drawer && current {
+        } else if current {
             self.render_playing_indicator(&key, true, animated, cx)
         } else {
             div()
                 .w_full()
                 .text_size(px(tokens::CAPTION))
+                .font_family(cx.theme().mono_font_family.clone())
                 .text_center()
                 .font_weight(if keyboard_selected {
                     FontWeight::SEMIBOLD
                 } else {
                     FontWeight::NORMAL
                 })
-                .text_color(if keyboard_selected || current {
+                .text_color(if keyboard_selected {
                     p.brand
                 } else {
                     p.text_muted
@@ -166,13 +178,16 @@ impl NavidromeApp {
                     .w(px(42.0))
                     .h(px(42.0))
                     .flex_none()
+                    .rounded(px(tokens::radius::CONTROL))
+                    .border_1()
+                    .border_color(cover_border)
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(self.render_song_cover_styled(
                         song,
                         40.0,
-                        tokens::radius::CONTROL,
+                        tokens::radius::CONTROL - 1.0,
                         Vec::new(),
                     )),
             )
@@ -184,9 +199,6 @@ impl NavidromeApp {
                 .min_w_0()
                 .gap_2()
                 .text_color(if current { p.brand } else { p.text })
-                .when(!queue_drawer, |this| {
-                    this.child(self.render_playing_indicator(&key, current, animated, cx))
-                })
                 .child(
                     v_flex()
                         .flex_1()
@@ -195,13 +207,18 @@ impl NavidromeApp {
                         .child(
                             h_flex()
                                 .min_w_0()
+                                .items_center()
                                 .gap_1p5()
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w_0()
                                         .text_size(px(tokens::BODY))
-                                        .font_weight(FontWeight::MEDIUM)
+                                        .font_weight(if current {
+                                            FontWeight::SEMIBOLD
+                                        } else {
+                                            FontWeight::MEDIUM
+                                        })
                                         .line_height(rems(1.25))
                                         .truncate()
                                         .child(song.title.clone()),
@@ -248,7 +265,7 @@ impl NavidromeApp {
                 div()
                     .flex_1()
                     .flex_grow(2.0)
-                    .max_w(px(180.0))
+                    .max_w(px(200.0))
                     .min_w_0()
                     .text_size(px(tokens::META))
                     .text_color(p.text_secondary)
@@ -268,9 +285,10 @@ impl NavidromeApp {
                 } else {
                     64.0
                 }))
-                .text_size(px(tokens::META))
+                .text_size(px(tokens::CAPTION))
+                .font_family(cx.theme().mono_font_family.clone())
                 .text_right()
-                .text_color(p.text_secondary)
+                .text_color(p.text_muted)
                 .child(format_duration(song.duration)),
         )
         .child(

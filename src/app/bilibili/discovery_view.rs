@@ -13,6 +13,7 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let state = &self.state.bilibili_discovery;
         let columns = self.video_content_columns(window);
         let focused = self
@@ -20,11 +21,17 @@ impl NavidromeApp {
             .read(cx)
             .focus_handle(cx)
             .is_focused(window);
+        let has_query = !self.bilibili_search_input.read(cx).value().trim().is_empty();
+        let border_idle = if dark {
+            hsla(0.0, 0.0, 1.0, 0.08)
+        } else {
+            p.border.opacity(0.80)
+        };
         let mut content =
             v_flex().w_full().gap(px(tokens::SECTION_GAP)).child(
                 v_flex()
                     .w_full()
-                    .gap_6()
+                    .gap_5()
                     .child(self.page_header(
                         t!("Search"),
                         t!("Search Bilibili videos, or open a BV/AV ID or official link."),
@@ -33,6 +40,7 @@ impl NavidromeApp {
                     .child(
                         h_flex()
                             .w_full()
+                            .max_w(px(860.0))
                             .items_center()
                             .gap_2()
                             .child(
@@ -40,7 +48,9 @@ impl NavidromeApp {
                                     .flex_1()
                                     .min_w_0()
                                     .h(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                    .px_4()
+                                    .pl_4()
+                                    .pr_1p5()
+                                    .gap_2()
                                     .items_center()
                                     .rounded(px(tokens::radius::FULL))
                                     .bg(p.sunken)
@@ -48,7 +58,7 @@ impl NavidromeApp {
                                     .border_color(if focused {
                                         cx.theme().ring
                                     } else {
-                                        cx.theme().transparent
+                                        border_idle
                                     })
                                     .child(
                                         Input::new(&self.bilibili_search_input)
@@ -64,21 +74,43 @@ impl NavidromeApp {
                                             .prefix(
                                                 Icon::new(KitIcon::Search)
                                                     .small()
-                                                    .text_color(p.text_muted),
+                                                    .text_color(if focused {
+                                                        p.brand
+                                                    } else {
+                                                        p.text_muted
+                                                    }),
                                             ),
+                                    )
+                                    .when(has_query, |this| {
+                                        this.child(
+                                            icon_button(
+                                                "clear-bilibili-search-input",
+                                                AppIcon::Close,
+                                                t!("Clear"),
+                                                tokens::ICON_BUTTON_XS,
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.bilibili_search_input.update(
+                                                    cx,
+                                                    |input, cx| input.set_value("", window, cx),
+                                                );
+                                                this.state.bilibili_discovery.input_error = None;
+                                                cx.notify();
+                                            })),
+                                        )
+                                    })
+                                    .child(
+                                        primary_button("bilibili-submit-search")
+                                            .label(t!("Search"))
+                                            .px_5()
+                                            .rounded(px(tokens::radius::FULL))
+                                            .h(px(tokens::SEARCH_CONTROL_HEIGHT - 8.0))
+                                            .loading(state.search_loading())
+                                            .disabled(self.api.is_none())
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.submit_bilibili_discovery(cx)
+                                            })),
                                     ),
-                            )
-                            .child(
-                                primary_button("bilibili-submit-search")
-                                    .label(t!("Search"))
-                                    .px_6()
-                                    .rounded(px(tokens::radius::FULL))
-                                    .h(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                    .loading(state.search_loading())
-                                    .disabled(self.api.is_none())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.submit_bilibili_discovery(cx)
-                                    })),
                             ),
                     )
                     .when(self.api.is_none(), |this| {

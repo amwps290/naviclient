@@ -326,6 +326,13 @@ impl NavidromeApp {
         match result {
             Ok(outcome) => {
                 self.lyrics_ui.records = matching::ranked(&self.lyrics_ui.query, outcome.records);
+                self.lyrics_ui.selected = self
+                    .lyrics_ui
+                    .records
+                    .iter()
+                    .position(|record| {
+                        !self.lyrics_ui.word_only || record.lyrics().has_word_timing()
+                    });
                 self.lyrics_ui.failures = outcome
                     .failures
                     .into_iter()

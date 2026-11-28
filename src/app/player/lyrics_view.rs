@@ -334,136 +334,260 @@ impl NavidromeApp {
         window: &Window,
         cx: &Context<Self>,
     ) -> Dialog {
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let compact = f32::from(window.viewport_size().width) < 820.0;
         let viewport_height = f32::from(window.viewport_size().height);
         let ui = &self.lyrics_ui;
         let enabled = self.config.lyrics.enabled;
-        let app = cx.entity().downgrade();
         let source = ui.source;
         let sources = self.config.lyrics.enabled_sources();
-        let fields = v_flex()
-            .gap_2()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_xs().child(t!("Song title")))
-                            .child(Input::new(&ui.title)),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_xs().child(t!("Artist (optional)")))
-                            .child(Input::new(&ui.artist)),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_end()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_xs().child(t!("Album (optional)")))
-                            .child(Input::new(&ui.album)),
-                    )
-                    .child(
-                        primary_button("search-online-lyrics")
-                            .label(t!("Search lyrics"))
-                            .compact_action()
-                            .disabled(!enabled)
-                            .on_click(cx.listener(|this, _, _, cx| this.search_lyrics(cx))),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().text_xs().child(t!("Lyrics source")))
-                    .child(
-                        surface_button("lyrics-search-source")
-                            .label(
-                                source
-                                    .map(ProviderId::label)
-                                    .unwrap_or_else(|| t!("All enabled sources").into()),
-                            )
-                            .compact_action()
-                            .dropdown_caret(true)
-                            .disabled(!enabled || sources.is_empty())
-                            .dropdown_menu(move |menu, _, cx| {
-                                app.update(cx, |_, cx| {
-                                    std::iter::once(None)
-                                        .chain(sources.iter().copied().map(Some))
-                                        .fold(menu, |menu, choice| {
-                                            menu.item(
-                                                PopupMenuItem::new(
-                                                    choice.map(ProviderId::label).unwrap_or_else(
-                                                        || t!("All enabled sources").into(),
-                                                    ),
-                                                )
-                                                .checked(choice == source)
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.lyrics_ui.source = choice;
-                                                    this.search_lyrics(cx);
-                                                })),
-                                            )
-                                        })
-                                })
-                                .expect("app owns lyrics source picker")
-                            }),
-                    ),
-            )
+        let panel_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.03)
+        } else {
+            p.sunken.opacity(0.62)
+        };
+        let panel_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.08)
+        } else {
+            p.border.opacity(0.85)
+        };
+        let hairline = if dark {
+            hsla(0.0, 0.0, 1.0, 0.07)
+        } else {
+            p.border.opacity(0.75)
+        };
+        let badge_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.06)
+        } else {
+            p.raised.opacity(0.85)
+        };
+        let duration_label = ui
+            .query
+            .duration
+            .map(|d| {
+                t!(
+                    "Current audio: %{duration}",
+                    duration = format_duration(Some(d as i32))
+                )
+                .to_string()
+            })
+            .unwrap_or_else(|| t!("Unknown duration").to_string());
+
+        let field = |label: SharedString, input: &Entity<InputState>| {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(p.text_muted)
+                        .child(label),
+                )
+                .child(Input::new(input))
+        };
+
+        let search_inputs = if compact {
+            v_flex()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .gap_2p5()
+                        .child(field(t!("Song title").into(), &ui.title))
+                        .child(field(t!("Artist (optional)").into(), &ui.artist)),
+                )
+                .child(
+                    h_flex()
+                        .gap_2p5()
+                        .items_end()
+                        .child(field(t!("Album (optional)").into(), &ui.album))
+                        .child(
+                            primary_button("search-online-lyrics")
+                                .label(t!("Search lyrics"))
+                                .compact_action()
+                                .loading(ui.request.is_some())
+                                .disabled(!enabled)
+                                .on_click(cx.listener(|this, _, _, cx| this.search_lyrics(cx))),
+                        ),
+                )
+                .into_any_element()
+        } else {
+            h_flex()
+                .gap_2p5()
+                .items_end()
+                .child(field(t!("Song title").into(), &ui.title))
+                .child(field(t!("Artist (optional)").into(), &ui.artist))
+                .child(field(t!("Album (optional)").into(), &ui.album))
+                .child(
+                    primary_button("search-online-lyrics")
+                        .label(t!("Search lyrics"))
+                        .compact_action()
+                        .loading(ui.request.is_some())
+                        .disabled(!enabled)
+                        .on_click(cx.listener(|this, _, _, cx| this.search_lyrics(cx))),
+                )
+                .into_any_element()
+        };
+
+        let source_pills = h_flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1p5()
             .child(
                 div()
                     .text_xs()
-                    .text_color(palette(cx).text_secondary)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(p.text_muted)
+                    .pr_1()
+                    .child(t!("Lyrics source")),
+            )
+            .children(
+                std::iter::once(None)
+                    .chain(sources.iter().copied().map(Some))
+                    .map(|choice| {
+                        let active = choice == source;
+                        let label: SharedString = choice
+                            .map(ProviderId::label)
+                            .unwrap_or_else(|| t!("All enabled sources").into());
+                        let id = match choice {
+                            Some(provider) => {
+                                SharedString::from(format!("lyrics-source-{}", provider.key()))
+                            }
+                            None => SharedString::from("lyrics-source-all"),
+                        };
+                        pill_filter_button(id, label, active, cx)
+                            .h(px(26.0))
+                            .px_2p5()
+                            .text_xs()
+                            .disabled(!enabled || sources.is_empty())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.lyrics_ui.source = choice;
+                                this.search_lyrics(cx);
+                            }))
+                    }),
+            );
+
+        let fields = v_flex()
+            .w_full()
+            .p_3()
+            .gap_2p5()
+            .rounded(px(tokens::radius::COVER))
+            .bg(panel_bg)
+            .border_1()
+            .border_color(panel_border)
+            .child(search_inputs)
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .justify_between()
+                    .items_center()
+                    .gap_2()
+                    .pt_2()
+                    .border_t_1()
+                    .border_color(hairline)
+                    .child(source_pills)
                     .child(
-                        ui.query
-                            .duration
-                            .map(|d| {
-                                t!(
-                                    "Current audio: %{duration}",
-                                    duration = format_duration(Some(d as i32))
-                                )
-                                .to_string()
-                            })
-                            .unwrap_or_else(|| t!("Unknown duration").to_string()),
+                        div()
+                            .flex_none()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_full()
+                            .bg(badge_bg)
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(p.text_secondary)
+                            .child(duration_label),
                     ),
             );
+
+        let visible_records: Vec<(usize, &Record)> = ui
+            .records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| !ui.word_only || record.lyrics().has_word_timing())
+            .collect();
+        let visible_count = visible_records.len();
+
         let candidates = v_flex()
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(t!("Candidates")),
-            )
+            .rounded(px(tokens::radius::COVER))
+            .bg(panel_bg)
+            .border_1()
+            .border_color(panel_border)
+            .overflow_hidden()
             .child(
                 h_flex()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
                     .justify_between()
                     .items_center()
                     .gap_2()
-                    .child(div().text_xs().child(t!("Only word-by-word lyrics")))
+                    .border_b_1()
+                    .border_color(hairline)
                     .child(
-                        Switch::new("word-lyrics-candidates-only")
-                            .checked(ui.word_only)
-                            .accessibility_label(t!("Only word-by-word lyrics"))
-                            .on_change(cx.listener(|this, checked, _, cx| {
-                                this.lyrics_ui.word_only = *checked;
-                                this.lyrics_ui.selected = None;
-                                cx.notify();
-                            })),
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(p.text)
+                                    .child(t!("Candidates")),
+                            )
+                            .when(visible_count > 0, |this| {
+                                this.child(
+                                    div()
+                                        .px_1p5()
+                                        .py_0p5()
+                                        .rounded_full()
+                                        .bg(badge_bg)
+                                        .text_xs()
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .text_color(p.text_secondary)
+                                        .child(visible_count.to_string()),
+                                )
+                            }),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(p.text_secondary)
+                                    .child(t!("Only word-by-word lyrics")),
+                            )
+                            .child(
+                                Switch::new("word-lyrics-candidates-only")
+                                    .checked(ui.word_only)
+                                    .accessibility_label(t!("Only word-by-word lyrics"))
+                                    .on_change(cx.listener(|this, checked, _, cx| {
+                                        this.lyrics_ui.word_only = *checked;
+                                        let keep_selected =
+                                            this.lyrics_ui.selected.filter(|&index| {
+                                                this.lyrics_ui.records.get(index).is_some_and(
+                                                    |record| {
+                                                        !*checked
+                                                            || record.lyrics().has_word_timing()
+                                                    },
+                                                )
+                                            });
+                                        this.lyrics_ui.selected = keep_selected.or_else(|| {
+                                            this.lyrics_ui.records.iter().position(|record| {
+                                                !*checked || record.lyrics().has_word_timing()
+                                            })
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
             .child(
@@ -471,198 +595,356 @@ impl NavidromeApp {
                     .id("lyrics-candidates")
                     .flex_1()
                     .min_h_0()
+                    .p_2()
                     .overflow_y_scroll()
                     .track_scroll(&ui.candidates_scroll)
-                    .gap_2()
-                    .children(
-                        ui.records
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, record)| {
-                                !ui.word_only || record.lyrics().has_word_timing()
-                            })
-                            .map(|(index, record)| {
-                                let info = matching::assess(&ui.query, record);
-                                Button::new(SharedString::from(format!(
-                                    "lyrics-candidate-{}-{}",
-                                    record.source.key(),
-                                    record.id
-                                )))
+                    .gap_1p5()
+                    .children(visible_records.into_iter().map(|(index, record)| {
+                        let info = matching::assess(&ui.query, record);
+                        let is_selected = ui.selected == Some(index);
+                        let format_label = if record.instrumental {
+                            t!("Instrumental")
+                        } else if record.lyrics().has_word_timing() {
+                            t!("Word-by-word lyrics")
+                        } else if record.lyrics().is_synced() {
+                            t!("Synced lyrics")
+                        } else {
+                            t!("Plain text lyrics")
+                        };
+                        let is_word_timed = !record.instrumental && record.lyrics().has_word_timing();
+                        let tag = |text: SharedString, accent: bool| {
+                            div()
+                                .flex_none()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_full()
+                                .bg(if accent { p.brand_soft } else { badge_bg })
+                                .text_xs()
+                                .text_color(if accent { p.brand } else { p.text_secondary })
+                                .child(text)
+                        };
+                        let mut hints: Vec<(SharedString, bool)> = Vec::new();
+                        if info.names {
+                            hints.push((t!("Song title and artist match").into(), true));
+                        } else {
+                            hints.push((t!("Song title or artist differs").into(), false));
+                        }
+                        if let Some(delta) = info.duration_delta {
+                            hints.push((
+                                t!(
+                                    "Duration differs by %{seconds} seconds",
+                                    seconds = format!("{delta:.1}")
+                                )
+                                .into(),
+                                false,
+                            ));
+                        }
+                        if info.album == Some(false) {
+                            hints.push((t!("Different album").into(), false));
+                        }
+                        if !info.version {
+                            hints.push((t!("Different performance version").into(), false));
+                        }
+                        Button::new(SharedString::from(format!(
+                            "lyrics-candidate-{}-{}",
+                            record.source.key(),
+                            record.id
+                        )))
+                        .w_full()
+                        .h_auto()
+                        .justify_start()
+                        .py_2p5()
+                        .px_3()
+                        .rounded(px(tokens::radius::ROW))
+                        .border_1()
+                        .border_color(if is_selected {
+                            p.brand.opacity(if dark { 0.55 } else { 0.45 })
+                        } else {
+                            hairline
+                        })
+                        .cursor_pointer()
+                        .selected(is_selected)
+                        .custom(soft_toggle_style(is_selected, cx))
+                        .child(
+                            v_flex()
+                                .min_w_0()
                                 .w_full()
-                                .h_auto()
-                                .justify_start()
-                                .py_2()
-                                .px_3()
-                                .rounded(px(tokens::radius::ROW))
-                                .border_1()
-                                .border_color(if ui.selected == Some(index) {
-                                    palette(cx).brand.opacity(0.45)
-                                } else {
-                                    palette(cx).border
-                                })
-                                .cursor_pointer()
-                                .selected(ui.selected == Some(index))
-                                .custom(soft_toggle_style(ui.selected == Some(index), cx))
+                                .items_start()
+                                .gap_1p5()
                                 .child(
-                                    v_flex()
-                                        .min_w_0()
+                                    h_flex()
                                         .w_full()
-                                        .items_start()
-                                        .gap_1()
-                                        .child(div().text_sm().truncate().child(format!(
-                                            "{} · {}",
-                                            record.track_name, record.artist_name
-                                        )))
+                                        .min_w_0()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
                                         .child(
                                             div()
-                                                .text_xs()
-                                                .text_color(palette(cx).text_secondary)
-                                                .child(format!(
-                                                    "{} · {} · {} · {}",
-                                                    record.source.label(),
-                                                    record.album_name,
-                                                    record_duration(record),
-                                                    if record.instrumental {
-                                                        t!("Instrumental")
-                                                    } else if record.lyrics().has_word_timing() {
-                                                        t!("Word-by-word lyrics")
-                                                    } else if record.lyrics().is_synced() {
-                                                        t!("Synced lyrics")
-                                                    } else {
-                                                        t!("Plain text lyrics")
-                                                    }
-                                                )),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(palette(cx).text_secondary)
-                                                .child(if info.names {
-                                                    t!("Song title and artist match")
+                                                .flex_1()
+                                                .min_w_0()
+                                                .text_sm()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(if is_selected {
+                                                    p.brand
                                                 } else {
-                                                    t!("Song title or artist differs")
-                                                }),
+                                                    p.text
+                                                })
+                                                .truncate()
+                                                .child(record.track_name.clone()),
                                         )
-                                        .when_some(info.duration_delta, |this, delta| {
-                                            this.child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(palette(cx).text_secondary)
-                                                    .child(t!(
-                                                        "Duration differs by %{seconds} seconds",
-                                                        seconds = format!("{delta:.1}")
-                                                    )),
-                                            )
-                                        })
-                                        .when(info.album == Some(false), |this| {
-                                            this.child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(palette(cx).text_secondary)
-                                                    .child(t!("Different album")),
-                                            )
-                                        })
-                                        .when(!info.version, |this| {
-                                            this.child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(palette(cx).text_secondary)
-                                                    .child(t!("Different performance version")),
-                                            )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_color(p.text_muted)
+                                                .child(record_duration(record)),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .text_xs()
+                                        .text_color(p.text_secondary)
+                                        .truncate()
+                                        .child(if record.album_name.trim().is_empty() {
+                                            record.artist_name.clone()
+                                        } else {
+                                            format!("{} · {}", record.artist_name, record.album_name)
                                         }),
                                 )
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        this.lyrics_ui.selected = Some(index);
-                                        cx.notify();
-                                    },
-                                ))
-                            }),
-                    )
+                                .child(
+                                    h_flex()
+                                        .flex_wrap()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(tag(record.source.label(), false))
+                                        .child(tag(format_label.into(), is_word_timed)),
+                                )
+                                .child(
+                                    h_flex()
+                                        .flex_wrap()
+                                        .items_center()
+                                        .gap_x_2()
+                                        .gap_y_0p5()
+                                        .children(hints.into_iter().map(|(label, good)| {
+                                            h_flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .child(div().size(px(5.0)).rounded_full().bg(
+                                                    if good {
+                                                        p.online
+                                                    } else {
+                                                        p.text_muted.opacity(0.6)
+                                                    },
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(if good {
+                                                            p.text_secondary
+                                                        } else {
+                                                            p.text_muted
+                                                        })
+                                                        .child(label),
+                                                )
+                                        })),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.lyrics_ui.selected = Some(index);
+                            cx.notify();
+                        }))
+                    }))
                     .when(ui.request.is_some(), |this| {
                         this.child(
-                            div()
+                            v_flex()
+                                .flex_1()
+                                .min_h(px(120.0))
+                                .items_center()
+                                .justify_center()
+                                .gap_2()
                                 .text_sm()
+                                .text_color(p.text_secondary)
                                 .child(LyricsStatus::SearchingOnline.message()),
                         )
                     })
                     .when_some(ui.error, |this, error| {
-                        this.child(div().text_sm().child(error.message()))
+                        this.child(
+                            div()
+                                .px_2()
+                                .py_4()
+                                .text_sm()
+                                .text_color(p.text_secondary)
+                                .child(error.message()),
+                        )
                     })
                     .when(
                         ui.word_only
                             && ui.searched
                             && ui.request.is_none()
-                            && !ui
-                                .records
-                                .iter()
-                                .any(|record| record.lyrics().has_word_timing()),
+                            && visible_count == 0
+                            && ui.error.is_none(),
                         |this| {
                             this.child(
                                 div()
+                                    .px_2()
+                                    .py_4()
                                     .text_sm()
-                                    .text_color(palette(cx).text_secondary)
+                                    .text_color(p.text_secondary)
                                     .child(t!("No word-by-word lyrics found.")),
                             )
                         },
                     )
                     .children(ui.failures.iter().map(|(id, status)| {
                         div()
+                            .px_2()
                             .text_xs()
-                            .text_color(palette(cx).text_secondary)
+                            .text_color(p.text_muted)
                             .child(format!("{} · {}", id.label(), status.message()))
                     }))
-                    .when(!ui.searched, |this| {
+                    .when(!ui.searched && ui.request.is_none(), |this| {
                         this.child(
-                            div()
+                            v_flex()
+                                .flex_1()
+                                .min_h(px(120.0))
+                                .items_center()
+                                .justify_center()
+                                .px_4()
+                                .text_center()
                                 .text_sm()
-                                .text_color(palette(cx).text_secondary)
+                                .text_color(p.text_muted)
                                 .child(t!("Search, then select a candidate to preview.")),
                         )
                     }),
             );
+
         let selected = ui.selected.and_then(|i| ui.records.get(i));
         let preview = v_flex()
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .gap_2()
+            .rounded(px(tokens::radius::COVER))
+            .bg(panel_bg)
+            .border_1()
+            .border_color(panel_border)
+            .overflow_hidden()
             .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(t!("Preview")),
+                h_flex()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
+                    .justify_between()
+                    .items_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(hairline)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.text)
+                            .child(t!("Preview")),
+                    )
+                    .when_some(selected, |this, record| {
+                        this.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(p.text_muted)
+                                .child(format!(
+                                    "{} · {}",
+                                    record.source.label(),
+                                    record_duration(record)
+                                )),
+                        )
+                    }),
             )
             .child(
                 v_flex()
                     .id("lyrics-preview")
                     .flex_1()
                     .min_h_0()
+                    .p_3()
                     .overflow_y_scroll()
-                    .gap_2()
+                    .gap_1p5()
                     .when_some(selected, |this, record| {
-                        this.children(record.lyrics().lines.into_iter().map(|line| {
-                            div().text_sm().child(
-                                line.start_ms
-                                    .filter(|_| !ui.plain)
-                                    .map(|ms| {
-                                        format!(
-                                            "[{}] {}",
-                                            format_duration(Some(
-                                                (ms / 1000).min(i32::MAX as u64) as i32
-                                            )),
-                                            line.text
+                        let parsed = record.lyrics();
+                        this.children(parsed.lines.into_iter().map(|line| {
+                            let timestamp = line.start_ms.filter(|_| !ui.plain).map(|ms| {
+                                format_duration(Some((ms / 1000).min(i32::MAX as u64) as i32))
+                            });
+                            let translation = line.translation.filter(|t| !t.trim().is_empty());
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .items_start()
+                                .gap_2p5()
+                                .when_some(timestamp, |row, stamp| {
+                                    row.child(
+                                        div()
+                                            .w(px(42.0))
+                                            .flex_none()
+                                            .text_right()
+                                            .text_xs()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .text_color(p.text_muted)
+                                            .pt(px(2.0))
+                                            .child(stamp),
+                                    )
+                                })
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap_0p5()
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(p.text)
+                                                .line_height(relative(1.4))
+                                                .child(line.text),
                                         )
-                                    })
-                                    .unwrap_or(line.text),
-                            )
+                                        .when_some(translation, |col, trans| {
+                                            col.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(p.text_secondary)
+                                                    .line_height(relative(1.35))
+                                                    .child(trans),
+                                            )
+                                        }),
+                                )
                         }))
                         .when(record.instrumental, |this| {
-                            this.child(LyricsStatus::Instrumental.message())
+                            this.child(
+                                div()
+                                    .py_4()
+                                    .text_sm()
+                                    .text_color(p.text_secondary)
+                                    .child(LyricsStatus::Instrumental.message()),
+                            )
                         })
+                    })
+                    .when(selected.is_none(), |this| {
+                        this.child(
+                            v_flex()
+                                .flex_1()
+                                .min_h(px(120.0))
+                                .items_center()
+                                .justify_center()
+                                .px_4()
+                                .text_center()
+                                .text_sm()
+                                .text_color(p.text_muted)
+                                .child(t!("Search, then select a candidate to preview.")),
+                        )
                     }),
             );
-        let body_height = (viewport_height - 380.0).clamp(120.0, 400.0);
+
+        let body_height = (viewport_height - 340.0).clamp(180.0, 440.0);
         let results = if compact {
             v_flex()
                 .h(px(body_height))
@@ -674,7 +956,7 @@ impl NavidromeApp {
             h_flex()
                 .h(px(body_height))
                 .items_stretch()
-                .gap_4()
+                .gap_3()
                 .child(candidates)
                 .child(preview)
                 .into_any_element()
@@ -685,41 +967,87 @@ impl NavidromeApp {
             .gap_3()
             .child(fields)
             .when(!enabled, |this| {
-                this.child(div().text_sm().child(t!(
-                    "Enable online lyrics in Settings to search lyrics services."
-                )))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(palette(cx).text_secondary)
-                        .child(t!(
-                            "When enabled, song metadata is sent to the selected lyrics services."
-                        )),
-                )
-                .child(
-                    surface_button("enable-online-lyrics")
-                        .label(t!("Enable online lyrics"))
-                        .compact_action()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_lyrics_settings(|s| s.enabled = true, cx);
-                        })),
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .px_3()
+                        .py_2p5()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .rounded(px(tokens::radius::ROW))
+                        .bg(p.brand_soft)
+                        .border_1()
+                        .border_color(p.brand.opacity(0.28))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(p.text)
+                                        .child(t!(
+                                            "Enable online lyrics in Settings to search lyrics services."
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(p.text_secondary)
+                                        .child(t!(
+                                            "When enabled, song metadata is sent to the selected lyrics services."
+                                        )),
+                                ),
+                        )
+                        .child(
+                            surface_button("enable-online-lyrics")
+                                .label(t!("Enable online lyrics"))
+                                .compact_action()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.save_lyrics_settings(|s| s.enabled = true, cx);
+                                })),
+                        ),
                 )
             })
             .child(results)
             .when(uncertain, |this| {
                 this.child(
-                    div()
-                        .text_xs()
-                        .text_color(palette(cx).text_secondary)
-                        .child(t!(
-                            "Timing may differ for this version. You can display it as plain text."
-                        )),
+                    h_flex()
+                        .w_full()
+                        .px_3()
+                        .py_2()
+                        .items_center()
+                        .gap_2()
+                        .rounded(px(tokens::radius::CONTROL))
+                        .bg(panel_bg)
+                        .border_1()
+                        .border_color(hairline)
+                        .child(div().size(px(6.0)).flex_none().rounded_full().bg(p.brand))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.text_secondary)
+                                .child(t!(
+                                    "Timing may differ for this version. You can display it as plain text."
+                                )),
+                        ),
                 )
             })
             .child(
                 h_flex()
-                    .gap_4()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .gap_5()
                     .flex_wrap()
+                    .items_center()
+                    .rounded(px(tokens::radius::CONTROL))
+                    .bg(panel_bg)
+                    .border_1()
+                    .border_color(hairline)
                     .child(
                         Switch::new("remember-lyrics-choice")
                             .checked(ui.remember)
@@ -741,7 +1069,7 @@ impl NavidromeApp {
             );
         dialog
             .title(t!("Change lyrics for “%{title}”", title = ui.song_title))
-            .w(px(if compact { 620.0 } else { 900.0 }))
+            .w(px(if compact { 640.0 } else { 940.0 }))
             .max_w(px(f32::from(window.viewport_size().width) - 32.0))
             .margin_top(px(16.0))
             .child(content)

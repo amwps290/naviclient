@@ -2,6 +2,7 @@
 
 use crate::app::prelude::*;
 use crate::app::widgets::shelf::shelf_section;
+use gpui_kit::Focusable;
 
 impl NavidromeApp {
     pub(in crate::app) fn render_search(
@@ -10,9 +11,22 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let p = palette(cx);
+        let dark = cx.theme().is_dark();
+        let focused = self.search_input.read(cx).focus_handle(cx).is_focused(window);
+        let has_query = !self.search_input.read(cx).value().trim().is_empty();
+        let card_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.03)
+        } else {
+            p.sunken.opacity(0.60)
+        };
+        let card_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.07)
+        } else {
+            p.border.opacity(0.80)
+        };
         let mut content = v_flex().gap(px(tokens::SECTION_GAP)).child(
             v_flex()
-                .gap_6()
+                .gap_5()
                 .child(self.page_header(
                     t!("Search"),
                     t!("Find music across the entire server library."),
@@ -21,6 +35,7 @@ impl NavidromeApp {
                 .child(
                     h_flex()
                         .w_full()
+                        .max_w(px(860.0))
                         .gap_2()
                         .items_center()
                         .child(
@@ -28,10 +43,18 @@ impl NavidromeApp {
                                 .flex_1()
                                 .min_w_0()
                                 .h(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                .px_4()
+                                .pl_4()
+                                .pr_1p5()
+                                .gap_2()
                                 .items_center()
                                 .rounded(px(tokens::radius::FULL))
                                 .bg(p.sunken)
+                                .border_1()
+                                .border_color(if focused {
+                                    cx.theme().ring
+                                } else {
+                                    card_border
+                                })
                                 .child(
                                     Input::new(&self.search_input)
                                         .appearance(false)
@@ -43,34 +66,60 @@ impl NavidromeApp {
                                         .prefix(
                                             Icon::new(KitIcon::Search)
                                                 .small()
-                                                .text_color(p.text_muted),
+                                                .text_color(if focused {
+                                                    p.brand
+                                                } else {
+                                                    p.text_muted
+                                                }),
                                         ),
+                                )
+                                .when(has_query, |this| {
+                                    this.child(
+                                        icon_button(
+                                            "clear-search-input",
+                                            AppIcon::Close,
+                                            t!("Clear"),
+                                            tokens::ICON_BUTTON_XS,
+                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.search_input.update(cx, |input, cx| {
+                                                input.set_value("", window, cx);
+                                            });
+                                            this.state.search.clear();
+                                            this.state
+                                                .clear_song_selection_for_scope(SongScope::Search);
+                                            cx.notify();
+                                        })),
+                                    )
+                                })
+                                .child(
+                                    primary_button("run-search")
+                                        .label(t!("Search"))
+                                        .h(px(tokens::SEARCH_CONTROL_HEIGHT - 8.0))
+                                        .px_5()
+                                        .rounded(px(tokens::radius::FULL))
+                                        .loading(self.state.search.loading())
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.submit_search(cx);
+                                            cx.notify();
+                                        })),
                                 ),
                         )
-                        .child(
-                            primary_button("run-search")
-                                .label(t!("Search"))
-                                .h(px(tokens::SEARCH_CONTROL_HEIGHT))
-                                .px_6()
-                                .rounded(px(tokens::radius::FULL))
+                        .when(self.state.search.results().is_some(), |this| {
+                            this.child(
+                                icon_button(
+                                    "refresh-search",
+                                    AppIcon::Refresh,
+                                    t!("Run search again"),
+                                    tokens::ICON_BUTTON_LG,
+                                )
+                                .loading(self.state.search.loading())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit_search(cx);
                                     cx.notify();
                                 })),
-                        )
-                        .child(
-                            icon_button(
-                                "refresh-search",
-                                AppIcon::Refresh,
-                                t!("Run search again"),
-                                tokens::SEARCH_CONTROL_HEIGHT,
                             )
-                            .loading(self.state.search.loading())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_search(cx);
-                                cx.notify();
-                            })),
-                        ),
+                        }),
                 ),
         );
         if self.state.search.loading() && self.state.search.results().is_none() {
@@ -82,7 +131,14 @@ impl NavidromeApp {
         {
             content = content.child(
                 v_flex()
-                    .gap_2()
+                    .w_full()
+                    .max_w(px(860.0))
+                    .p_4()
+                    .gap_3()
+                    .rounded(px(tokens::radius::COVER))
+                    .bg(card_bg)
+                    .border_1()
+                    .border_color(card_border)
                     .child(
                         h_flex()
                             .items_center()
@@ -90,7 +146,7 @@ impl NavidromeApp {
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
+                                    .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(p.text_muted)
                                     .child(t!("Recent searches")),
                             )
@@ -131,30 +187,66 @@ impl NavidromeApp {
         }
         if let Some(results) = self.state.search.results() {
             // 过滤只在有结果后出现；会话内状态，不持久化。
-            content = content.child(h_flex().flex_wrap().items_center().gap_2().children(
-                SearchFilter::ALL.map(|filter| {
-                    let selected = self.state.search.filter() == filter;
-                    let count = match filter {
-                        SearchFilter::All => {
-                            results.artists.len() + results.albums.len() + results.songs.len()
-                        }
-                        SearchFilter::Artists => results.artists.len(),
-                        SearchFilter::Albums => results.albums.len(),
-                        SearchFilter::Songs => results.songs.len(),
-                    };
-                    let label = format!("{} ({count})", filter.label());
-                    pill_filter_button(
-                        SharedString::from(format!("search-filter-{filter:?}")),
-                        label,
-                        selected,
-                        cx,
-                    )
-                    .px_4()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_search_filter(filter, cx);
-                    }))
-                }),
-            ));
+            content = content.child(
+                h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .children(SearchFilter::ALL.map(|filter| {
+                        let selected = self.state.search.filter() == filter;
+                        let count = match filter {
+                            SearchFilter::All => {
+                                results.artists.len() + results.albums.len() + results.songs.len()
+                            }
+                            SearchFilter::Artists => results.artists.len(),
+                            SearchFilter::Albums => results.albums.len(),
+                            SearchFilter::Songs => results.songs.len(),
+                        };
+                        let badge_bg = if selected {
+                            p.brand.opacity(if dark { 0.24 } else { 0.14 })
+                        } else if dark {
+                            hsla(0.0, 0.0, 1.0, 0.06)
+                        } else {
+                            p.sunken
+                        };
+                        Button::new(SharedString::from(format!("search-filter-{filter:?}")))
+                            .custom(soft_toggle_style(selected, cx))
+                            .selected(selected)
+                            .rounded(px(tokens::radius::FULL))
+                            .h(px(32.0))
+                            .px_3p5()
+                            .cursor_pointer()
+                            .when(selected, |this| {
+                                this.border_1()
+                                    .border_color(p.brand.opacity(if dark { 0.30 } else { 0.20 }))
+                            })
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .child(
+                                        div()
+                                            .text_size(px(13.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child(filter.label()),
+                                    )
+                                    .child(
+                                        div()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_full()
+                                            .bg(badge_bg)
+                                            .text_xs()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .text_color(if selected { p.brand } else { p.text_muted })
+                                            .child(count.to_string()),
+                                    ),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_search_filter(filter, cx);
+                            }))
+                    })),
+            );
         }
         if let Some(results) = self.state.search.results() {
             let filter = self.state.search.filter();
