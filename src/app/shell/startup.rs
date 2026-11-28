@@ -361,7 +361,8 @@ impl NavidromeApp {
             if close_quitting.load(Ordering::Relaxed) {
                 // 真正退出前保存最后状态。
                 if let Some(Some(root)) = window.root::<NavidromeApp>() {
-                    root.update(cx, |app, _cx| {
+                    root.update(cx, |app, cx| {
+                        app.close_overlay_lyrics(cx);
                         app.save_playback_before_exit();
                     });
                 }
@@ -379,6 +380,11 @@ impl NavidromeApp {
                     window.minimize_window();
                     false
                 } else {
+                    if let Some(Some(root)) = window.root::<NavidromeApp>() {
+                        root.update(cx, |app, cx| {
+                            app.close_overlay_lyrics(cx);
+                        });
+                    }
                     true
                 }
             }

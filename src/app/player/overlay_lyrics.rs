@@ -1,10 +1,10 @@
 //! Standalone borderless, transparent, always-on-top Desktop Overlay Lyrics window.
 
 use gpui_kit::{
-    div, hsla, point, px, size, AnyWindowHandle, Context, FocusHandle, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind,
-    WindowOptions,
+    div, hsla, point, px, size, transparent_black, AnyWindowHandle, Context, FocusHandle,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowControlArea, WindowDecorations, WindowKind, WindowOptions,
 };
 
 use super::word_lyrics::WordLyrics;
@@ -12,8 +12,8 @@ use crate::app::prelude::*;
 use crate::models::{Lyrics, WordTimedLine};
 
 const OVERLAY_DEFAULT_WIDTH: f32 = 760.0;
-const OVERLAY_TWO_LINE_HEIGHT: f32 = 136.0;
-const OVERLAY_ONE_LINE_HEIGHT: f32 = 96.0;
+const OVERLAY_TWO_LINE_HEIGHT: f32 = 128.0;
+const OVERLAY_ONE_LINE_HEIGHT: f32 = 88.0;
 pub(in crate::app) const OVERLAY_MIN_FONT: u16 = 16;
 pub(in crate::app) const OVERLAY_MAX_FONT: u16 = 44;
 
@@ -187,29 +187,64 @@ impl Render for DesktopLyricsView {
         let font_px = snap.font_size as f32;
         let secondary_px = (font_px * 0.62).clamp(12.0, 22.0);
         let accent = palette(cx).brand;
-        let base_color = hsla(0.0, 0.0, 0.96, 0.95);
-        let dim_color = hsla(0.0, 0.0, 0.90, 0.72);
+        let base_color = hsla(0.0, 0.0, 0.98, 0.98);
+        let dim_color = hsla(0.0, 0.0, 0.92, 0.78);
+        let shadow_color = hsla(0.0, 0.0, 0.0, 0.85);
 
+        // Render a subtle dark drop-shadow behind text so lyrics remain crisp and
+        // legible on bright wallpapers even with a completely transparent backdrop.
         let primary_el: gpui_kit::AnyElement = if let Some(words) = snap.primary_words.clone() {
             div()
+                .relative()
                 .w_full()
                 .flex()
                 .justify_center()
                 .text_size(px(font_px))
                 .font_weight(FontWeight::BOLD)
                 .line_height(px(font_px * 1.32))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .top(px(1.5))
+                        .left(px(1.0))
+                        .w_full()
+                        .text_center()
+                        .text_color(shadow_color)
+                        .truncate()
+                        .child(words.text.clone()),
+                )
                 .child(WordLyrics::new(words, snap.position_ms, dim_color, accent))
                 .into_any_element()
         } else {
             div()
+                .relative()
                 .w_full()
                 .text_center()
                 .text_size(px(font_px))
                 .font_weight(FontWeight::BOLD)
                 .line_height(px(font_px * 1.32))
-                .text_color(base_color)
-                .truncate()
-                .child(snap.primary_text.clone())
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .top(px(1.5))
+                        .left(px(1.0))
+                        .w_full()
+                        .text_center()
+                        .text_color(shadow_color)
+                        .truncate()
+                        .child(snap.primary_text.clone()),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .text_center()
+                        .text_color(base_color)
+                        .truncate()
+                        .child(snap.primary_text.clone()),
+                )
                 .into_any_element()
         };
 
@@ -230,10 +265,18 @@ impl Render for DesktopLyricsView {
             .items_center()
             .justify_center()
             .rounded_full()
-            .bg(hsla(0.0, 0.0, 0.08, 0.78))
+            .bg(hsla(0.0, 0.0, 0.08, 0.84))
             .border_1()
-            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .border_color(hsla(0.0, 0.0, 1.0, 0.16))
+            .shadow(vec![box_shadow(
+                px(0.0),
+                px(4.0),
+                px(14.0),
+                px(0.0),
+                hsla(0.0, 0.0, 0.0, 0.42),
+            )])
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .occlude()
             .child(
                 icon_button(
                     "overlay-prev",
@@ -338,52 +381,61 @@ impl Render for DesktopLyricsView {
                     t!("Close desktop lyrics"),
                     tokens::ICON_BUTTON_XS,
                 )
-                .on_click(move |_, _, cx| {
+                .on_click(move |_, window, cx| {
+                    // Close the current window directly; calling `handle.update`
+                    // from inside the same window's event handler would fail
+                    // because GPUI temporarily removes the active window from
+                    // `App.windows` during dispatch.
+                    window.remove_window();
                     let _ = app_close.update(cx, |this, cx| {
-                        this.close_overlay_lyrics(cx);
+                        this.clear_overlay_lyrics_handle(cx);
                     });
                 }),
             );
 
+        let app_esc_close = self.app.clone();
         v_flex()
             .id("desktop-lyrics-root")
             .track_focus(&self.focus)
+            .on_key_down(move |event, window, cx| {
+                if event.keystroke.key == "escape" && !locked {
+                    window.remove_window();
+                    let _ = app_esc_close.update(cx, |this, cx| {
+                        this.clear_overlay_lyrics_handle(cx);
+                    });
+                }
+            })
             .size_full()
             .px_5()
-            .py_2p5()
+            .py_2()
             .justify_center()
             .items_center()
             .gap_1p5()
-            .rounded(px(tokens::radius::LARGE))
-            .bg(if show_chrome {
-                hsla(0.0, 0.0, 0.06, 0.68)
-            } else {
-                hsla(0.0, 0.0, 0.04, 0.34)
-            })
-            .border_1()
-            .border_color(if show_chrome {
-                hsla(0.0, 0.0, 1.0, 0.16)
-            } else {
-                hsla(0.0, 0.0, 1.0, 0.04)
-            })
-            .shadow(vec![box_shadow(
-                px(0.0),
-                px(6.0),
-                px(20.0),
-                px(0.0),
-                hsla(0.0, 0.0, 0.0, if show_chrome { 0.42 } else { 0.22 }),
-            )])
+            .bg(transparent_black())
+            .cursor_grab()
             .on_hover(cx.listener(|this, hovering, _, cx| {
                 this.hovered = *hovering;
                 cx.notify();
             }))
-            .on_mouse_down(MouseButton::Left, move |_, window, _| {
-                if !locked {
-                    window.start_window_move();
-                }
+            .when(cfg!(target_os = "windows") && !locked, |this| {
+                this.window_control_area(WindowControlArea::Drag)
+            })
+            .when(cfg!(not(target_os = "windows")), |this| {
+                this.on_mouse_down(MouseButton::Left, move |_, window, _| {
+                    if !locked {
+                        window.start_window_move();
+                    }
+                })
             })
             .when(show_chrome, |this| this.child(toolbar))
-            .child(primary_el)
+            .child(
+                // Keep text centered cleanly without painting any box behind it.
+                v_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .child(primary_el),
+            )
             .when_some(
                 snap.two_line
                     .then_some(snap.secondary_text.as_ref())
@@ -391,13 +443,32 @@ impl Render for DesktopLyricsView {
                 |this, secondary| {
                     this.child(
                         div()
+                            .relative()
                             .w_full()
                             .text_center()
                             .text_size(px(secondary_px))
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(dim_color)
-                            .truncate()
-                            .child(secondary.clone()),
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .top(px(1.0))
+                                    .left(px(0.8))
+                                    .w_full()
+                                    .text_center()
+                                    .text_color(shadow_color)
+                                    .truncate()
+                                    .child(secondary.clone()),
+                            )
+                            .child(
+                                div()
+                                    .relative()
+                                    .w_full()
+                                    .text_center()
+                                    .text_color(dim_color)
+                                    .truncate()
+                                    .child(secondary.clone()),
+                            ),
                     )
                 },
             )
@@ -436,23 +507,35 @@ impl NavidromeApp {
             titlebar: None,
             focus: false,
             show: true,
-            kind: WindowKind::PopUp,
+            // Use Floating instead of PopUp so X11 doesn't set override_redirect
+            // (which disables WM interactive drag/move) and Wayland creates a
+            // movable xdg_toplevel. On Windows we strip the non-client frame and
+            // promote to topmost tool window right after creation.
+            kind: WindowKind::Floating,
             is_movable: true,
-            is_resizable: true,
+            is_resizable: false,
             is_minimizable: false,
             window_background: WindowBackgroundAppearance::Transparent,
             window_decorations: Some(WindowDecorations::Client),
             ..Default::default()
         };
         let app_weak = cx.entity().downgrade();
+        let app_for_close = app_weak.clone();
         let locked = snapshot.locked;
         let Ok(handle) = cx.open_window(options, move |window, cx| {
             window.set_window_title("Desktop Lyrics");
             window.set_background_appearance(WindowBackgroundAppearance::Transparent);
+            strip_overlay_window_frame(window);
             set_always_on_top(window, true);
             if locked {
                 set_click_through(window, true);
             }
+            window.on_window_should_close(cx, move |_, cx| {
+                let _ = app_for_close.update(cx, |this, cx| {
+                    this.clear_overlay_lyrics_handle(cx);
+                });
+                true
+            });
             cx.new(|cx| DesktopLyricsView::new(app_weak, snapshot, cx))
         }) else {
             self.notify_error(t!("Could not open desktop lyrics window"));
@@ -465,10 +548,25 @@ impl NavidromeApp {
         cx.notify();
     }
 
+    pub(in crate::app) fn clear_overlay_lyrics_handle(&mut self, cx: &mut Context<Self>) {
+        self.overlay_lyrics.window = None;
+        self.overlay_lyrics.view = None;
+        cx.notify();
+    }
+
     pub(in crate::app) fn close_overlay_lyrics(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.overlay_lyrics.window.take() {
             let _ = handle.update(cx, |_, window, _| {
                 window.remove_window();
+            });
+            // If called while that window itself is currently executing a callback,
+            // `handle.update` cannot re-enter synchronously; defer closing to the
+            // next tick so the window is always closed reliably.
+            let deferred = handle;
+            cx.defer(move |cx| {
+                let _ = deferred.update(cx, |_, window, _| {
+                    window.remove_window();
+                });
             });
         }
         self.overlay_lyrics.view = None;

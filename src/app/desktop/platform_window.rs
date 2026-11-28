@@ -107,8 +107,49 @@ pub(in crate::app) fn set_click_through(window: &mut Window, enabled: bool) {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(in crate::app) fn strip_overlay_window_frame(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION,
+        WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP,
+        WS_THICKFRAME,
+    };
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let next_style = (style
+            & !(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX))
+            | WS_POPUP;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, next_style as _);
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let next_ex = (ex_style & !WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next_ex as _);
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(in crate::app) fn set_click_through(_window: &mut Window, _enabled: bool) {}
+
+#[cfg(not(target_os = "windows"))]
+pub(in crate::app) fn strip_overlay_window_frame(_window: &mut Window) {}
 
 #[cfg(not(target_os = "windows"))]
 pub(in crate::app) fn set_always_on_top(_window: &mut Window, on: bool) {
