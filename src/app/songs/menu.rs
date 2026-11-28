@@ -88,10 +88,19 @@ impl SongMenuContext {
                     Vec::new()
                 } else if scope == SongScope::PlaylistDetail {
                     state.playlists.songs().to_vec()
+                } else if scope == SongScope::LocalPlaylist {
+                    state
+                        .active_local_playlist
+                        .as_ref()
+                        .map_or_else(Vec::new, |p| p.songs.clone())
                 } else {
                     songs.to_vec()
                 }),
-                index: songs.original_index(index)?,
+                index: if matches!(scope, SongScope::PlaylistDetail | SongScope::LocalPlaylist) {
+                    songs.original_index(index)?
+                } else {
+                    index
+                },
                 playlist: (scope == SongScope::PlaylistDetail)
                     .then(|| state.playlists.playlist().cloned())
                     .flatten(),
@@ -402,6 +411,7 @@ impl NavidromeApp {
         {
             let total = songs.len();
             let index = *index;
+            let sorted = self.state.song_sort.is_sorted(SongScope::LocalPlaylist);
             let up_id = local_id.clone();
             let down_id = local_id.clone();
             let rm_id = local_id.clone();
@@ -409,7 +419,7 @@ impl NavidromeApp {
                 .separator()
                 .item(
                     PopupMenuItem::new(t!("Move up"))
-                        .disabled(index == 0)
+                        .disabled(index == 0 || sorted)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(to) = index.checked_sub(1) {
                                 this.move_local_playlist_song(&up_id, index, to);
@@ -419,7 +429,7 @@ impl NavidromeApp {
                 )
                 .item(
                     PopupMenuItem::new(t!("Move down"))
-                        .disabled(index + 1 >= total)
+                        .disabled(index + 1 >= total || sorted)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if index + 1 < total {
                                 this.move_local_playlist_song(&down_id, index, index + 1);
@@ -486,7 +496,8 @@ impl NavidromeApp {
                         .disabled(
                             disabled
                                 || to.is_none()
-                                || playlist_target.is_some_and(|target| target.filtered),
+                                || playlist_target.is_some_and(|target| target.filtered)
+                                || self.state.song_sort.is_sorted(SongScope::PlaylistDetail),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if !playlist_target.is_none_or(|target| target.can_play(&this.state))

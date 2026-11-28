@@ -8,4 +8,5 @@ pub(in crate::app) mod row_actions;
 pub(in crate::app) mod row_view;
 pub(in crate::app) mod scope;
 pub(in crate::app) mod selection;
+pub(in crate::app) mod sort;
 pub(in crate::app) mod view;

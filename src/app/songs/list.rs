@@ -74,6 +74,102 @@ impl std::ops::Index<usize> for SongList<'_> {
 impl AppState {
     pub(in crate::app) fn clear_song_selection_for_scope(&mut self, scope: SongScope) {
         self.song_selection.clear_scope(scope);
+        self.refresh_song_sort_for_scope(scope);
+    }
+
+    pub(in crate::app) fn refresh_song_sort_for_scope(&mut self, scope: SongScope) {
+        if !scope.is_sortable() || !self.song_sort.is_sorted(scope) {
+            return;
+        }
+        match scope {
+            SongScope::AlbumDetail => {
+                self.song_sort
+                    .refresh(scope, self.album_details.songs(), None);
+            }
+            SongScope::ArtistTop => {
+                self.song_sort
+                    .refresh(scope, self.artist_details.top_songs(), None);
+            }
+            SongScope::PlaylistDetail => {
+                self.song_sort.refresh(
+                    scope,
+                    self.playlists.songs(),
+                    self.playlists.search.indices(),
+                );
+            }
+            SongScope::LocalPlaylist => {
+                let songs = self
+                    .active_local_playlist
+                    .as_ref()
+                    .map_or(&[][..], |p| p.songs.as_slice());
+                self.song_sort.refresh(scope, songs, None);
+            }
+            SongScope::Favorites => {
+                self.song_sort
+                    .refresh(scope, &self.favorites.items().songs, None);
+            }
+            SongScope::Folder => {
+                self.song_sort.refresh(scope, self.folders.songs(), None);
+            }
+            SongScope::Search => {
+                if let Some(results) = self.search.results() {
+                    self.song_sort.refresh(scope, &results.songs, None);
+                } else {
+                    self.song_sort.clear_scope(scope);
+                }
+            }
+            SongScope::Queue | SongScope::History => {}
+        }
+    }
+
+    pub(in crate::app) fn toggle_song_sort(
+        &mut self,
+        scope: SongScope,
+        column: super::sort::SongSortColumn,
+    ) {
+        if !scope.is_sortable() {
+            return;
+        }
+        self.song_selection.clear_scope(scope);
+        match scope {
+            SongScope::AlbumDetail => {
+                self.song_sort
+                    .toggle(scope, column, self.album_details.songs(), None);
+            }
+            SongScope::ArtistTop => {
+                self.song_sort
+                    .toggle(scope, column, self.artist_details.top_songs(), None);
+            }
+            SongScope::PlaylistDetail => {
+                self.song_sort.toggle(
+                    scope,
+                    column,
+                    self.playlists.songs(),
+                    self.playlists.search.indices(),
+                );
+            }
+            SongScope::LocalPlaylist => {
+                let songs = self
+                    .active_local_playlist
+                    .as_ref()
+                    .map_or(&[][..], |p| p.songs.as_slice());
+                self.song_sort.toggle(scope, column, songs, None);
+            }
+            SongScope::Favorites => {
+                self.song_sort
+                    .toggle(scope, column, &self.favorites.items().songs, None);
+            }
+            SongScope::Folder => {
+                self.song_sort
+                    .toggle(scope, column, self.folders.songs(), None);
+            }
+            SongScope::Search => {
+                if let Some(results) = self.search.results() {
+                    self.song_sort.toggle(scope, column, &results.songs, None);
+                }
+            }
+            SongScope::Queue | SongScope::History => {}
+        }
     }
 
     pub(in crate::app) fn selected_song_iter(
@@ -117,25 +213,43 @@ impl AppState {
     /// 避免在每次渲染时克隆整个列表。
     pub(in crate::app) fn songs_for_scope(&self, scope: SongScope) -> Option<SongList<'_>> {
         match scope {
-            SongScope::AlbumDetail => Some(SongList::Songs(self.album_details.songs())),
-            SongScope::ArtistTop => Some(SongList::Songs(self.artist_details.top_songs())),
-            SongScope::PlaylistDetail => Some(match self.playlists.search.indices() {
-                Some(indices) => SongList::Indexed {
-                    songs: self.playlists.songs(),
-                    indices,
-                },
-                None => SongList::Songs(self.playlists.songs()),
-            }),
-            SongScope::LocalPlaylist => Some(SongList::Songs(
-                self.active_local_playlist
+            SongScope::AlbumDetail => Some(self.project_songs(scope, self.album_details.songs())),
+            SongScope::ArtistTop => Some(self.project_songs(scope, self.artist_details.top_songs())),
+            SongScope::PlaylistDetail => {
+                let songs = self.playlists.songs();
+                let base_indices = self.playlists.search.indices();
+                let expected_len = base_indices.map_or(songs.len(), <[usize]>::len);
+                if let Some(sorted) = self.song_sort.indices(scope, expected_len) {
+                    Some(SongList::Indexed {
+                        songs,
+                        indices: sorted,
+                    })
+                } else {
+                    Some(match base_indices {
+                        Some(indices) => SongList::Indexed { songs, indices },
+                        None => SongList::Songs(songs),
+                    })
+                }
+            }
+            SongScope::LocalPlaylist => {
+                let songs = self
+                    .active_local_playlist
                     .as_ref()
-                    .map_or(&[], |playlist| playlist.songs.as_slice()),
-            )),
-            SongScope::Favorites => Some(SongList::Songs(&self.favorites.items().songs)),
-            SongScope::Folder => Some(SongList::Songs(self.folders.songs())),
-            SongScope::Search => Some(SongList::Songs(&self.search.results()?.songs)),
+                    .map_or(&[][..], |playlist| playlist.songs.as_slice());
+                Some(self.project_songs(scope, songs))
+            }
+            SongScope::Favorites => Some(self.project_songs(scope, &self.favorites.items().songs)),
+            SongScope::Folder => Some(self.project_songs(scope, self.folders.songs())),
+            SongScope::Search => Some(self.project_songs(scope, &self.search.results()?.songs)),
             SongScope::Queue => Some(SongList::Queue(self.queue.entries())),
             SongScope::History => Some(SongList::Songs(self.listening.recent_songs())),
+        }
+    }
+
+    fn project_songs<'a>(&'a self, scope: SongScope, songs: &'a [Song]) -> SongList<'a> {
+        match self.song_sort.indices(scope, songs.len()) {
+            Some(indices) => SongList::Indexed { songs, indices },
+            None => SongList::Songs(songs),
         }
     }
 }

@@ -25,6 +25,7 @@ use crate::app::server::connection_state::ServerConnection;
 use crate::app::settings::state::SettingsUi;
 use crate::app::shell::history::NavHistory;
 use crate::app::songs::selection::SongSelection;
+use crate::app::songs::sort::SongSortState;
 use crate::app::sound::loudness_state::LoudnessCache;
 use crate::app::sound::output::OutputDevices;
 
@@ -67,6 +68,8 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) settings: SettingsUi,
     /// Scoped cursor, multi-selection, and fixed range anchor.
     pub(in crate::app) song_selection: SongSelection,
+    /// Non-destructive per-scope column sorting for browsing song lists.
+    pub(in crate::app) song_sort: SongSortState,
     /// “曲目信息”对话框当前展示的歌曲。
     pub(in crate::app) song_info: Option<Song>,
     pub(in crate::app) view_before_now_playing: View,
@@ -107,6 +110,7 @@ impl AppState {
         self.song_info = None;
         self.view_before_now_playing = View::Home;
         self.song_selection.retain_playback_scopes();
+        self.song_sort.clear_all();
     }
 }
 
@@ -149,6 +153,7 @@ impl Default for AppState {
             status: t!("Not connected").to_string(),
             settings: SettingsUi::default(),
             song_selection: SongSelection::default(),
+            song_sort: SongSortState::default(),
             song_info: None,
             view_before_now_playing: View::Home,
             playback_modes: PlayModes::default(),

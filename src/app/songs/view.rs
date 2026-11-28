@@ -96,6 +96,40 @@ impl NavidromeApp {
                 } else {
                     p.border.opacity(0.8)
                 };
+                let active_sort = self.state.song_sort.active(scope);
+                let sortable = scope.is_sortable();
+                let sort_header =
+                    |column: super::sort::SongSortColumn, label: SharedString, right_align: bool| {
+                        let active = active_sort.filter(|s| s.column == column);
+                        let indicator = active.map(|s| match s.direction {
+                            super::sort::SortDirection::Asc => AppIcon::ChevronUp,
+                            super::sort::SortDirection::Desc => AppIcon::ChevronDown,
+                        });
+                        h_flex()
+                            .id(SharedString::from(format!(
+                                "song-sort-{scope}-{}",
+                                column.id()
+                            )))
+                            .items_center()
+                            .gap_1()
+                            .when(right_align, |el| el.justify_end())
+                            .when(active.is_some(), |el| {
+                                el.text_color(p.brand).font_weight(FontWeight::SEMIBOLD)
+                            })
+                            .when(sortable, |el| {
+                                el.cursor_pointer()
+                                    .rounded(px(4.0))
+                                    .hover(|style| style.text_color(p.text))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.state.toggle_song_sort(scope, column);
+                                        cx.notify();
+                                    }))
+                            })
+                            .child(label)
+                            .when_some(indicator, |el, icon| {
+                                el.child(Icon::new(icon).with_size(px(12.0)))
+                            })
+                    };
                 this.child(
                     h_flex()
                         .h(px(34.0))
@@ -112,28 +146,56 @@ impl NavidromeApp {
                         .child(
                             div()
                                 .w(px(28.0))
-                                .text_center()
+                                .flex()
+                                .justify_center()
                                 .font_family(cx.theme().mono_font_family.clone())
-                                .child("#"),
+                                .child(sort_header(
+                                    super::sort::SongSortColumn::Track,
+                                    "#".into(),
+                                    false,
+                                )),
                         )
                         .when(scope.shows_row_cover(), |this| {
                             this.child(div().w(px(42.0)))
                         })
-                        .child(div().flex_1().flex_grow(3.0).child(t!("Title")))
+                        .child(
+                            div()
+                                .flex_1()
+                                .flex_grow(3.0)
+                                .min_w_0()
+                                .child(sort_header(
+                                    super::sort::SongSortColumn::Title,
+                                    t!("Title").into(),
+                                    false,
+                                )),
+                        )
                         .when(!compact_columns, |this| {
-                            this.child(div().flex_1().flex_grow(2.0).max_w(px(200.0)).child(
-                                if self.browsing_bilibili() {
-                                    t!("Uploader")
-                                } else {
-                                    t!("Artist")
-                                },
-                            ))
+                            this.child(
+                                div()
+                                    .flex_1()
+                                    .flex_grow(2.0)
+                                    .max_w(px(200.0))
+                                    .min_w_0()
+                                    .child(sort_header(
+                                        super::sort::SongSortColumn::Artist,
+                                        if self.browsing_bilibili() {
+                                            t!("Uploader")
+                                        } else {
+                                            t!("Artist")
+                                        }
+                                        .into(),
+                                        false,
+                                    )),
+                            )
                         })
                         .child(
                             div()
                                 .w(px(if compact_columns { 48.0 } else { 64.0 }))
-                                .text_right()
-                                .child(t!("Time")),
+                                .child(sort_header(
+                                    super::sort::SongSortColumn::Duration,
+                                    t!("Time").into(),
+                                    true,
+                                )),
                         )
                         .child(div().w(px(match (editable, compact_columns) {
                             (true, true) | (false, true) => 60.0,

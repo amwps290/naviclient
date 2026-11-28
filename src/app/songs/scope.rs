@@ -60,6 +60,12 @@ impl SongScope {
         matches!(self, Self::Queue | Self::History)
     }
 
+    /// Browsing lists support non-destructive column sorting; playback queue and
+    /// chronological listening history keep their fixed order.
+    pub(in crate::app) fn is_sortable(self) -> bool {
+        !self.is_drawer()
+    }
+
     /// Every row on an album page has the same cover, so showing it repeats noise.
     pub(in crate::app) fn shows_row_cover(self) -> bool {
         self != Self::AlbumDetail
