@@ -6,11 +6,12 @@ mod tests;
 pub(in crate::app) mod prelude;
 
 mod bilibili;
-mod covers;
+pub(crate) mod covers;
 mod desktop;
 mod home;
 mod import;
 mod library;
+mod offline;
 mod playback;
 mod player;
 mod playlists;
@@ -106,6 +107,9 @@ pub struct NavidromeApp {
     pending_notifications: Vec<(NotificationType, SharedString)>,
     cover_slots: Arc<tokio::sync::Semaphore>,
     folder_cover_slots: Arc<tokio::sync::Semaphore>,
+    offline_slots: Arc<tokio::sync::Semaphore>,
+    offline_store: crate::offline::OfflineStore,
+    offline_outbox: crate::offline::OfflineOutbox,
     /// Retention and pending texture/asset releases survive server state resets.
     cover_textures: RefCell<CoverTextures>,
     text_width_cache: RefCell<TextWidthCache>,

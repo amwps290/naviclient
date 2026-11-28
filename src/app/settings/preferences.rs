@@ -28,6 +28,7 @@ impl NavidromeApp {
         self.config = next;
         self.cancel_next_preload();
         self.audio.set_cache_directory(effective_dir.clone());
+        self.sync_offline_store_dir();
         self.state.status = t!("Audio cache: %{dir}", dir = effective_dir.display()).to_string();
     }
 

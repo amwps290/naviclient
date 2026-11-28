@@ -135,6 +135,8 @@ pub struct Config {
     pub audio_cache_limit_mb: u64,
     #[serde(default)]
     pub transcoding_quality: TranscodingQuality,
+    #[serde(default)]
+    pub offline_mode: bool,
     #[serde(default = "default_volume")]
     pub volume: f32,
     #[serde(default)]
@@ -190,6 +192,7 @@ impl Default for Config {
             cache_dir: None,
             audio_cache_limit_mb: default_audio_cache_limit_mb(),
             transcoding_quality: TranscodingQuality::Original,
+            offline_mode: false,
             volume: default_volume(),
             playback_modes: PlayModes::default(),
             auto_continue: false,

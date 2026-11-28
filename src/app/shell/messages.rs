@@ -183,6 +183,9 @@ impl NavidromeApp {
                 Msg::ImportMatched { request, result } => {
                     self.finish_import_match(request, result, window, cx);
                 }
+                Msg::OfflineDownloaded { outcome } => {
+                    self.finish_offline_download(*outcome);
+                }
             }
         }
         // A finished login or a closed settings overlay ends its dialog.

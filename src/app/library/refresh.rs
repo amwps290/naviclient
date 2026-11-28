@@ -8,6 +8,10 @@ impl NavidromeApp {
         if self.api.is_none() {
             return;
         }
+        if self.offline_mode_active() {
+            self.load_offline_library();
+            return;
+        }
         self.refresh_connection();
         if self.browsing_bilibili() {
             self.load_playlists();

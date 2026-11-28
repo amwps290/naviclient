@@ -222,10 +222,58 @@ impl NavidromeApp {
             settings_row(t!("Streaming quality"), None, picker, cx)
         };
 
+        let offline_row = {
+            let stats = self.offline_stats();
+            let downloading = self.offline_downloading_count();
+            let summary = if downloading > 0 {
+                t!(
+                    "%{count} tracks saved (%{size}) · %{downloading} downloading",
+                    count = stats.track_count,
+                    size = format_file_size(stats.total_bytes),
+                    downloading = downloading
+                )
+                .to_string()
+            } else {
+                t!(
+                    "%{count} tracks saved (%{size}) · Protected from automatic cache cleanup.",
+                    count = stats.track_count,
+                    size = format_file_size(stats.total_bytes)
+                )
+                .to_string()
+            };
+            let offline_mode = self.config.offline_mode;
+            let controls = h_flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    surface_button("toggle-offline-mode-setting")
+                        .label(if offline_mode {
+                            t!("Go online")
+                        } else {
+                            t!("Offline mode")
+                        })
+                        .compact_action()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_offline_mode(!offline_mode, cx);
+                        })),
+                )
+                .child(
+                    surface_button("clear-offline-library")
+                        .label(t!("Clear offline files"))
+                        .compact_action()
+                        .disabled(stats.track_count == 0)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.clear_all_offline_action(cx);
+                        })),
+                )
+                .into_any_element();
+            settings_row(t!("Offline downloads"), Some(summary.into()), controls, cx)
+        };
+
         settings_group(
             Some(t!("Streaming & cache").into()),
             None,
-            vec![quality_row, cache_limit_row, cache_row],
+            vec![quality_row, cache_limit_row, cache_row, offline_row],
             cx,
         )
     }

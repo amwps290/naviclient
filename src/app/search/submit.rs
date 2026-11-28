@@ -41,6 +41,11 @@ impl NavidromeApp {
         let Some(api) = self.api.clone() else { return };
         self.state.search.record_query(&query);
         let request = self.state.search.begin(&mut self.library_requests);
+        if self.offline_mode_active() {
+            let results = self.offline_store.search(api.id(), &query);
+            self.finish_search(request, Ok(results));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api.search(&query, 120, 80, 60).await.map_err(error_message);

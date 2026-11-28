@@ -153,6 +153,11 @@ impl NavidromeApp {
         else {
             return;
         };
+        if self.offline_mode_for_source(api.id()) {
+            self.queue_offline_favorite(api.id().clone(), &change.key, change.starred);
+            self.finish_favorite_change(change, Ok(()));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api

@@ -23,6 +23,7 @@ mod memory_stats;
 mod models;
 mod msg;
 mod notify;
+mod offline;
 mod playback_timeline;
 mod playlist;
 pub mod recommendation;

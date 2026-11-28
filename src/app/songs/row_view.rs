@@ -235,7 +235,38 @@ impl NavidromeApp {
                                             .text_color(p.brand)
                                             .child(label),
                                     )
-                                }),
+                                })
+                                .when(
+                                    matches!(
+                                        self.song_offline_status(song),
+                                        crate::offline::OfflineTrackStatus::Ready
+                                            | crate::offline::OfflineTrackStatus::Downloading
+                                    ),
+                                    |this| {
+                                        let ready = self.song_offline_status(song)
+                                            == crate::offline::OfflineTrackStatus::Ready;
+                                        this.child(
+                                            div()
+                                                .flex_none()
+                                                .px_1p5()
+                                                .py_0p5()
+                                                .rounded_full()
+                                                .bg(if ready {
+                                                    p.online.opacity(0.14)
+                                                } else {
+                                                    p.brand_soft
+                                                })
+                                                .text_size(px(10.0))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(if ready { p.online } else { p.brand })
+                                                .child(if ready {
+                                                    t!("Offline")
+                                                } else {
+                                                    t!("Downloading")
+                                                }),
+                                        )
+                                    },
+                                ),
                         )
                         .child(
                             div()

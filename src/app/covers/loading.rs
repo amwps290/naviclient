@@ -60,6 +60,8 @@ impl NavidromeApp {
             // 整条加载管线限流，而不只是解码：大收藏库若同时下载几百张封面，
             // 每个任务都会在等待解码许可时持有完整字节，造成明显瞬时内存峰值。
             let _permit = cover_slots.acquire_owned().await;
+            let offline_only = config.offline_mode
+                && source.provider != crate::source::ProviderKind::LocalFolder;
             // 先查磁盘缓存，命中跳过网络；若旧磁盘缓存是超大原图，顺带降采样并回写。
             let result = match config::read_source_cover_cache(&config, &source, &id) {
                 Some(bytes) => {
@@ -70,6 +72,7 @@ impl NavidromeApp {
                     }
                     Ok(normalized)
                 }
+                None if offline_only => Err("offline".to_string()),
                 None => match api.get_bytes(&url).await {
                     Ok(bytes) => {
                         let normalized = normalize_cover_bytes(bytes);

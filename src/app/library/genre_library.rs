@@ -164,6 +164,11 @@ impl NavidromeApp {
         else {
             return;
         };
+        if self.offline_mode_active() {
+            let albums = self.offline_store.albums_by_genre(api.id(), &genre);
+            self.handle_genre_album_page(request, Ok(albums));
+            return;
+        }
         let offset = album_page_offset(request.page(), ALBUM_PAGE_SIZE);
         let tx = self.tx.clone();
         self.spawn_future(async move {

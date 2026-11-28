@@ -211,6 +211,10 @@ pub enum Msg {
         request: LibraryRequest,
         result: Result<MatchedSongs, String>,
     },
+    /// 单曲离线下载（Pin）完成。
+    OfflineDownloaded {
+        outcome: Box<crate::offline::OfflineDownloadOutcome>,
+    },
 }
 
 pub fn error_message(error: impl std::fmt::Display) -> String {

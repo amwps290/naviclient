@@ -126,6 +126,11 @@ impl NavidromeApp {
         else {
             return;
         };
+        if self.offline_mode_active() {
+            let albums = self.offline_store.artist_albums(api.id(), &artist_id);
+            self.finish_artist_albums(request, Ok(albums));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api.artist_albums(&artist_id).await.map_err(error_message);
@@ -153,6 +158,11 @@ impl NavidromeApp {
         else {
             return;
         };
+        if self.offline_mode_active() {
+            let songs = self.offline_store.artist_songs(api.id(), &artist);
+            self.finish_artist_top_songs(request, Ok(songs));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api

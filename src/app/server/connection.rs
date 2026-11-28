@@ -52,6 +52,7 @@ impl NavidromeApp {
                     }
                 } else {
                     self.load_open_subsonic_info(discovery);
+                    self.flush_offline_outbox();
                 }
             }
             Err(error) => {

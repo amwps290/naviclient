@@ -80,6 +80,23 @@ impl NavidromeApp {
         if !start.intent().reconnecting() {
             self.reconnect.cancel();
         }
+        // Prefer protected offline copy when available (zero network I/O, works offline).
+        if let Some(offline_resource) = self.offline_playback_resource(start.song(), &start.source) {
+            return match start.finish(offline_resource) {
+                Ok(start) => self.commit_playback_start(start),
+                Err(error) => {
+                    self.report_start_error(error);
+                    false
+                }
+            };
+        }
+        if self.offline_mode_for_source(start.source.id()) {
+            self.notify_warning(t!(
+                "Track “%{title}” is not downloaded for offline playback.",
+                title = start.song().title
+            ));
+            return false;
+        }
         match start.try_resolve() {
             Some(result) => match result
                 .map_err(StartError::Request)
@@ -201,6 +218,9 @@ impl NavidromeApp {
         else {
             return;
         };
+        if self.offline_mode_for_source(api.id()) {
+            return;
+        }
         if !self.state.occurrence.claim_report(&song.id) {
             return;
         }
@@ -232,6 +252,10 @@ impl NavidromeApp {
         if !self.state.occurrence.claim_scrobble(&song_id) {
             return;
         }
+        if self.offline_mode_for_source(api.id()) {
+            self.queue_offline_scrobble(api.id().clone(), song_id);
+            return;
+        }
         self.spawn_future(async move {
             if let Err(error) = api.scrobble(&song_id, true).await {
                 log::warn!("scrobble failed (non-fatal): {error:#}");
@@ -255,6 +279,10 @@ impl NavidromeApp {
             return;
         }
         let song_id = song.id.clone();
+        if self.offline_mode_for_source(api.id()) {
+            self.queue_offline_scrobble(api.id().clone(), song_id);
+            return;
+        }
         self.spawn_future(async move {
             if let Err(error) = api.scrobble(&song_id, true).await {
                 log::warn!("scrobble on end failed (non-fatal): {error:#}");

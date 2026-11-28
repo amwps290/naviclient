@@ -83,6 +83,11 @@ impl NavidromeApp {
         let Some(request) = self.state.album_details.begin(&mut self.library_requests) else {
             return;
         };
+        if self.offline_mode_active() {
+            let songs = self.offline_store.album_songs(api.id(), &album_id);
+            self.finish_album_details(request, Ok(songs));
+            return;
+        }
         let tx = self.tx.clone();
         self.spawn_future(async move {
             let result = api.album_songs(&album_id).await.map_err(error_message);

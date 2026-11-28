@@ -17,7 +17,7 @@ const REENCODED_JPEG_QUALITY: u8 = 86;
 
 /// 若原图任意一边超过 `MAX_COVER_EDGE`（非动图），在后台按比例降采样并重新编码为轻量字节。
 /// 既减小内存中的原图体积，也让磁盘缓存不再保存动辄 600KB–2MB 的高清大图。
-pub(in crate::app) fn normalize_cover_bytes(bytes: Vec<u8>) -> Vec<u8> {
+pub(crate) fn normalize_cover_bytes(bytes: Vec<u8>) -> Vec<u8> {
     let Ok(format) = image::guess_format(&bytes) else {
         return bytes;
     };

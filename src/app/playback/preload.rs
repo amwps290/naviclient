@@ -76,7 +76,13 @@ impl NavidromeApp {
         {
             return;
         }
-        let resource = api.try_resolve_immediate(song, self.config.transcoding_quality);
+        let resource = if let Some(offline) = self.offline_playback_resource(song, api) {
+            Some(Ok(offline))
+        } else if self.offline_mode_for_source(api.id()) {
+            return;
+        } else {
+            api.try_resolve_immediate(song, self.config.transcoding_quality)
+        };
         let Some(result) = resource else {
             self.resolve_next_preload(index);
             return;

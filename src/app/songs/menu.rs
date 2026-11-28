@@ -327,6 +327,40 @@ impl NavidromeApp {
                     })),
             );
         }
+        let is_local = song
+            .source
+            .as_ref()
+            .is_some_and(|source| source.provider == crate::source::ProviderKind::LocalFolder);
+        if !is_local && browsing_owner {
+            let offline_status = self.song_offline_status(&song);
+            let offline_song = song.clone();
+            let offline_label = match offline_status {
+                crate::offline::OfflineTrackStatus::Ready => t!("Remove offline copy"),
+                crate::offline::OfflineTrackStatus::Downloading => t!("Downloading offline…"),
+                crate::offline::OfflineTrackStatus::NotPinned => t!("Download for offline"),
+            };
+            menu = menu.item(
+                PopupMenuItem::new(offline_label)
+                    .disabled(
+                        offline_status == crate::offline::OfflineTrackStatus::Downloading
+                            || (self.offline_mode_active()
+                                && offline_status
+                                    == crate::offline::OfflineTrackStatus::NotPinned),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        match offline_status {
+                            crate::offline::OfflineTrackStatus::Ready => {
+                                this.unpin_song_offline(&offline_song);
+                            }
+                            crate::offline::OfflineTrackStatus::NotPinned => {
+                                this.pin_song_offline(offline_song.clone());
+                            }
+                            crate::offline::OfflineTrackStatus::Downloading => {}
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
         let song_for_info = song.clone();
         menu = menu
             .separator()

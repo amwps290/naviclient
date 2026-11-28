@@ -253,9 +253,12 @@ impl NavidromeApp {
         cx: &Context<Self>,
     ) -> gpui_kit::AnyElement {
         let p = palette(cx);
+        let offline_mode = self.offline_mode_active();
         let connected = self.state.connection.server().is_some();
         let label = self.active_server_label();
-        let status = if self.state.connection.loading() {
+        let status = if offline_mode {
+            t!("Offline mode")
+        } else if self.state.connection.loading() {
             t!("Connecting…")
         } else if connected {
             t!("Connected")
@@ -317,51 +320,127 @@ impl NavidromeApp {
                 .into_any_element();
         }
 
-        h_flex()
+        let show_offline_toggle = !self.browsing_local_folder() && self.api.is_some();
+        v_flex()
             .mt_auto()
             .mb(px(bottom_clearance))
             .pt_2()
             .border_t_1()
             .border_color(p.border.opacity(0.45))
             .w_full()
-            .items_center()
             .gap_1()
+            .when(show_offline_toggle, |this| {
+                let stats = self.offline_stats();
+                let downloading = self.offline_downloading_count();
+                let offline_label = if offline_mode {
+                    t!("Offline mode (%{count})", count = stats.track_count).to_string()
+                } else if downloading > 0 {
+                    t!("Downloading (%{count})…", count = downloading).to_string()
+                } else {
+                    t!("Offline mode").to_string()
+                };
+                this.child(
+                    h_flex()
+                        .id("sidebar-offline-toggle")
+                        .w_full()
+                        .h(px(28.0))
+                        .px_2()
+                        .gap_2()
+                        .items_center()
+                        .rounded(px(tokens::radius::CONTROL))
+                        .cursor_pointer()
+                        .bg(if offline_mode {
+                            p.brand_soft
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .hover(|style| style.bg(p.sunken))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_offline_mode(!offline_mode, cx);
+                        }))
+                        .child(
+                            Icon::new(if offline_mode {
+                                AppIcon::ServerOff
+                            } else {
+                                AppIcon::Download
+                            })
+                            .with_size(px(13.0))
+                            .text_color(if offline_mode {
+                                p.brand
+                            } else {
+                                p.text_muted
+                            }),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(px(tokens::CAPTION))
+                                .font_weight(if offline_mode {
+                                    FontWeight::MEDIUM
+                                } else {
+                                    FontWeight::NORMAL
+                                })
+                                .text_color(if offline_mode {
+                                    p.brand
+                                } else {
+                                    p.text_secondary
+                                })
+                                .truncate()
+                                .child(offline_label),
+                        ),
+                )
+            })
             .child(
                 h_flex()
-                    .id("sidebar-server")
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(32.0))
+                    .w_full()
                     .items_center()
-                    .gap_2()
-                    .px_2()
-                    .rounded(px(tokens::radius::CONTROL))
-                    .cursor_pointer()
-                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                    .hover(|style| style.bg(p.sunken))
+                    .gap_1()
                     .child(
-                        div()
-                            .flex_none()
-                            .size(px(7.0))
-                            .rounded_full()
-                            .bg(if connected { p.online } else { p.text_muted }),
-                    )
-                    .child(
-                        div()
+                        h_flex()
+                            .id("sidebar-server")
+                            .flex_1()
                             .min_w_0()
-                            .text_size(px(tokens::CAPTION))
-                            .text_color(p.text_secondary)
-                            .truncate()
-                            .child(label),
+                            .h(px(32.0))
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .rounded(px(tokens::radius::CONTROL))
+                            .cursor_pointer()
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(tooltip.clone()).build(window, cx)
+                            })
+                            .hover(|style| style.bg(p.sunken))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(7.0))
+                                    .rounded_full()
+                                    .bg(if offline_mode {
+                                        cx.theme().warning
+                                    } else if connected {
+                                        p.online
+                                    } else {
+                                        p.text_muted
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_size(px(tokens::CAPTION))
+                                    .text_color(p.text_secondary)
+                                    .truncate()
+                                    .child(label),
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.state.settings.open = true;
+                                this.state.settings.section = SettingsSection::Sources;
+                                this.refresh_output_devices(cx);
+                                cx.notify();
+                            })),
                     )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.settings.open = true;
-                        this.state.settings.section = SettingsSection::Sources;
-                        this.refresh_output_devices(cx);
-                        cx.notify();
-                    })),
+                    .child(self.sidebar_collapse_toggle(false, cx)),
             )
-            .child(self.sidebar_collapse_toggle(false, cx))
             .into_any_element()
     }
 }

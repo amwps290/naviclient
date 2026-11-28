@@ -89,7 +89,7 @@ impl NavidromeApp {
 
     pub(in crate::app) fn load_playlist_detail(&mut self) {
         let Some(api) = self.api.clone() else { return };
-        let Some(playlist) = self.state.playlists.playlist() else {
+        let Some(playlist) = self.state.playlists.playlist().cloned() else {
             return;
         };
         let playlist_id = playlist.id.clone();
@@ -102,6 +102,32 @@ impl NavidromeApp {
         };
         let source = api.id().clone();
         let (updates, receiver) = playlist_update_channel();
+        if self.offline_mode_active() {
+            let playlist = playlist.clone();
+            let songs = self.offline_store.playlist_songs(&source, &playlist_id);
+            let total = songs.len();
+            let progress = crate::playlist::loading::PlaylistProgress {
+                pages: 1,
+                videos: 0,
+                songs: total,
+                unavailable_count: 0,
+            };
+            let task = self.runtime.spawn(async move {
+                let _ = updates
+                    .send(crate::playlist::loading::PlaylistUpdate::Metadata(playlist))
+                    .await;
+                let _ = updates
+                    .send(crate::playlist::loading::PlaylistUpdate::Batch { songs, progress })
+                    .await;
+                let _ = updates
+                    .send(crate::playlist::loading::PlaylistUpdate::Complete(progress))
+                    .await;
+            });
+            self.state
+                .playlists
+                .attach_detail_stream(request, source, receiver, task.abort_handle());
+            return;
+        }
         let tx = self.tx.clone();
         let task = self.runtime.spawn(super::search::load_indexed_playlist(
             api,

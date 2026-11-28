@@ -134,6 +134,11 @@ pub fn cover_cache_dir(config: &Config) -> PathBuf {
     audio_cache_dir(config).join("covers")
 }
 
+/// 受保护的离线音频存储目录（独立于自动 LRU 音频缓存，不会被缓存限额回收）。
+pub fn offline_audio_dir(config: &Config) -> PathBuf {
+    audio_cache_dir(config).join("offline")
+}
+
 pub fn log_path() -> PathBuf {
     if let Some(project_dirs) =
         directories::ProjectDirs::from("rs", "navidrome", "navidrome-client")

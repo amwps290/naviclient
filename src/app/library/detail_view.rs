@@ -319,6 +319,40 @@ impl NavidromeApp {
                                 );
                             })),
                     )
+                    .when(!self.browsing_local_folder(), |this| {
+                        let all_pinned = !songs.is_empty()
+                            && songs.iter().all(|song| self.song_is_pinned_offline(song));
+                        let any_downloading = songs.iter().any(|song| {
+                            self.song_offline_status(song)
+                                == crate::offline::OfflineTrackStatus::Downloading
+                        });
+                        let label = if any_downloading {
+                            t!("Downloading…")
+                        } else if all_pinned {
+                            t!("Saved offline")
+                        } else {
+                            t!("Download offline")
+                        };
+                        this.child(
+                            capsule_button("album-offline-pin")
+                                .icon(AppIcon::Download)
+                                .label(label)
+                                .disabled_tonal(
+                                    actions_disabled
+                                        || any_downloading
+                                        || (self.offline_mode_active() && !all_pinned),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let tracks = this.state.album_details.songs().to_vec();
+                                    if all_pinned {
+                                        this.unpin_songs_offline(&tracks);
+                                    } else {
+                                        this.pin_songs_offline(tracks, None);
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(self.favorite_button_sized(
                         FavoriteKind::Album,
                         &album.id,
@@ -424,6 +458,42 @@ impl NavidromeApp {
                                 cx.notify();
                             })),
                     )
+                    .when(!self.browsing_local_folder(), |this| {
+                        let songs = self.state.playlists.songs();
+                        let all_pinned = !songs.is_empty()
+                            && songs.iter().all(|song| self.song_is_pinned_offline(song));
+                        let any_downloading = songs.iter().any(|song| {
+                            self.song_offline_status(song)
+                                == crate::offline::OfflineTrackStatus::Downloading
+                        });
+                        let label = if any_downloading {
+                            t!("Downloading…")
+                        } else if all_pinned {
+                            t!("Saved offline")
+                        } else {
+                            t!("Download offline")
+                        };
+                        let pl_snapshot = playlist.clone();
+                        this.child(
+                            capsule_button("playlist-offline-pin")
+                                .icon(AppIcon::Download)
+                                .label(label)
+                                .disabled_tonal(
+                                    playback_disabled
+                                        || any_downloading
+                                        || (self.offline_mode_active() && !all_pinned),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let tracks = this.state.playlists.songs().to_vec();
+                                    if all_pinned {
+                                        this.unpin_songs_offline(&tracks);
+                                    } else {
+                                        this.pin_songs_offline(tracks, Some(pl_snapshot.clone()));
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .when(!bilibili, |this| {
                         this.child(
                             ghost_button("rename-playlist")
