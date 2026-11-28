@@ -204,38 +204,91 @@ fn timing_bar<V: 'static>(
     host: fn(&mut V, TimingAction, &mut Context<V>),
 ) -> gpui_kit::AnyElement {
     let p = palette(cx);
+    let dark = cx.theme().is_dark();
     let shift = shift_label(document.offset_ms);
+    let is_adjusted = adjusted(document);
     let hint: SharedString = if aligning {
         t!("Click a line the moment it starts being sung. Press Esc to cancel.")
     } else {
         t!("Timing changes apply to this song only.")
     }
     .into();
+    let card_bg = if dark {
+        hsla(0.0, 0.0, 1.0, 0.045)
+    } else {
+        p.raised.opacity(0.76)
+    };
+    let card_border = if aligning {
+        p.brand.opacity(if dark { 0.42 } else { 0.34 })
+    } else if dark {
+        hsla(0.0, 0.0, 1.0, 0.09)
+    } else {
+        p.border.opacity(0.82)
+    };
+    let stepper_bg = if dark {
+        hsla(0.0, 0.0, 0.0, 0.24)
+    } else {
+        p.sunken.opacity(0.72)
+    };
+    let stepper_border = if dark {
+        hsla(0.0, 0.0, 1.0, 0.07)
+    } else {
+        p.border.opacity(0.75)
+    };
+    let divider = || {
+        div()
+            .w(px(1.0))
+            .h(px(14.0))
+            .flex_none()
+            .bg(if dark {
+                hsla(0.0, 0.0, 1.0, 0.08)
+            } else {
+                p.border.opacity(0.85)
+            })
+    };
     let step = |id: &'static str, label: &'static str, delta_ms: i64| {
-        surface_button(id)
+        ghost_button(id)
             .debug_selector(move || id.into())
             .label(label)
             .tooltip(shift_label(delta_ms))
-            .dense_action()
+            .rounded_full()
+            .h(px(26.0))
+            .px_2()
+            .text_xs()
+            .font_family(cx.theme().mono_font_family.clone())
+            .font_weight(FontWeight::MEDIUM)
             .on_click(
                 cx.listener(move |this, _, _, cx| host(this, TimingAction::Nudge(delta_ms), cx)),
             )
     };
     let steps = h_flex()
         .min_w_0()
-        .flex_wrap()
+        .flex_none()
+        .px_1()
+        .py_0p5()
         .items_center()
-        .gap_1()
+        .gap_0p5()
+        .rounded_full()
+        .bg(stepper_bg)
+        .border_1()
+        .border_color(stepper_border)
         .child(step("lyrics-earlier-500", "−0.5", -500))
         .child(step("lyrics-earlier-100", "−0.1", -100))
+        .child(divider())
         .child(
             // A fixed slot keeps the buttons still while the amount changes.
             div()
                 .id("lyrics-timing-shift")
                 .w(px(tokens::LYRIC_TIMING_STATUS_WIDTH))
                 .flex_none()
+                .px_1()
                 .text_center()
-                .text_sm()
+                .text_xs()
+                .font_weight(if document.offset_ms == 0 {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::SEMIBOLD
+                })
                 .text_ellipsis()
                 .text_color(if document.offset_ms == 0 {
                     p.text_secondary
@@ -245,6 +298,7 @@ fn timing_bar<V: 'static>(
                 .child(shift.clone())
                 .tooltip(move |window, cx| Tooltip::new(shift.clone()).build(window, cx)),
         )
+        .child(divider())
         .child(step("lyrics-later-100", "+0.1", 100))
         .child(step("lyrics-later-500", "+0.5", 500));
     let actions = h_flex()
@@ -257,8 +311,16 @@ fn timing_bar<V: 'static>(
                 .custom(soft_toggle_style(aligning, cx))
                 .selected(aligning)
                 .toggled(aligning)
-                .rounded(px(tokens::radius::BUTTON))
-                .dense_action()
+                .rounded_full()
+                .h(px(28.0))
+                .px_3()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .cursor_pointer()
+                .when(aligning, |this| {
+                    this.border_1()
+                        .border_color(p.brand.opacity(if dark { 0.36 } else { 0.28 }))
+                })
                 .on_click(
                     cx.listener(move |this, _, _, cx| host(this, TimingAction::ToggleAlign, cx)),
                 ),
@@ -267,8 +329,11 @@ fn timing_bar<V: 'static>(
             ghost_button("lyrics-timing-reset")
                 .debug_selector(|| "lyrics-timing-reset".into())
                 .label(t!("Reset"))
-                .dense_action()
-                .disabled(!adjusted(document))
+                .rounded_full()
+                .h(px(28.0))
+                .px_2p5()
+                .text_xs()
+                .disabled(!is_adjusted)
                 .on_click(cx.listener(move |this, _, _, cx| host(this, TimingAction::Reset, cx))),
         )
         .child(
@@ -282,32 +347,58 @@ fn timing_bar<V: 'static>(
             .on_click(cx.listener(move |this, _, _, cx| host(this, TimingAction::Close, cx))),
         );
     v_flex()
-        .pt_1()
-        .gap_1()
+        .w_full()
+        .mt_1()
+        .px_3()
+        .py_2()
+        .gap_1p5()
+        .rounded(px(tokens::radius::COVER))
+        .bg(card_bg)
+        .border_1()
+        .border_color(card_border)
         .child(
             h_flex()
+                .w_full()
                 .flex_wrap()
                 .items_center()
                 .justify_between()
-                .gap_x_3()
-                .gap_y_1()
+                .gap_x_2p5()
+                .gap_y_1p5()
                 .child(steps)
                 .child(actions),
         )
         .child(
             // Always one line, so arming an alignment moves no lyric.
-            div()
-                .id("lyrics-timing-hint")
+            h_flex()
                 .w_full()
-                .min_w_0()
                 .h(px(tokens::LYRIC_TIMING_HINT_HEIGHT))
                 .flex_none()
-                .text_xs()
-                .line_height(px(tokens::LYRIC_TIMING_HINT_HEIGHT))
-                .text_ellipsis()
-                .text_color(if aligning { p.brand } else { p.text_secondary })
-                .child(hint.clone())
-                .tooltip(move |window, cx| Tooltip::new(hint.clone()).build(window, cx)),
+                .items_center()
+                .gap_1p5()
+                .child(
+                    div()
+                        .size(px(5.0))
+                        .flex_none()
+                        .rounded_full()
+                        .bg(if aligning {
+                            p.brand
+                        } else {
+                            p.text_muted.opacity(0.55)
+                        }),
+                )
+                .child(
+                    div()
+                        .id("lyrics-timing-hint")
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(tokens::LYRIC_TIMING_HINT_HEIGHT))
+                        .text_xs()
+                        .line_height(px(tokens::LYRIC_TIMING_HINT_HEIGHT))
+                        .text_ellipsis()
+                        .text_color(if aligning { p.brand } else { p.text_muted })
+                        .child(hint.clone())
+                        .tooltip(move |window, cx| Tooltip::new(hint.clone()).build(window, cx)),
+                ),
         )
         .into_any_element()
 }
