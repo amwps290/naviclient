@@ -55,18 +55,29 @@ fn record_duration(record: &Record) -> SharedString {
 
 impl NavidromeApp {
     pub(in crate::app) fn render_lyrics_header(&self, cx: &Context<Self>) -> gpui_kit::AnyElement {
+        let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let document = self.state.lyrics.document.as_ref();
-        let synced = self.state.lyrics.lyrics().is_some_and(|l| l.is_synced());
+        let lyrics = self.state.lyrics.lyrics();
+        let synced = lyrics.is_some_and(|l| l.is_synced());
         let original_synced = document.is_some_and(|d| d.lyrics.is_synced());
         let plain = document.is_some_and(|d| d.plain);
         let personal = document.is_some_and(|d| d.manual || d.offset_ms != 0 || d.plain);
         let word_timing = self.config.lyrics.word_timing;
         let show_translation = self.config.show_lyrics_translation;
-        let has_lyrics_text = self
-            .state
-            .lyrics
-            .lyrics()
-            .is_some_and(|l| l.lines.iter().any(|line| !line.text.trim().is_empty()));
+        let has_translation = lyrics.is_some_and(|l| {
+            l.lines.iter().any(|line| {
+                line.translation
+                    .as_deref()
+                    .is_some_and(|text| !text.trim().is_empty())
+            })
+        });
+        let has_lyrics_text =
+            lyrics.is_some_and(|l| l.lines.iter().any(|line| !line.text.trim().is_empty()));
+        let line_count = lyrics.map_or(0, |l| l.lines.len());
+        let active_line = lyrics
+            .and_then(|l| l.display_line_index(self.playback_for_display().position))
+            .and_then(|index| self.lyrics_ui.timing.display_line(Some(index)));
         let timing_open = self.lyrics_ui.timing.is_open();
         // A closed bar still tells the listener that this song is shifted.
         let shift = document
@@ -100,24 +111,103 @@ impl NavidromeApp {
             }
             label
         });
+        let pill_bg = if dark {
+            hsla(0.0, 0.0, 1.0, 0.04)
+        } else {
+            p.raised.opacity(0.65)
+        };
+        let pill_border = if dark {
+            hsla(0.0, 0.0, 1.0, 0.08)
+        } else {
+            p.border.opacity(0.75)
+        };
         v_flex()
-            .gap_1()
+            .w_full()
+            .max_w(px(740.0))
+            .gap_1p5()
             .pb_2()
+            .pl_3()
             .child(
                 h_flex()
+                    .w_full()
                     .justify_between()
                     .items_center()
                     .gap_2()
                     .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(t!("Lyrics")),
+                        h_flex()
+                            .min_w_0()
+                            .flex_1()
+                            .items_center()
+                            .gap_2()
+                            .child(div().size(px(6.0)).flex_none().rounded_full().bg(if synced {
+                                p.brand
+                            } else {
+                                p.text_muted.opacity(0.6)
+                            }))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(p.text_secondary)
+                                    .child(source.unwrap_or_else(|| t!("Lyrics").to_string())),
+                            )
+                            .when(line_count > 0 && synced, |this| {
+                                this.child(
+                                    div()
+                                        .flex_none()
+                                        .text_xs()
+                                        .text_color(p.text_muted)
+                                        .child(format!(
+                                            "· {:02}/{line_count}",
+                                            active_line.map_or(0, |index| index + 1)
+                                        )),
+                                )
+                            })
+                            .when_some(shift, |this, shift| {
+                                this.child(
+                                    div()
+                                        .id("lyrics-shift")
+                                        .flex_none()
+                                        .cursor_pointer()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(p.brand)
+                                        .child(format!("· {shift}"))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.toggle_lyrics_timing(cx)
+                                        })),
+                                )
+                            }),
                     )
                     .child(
                         h_flex()
+                            .flex_none()
+                            .px_1p5()
+                            .py_0p5()
                             .items_center()
-                            .gap_1()
+                            .gap_0p5()
+                            .rounded_full()
+                            .bg(pill_bg)
+                            .border_1()
+                            .border_color(pill_border)
+                            .when(has_translation, |this| {
+                                this.child(
+                                    icon_button(
+                                        "now-playing-translation",
+                                        AppIcon::Translation,
+                                        t!("Show translation"),
+                                        tokens::ICON_BUTTON_XS,
+                                    )
+                                    .custom(soft_toggle_style(show_translation, cx))
+                                    .selected(show_translation)
+                                    .toggled(show_translation)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.set_show_lyrics_translation(!show_translation, cx)
+                                    })),
+                                )
+                            })
                             .child(
                                 ghost_button("change-lyrics")
                                     .label(t!("Change lyrics"))
@@ -131,7 +221,7 @@ impl NavidromeApp {
                                     "lyrics-actions",
                                     IconName::Ellipsis,
                                     t!("Lyrics actions"),
-                                    tokens::ICON_BUTTON_SM,
+                                    tokens::ICON_BUTTON_XS,
                                 )
                                 .dropdown_menu(
                                     move |menu, _, cx| {
@@ -226,33 +316,11 @@ impl NavidromeApp {
                             ),
                     ),
             )
-            .when_some(source, |this, source| {
-                this.child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_x_1()
-                        .text_xs()
-                        .text_color(palette(cx).text_secondary)
-                        .child(div().min_w_0().child(source))
-                        .when_some(shift, |this, shift| {
-                            this.child(
-                                div()
-                                    .id("lyrics-shift")
-                                    .cursor_pointer()
-                                    .text_color(palette(cx).brand)
-                                    .child(format!("· {shift}"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.toggle_lyrics_timing(cx)),
-                                    ),
-                            )
-                        }),
-                )
-            })
             .when_some(self.state.lyrics.warning, |this, status| {
                 this.child(
                     div()
                         .text_xs()
-                        .text_color(palette(cx).text_secondary)
+                        .text_color(p.text_secondary)
                         .child(status.message()),
                 )
             })

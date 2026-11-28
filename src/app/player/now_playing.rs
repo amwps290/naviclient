@@ -3,6 +3,79 @@
 use crate::app::prelude::*;
 use gpui_kit::component::menu::PopupMenuItem;
 
+/// Viewport-derived geometry for the standard Now Playing vinyl stage.
+/// Keeps the turntable anchored vertically even when titles span two lines.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NowPlayingStage {
+    pub(super) compact: bool,
+    pub(super) stage_max_width: f32,
+    pub(super) left_width: f32,
+    pub(super) cover_size: f32,
+    pub(super) metadata_width: f32,
+    pub(super) title_size: f32,
+    pub(super) title_slot_height: f32,
+    pub(super) column_gap: f32,
+    pub(super) lyric_size: f32,
+    pub(super) active_lyric_size: f32,
+    pub(super) scroll_spacer: f32,
+}
+
+impl NowPlayingStage {
+    pub(super) fn new(viewport_width: f32, viewport_height: f32, player_clearance: f32) -> Self {
+        let width = viewport_width.max(1.0);
+        let height = viewport_height.max(1.0);
+        let compact = width < 1_080.0 || height < 740.0;
+        let horizontal_padding = if compact { 28.0 } else { 48.0 };
+        let top_padding = if compact { 16.0 } else { 24.0 };
+        let bottom_padding = 20.0 + player_clearance;
+        let available_height = (height - top_padding - bottom_padding).max(260.0);
+        let stage_max_width = (width - horizontal_padding * 2.0)
+            .max(320.0)
+            .min(if width >= 1_800.0 { 1_440.0 } else { 1_260.0 });
+        let column_gap = if compact {
+            32.0
+        } else {
+            (stage_max_width * 0.055).clamp(40.0, 76.0)
+        };
+        let title_size: f32 = if compact {
+            24.0
+        } else {
+            tokens::NOW_PLAYING_TITLE
+        };
+        // Fixed 2-line title budget (1.28 line-height + small breathing room) so long titles
+        // never push the turntable upward.
+        let title_slot_height = (title_size * 1.28 * 2.0).ceil();
+        // Reserve space for the fixed metadata & action stack under the vinyl record:
+        // gap (22) + album/tag (18) + 2-line title + artist/subtitle (40) + actions (36).
+        let metadata_reserve = title_slot_height + if compact { 116.0 } else { 132.0 };
+        let max_cover_by_height = (available_height - metadata_reserve).max(168.0);
+        let max_cover_by_width = ((stage_max_width - column_gap) * 0.42).max(168.0);
+        let cover_size = max_cover_by_height
+            .min(max_cover_by_width)
+            .clamp(168.0, if compact { 290.0 } else { 360.0 });
+        let left_width = (cover_size + if compact { 32.0 } else { 44.0 })
+            .max(280.0)
+            .min((stage_max_width - column_gap) * 0.46);
+        let metadata_width = cover_size.max(256.0).min(left_width);
+        let active_lyric_size = if compact { 24.0 } else { tokens::LYRIC_ACTIVE };
+        let lyric_size = if compact { 18.0 } else { tokens::LYRIC };
+        let scroll_spacer = (available_height * 0.38).clamp(140.0, 260.0);
+        Self {
+            compact,
+            stage_max_width,
+            left_width,
+            cover_size,
+            metadata_width,
+            title_size,
+            title_slot_height,
+            column_gap,
+            lyric_size,
+            active_lyric_size,
+            scroll_spacer,
+        }
+    }
+}
+
 impl NavidromeApp {
     /// 渲染当前播放页，包括黑胶封面、歌词和歌曲操作。
     pub(in crate::app) fn render_now_playing(
@@ -31,19 +104,35 @@ impl NavidromeApp {
                 .into_any_element();
         };
 
+        let layout = self.shell_layout(window);
+        let player_clearance = layout.player_clearance();
         let viewport_width = f32::from(window.viewport_size().width);
         let viewport_height = f32::from(window.viewport_size().height);
-        let max_cover_size = if viewport_width < 1_100.0 {
-            300.0
-        } else {
-            380.0
-        };
-        let cover_size = (viewport_height - 300.0).clamp(220.0, max_cover_size);
+        let stage = NowPlayingStage::new(viewport_width, viewport_height, player_clearance);
+        let cover_size = stage.cover_size;
         let playback = self.playback_for_display();
         let p = palette(cx);
+        let dark = cx.theme().is_dark();
         let serif = crate::typography::serif_font_family(cx);
         let radio_seed = song.clone();
         let radio_loading = self.song_radio_loading(&song.id);
+        let can_favorite = self.api.as_ref().is_some_and(|api| {
+            api.capabilities().favorite_write
+                && self
+                    .source_for_song(song)
+                    .is_some_and(|source| source.id() == api.id())
+        });
+        let accent_color = self
+            .now_playing_cover_palette()
+            .map(|(_, accent)| {
+                hsla(
+                    accent.h,
+                    accent.s.clamp(0.28, 0.62),
+                    if dark { 0.66 } else { 0.44 },
+                    1.0,
+                )
+            })
+            .unwrap_or(p.brand);
         let display_line = self
             .state
             .lyrics
@@ -56,19 +145,21 @@ impl NavidromeApp {
                 .flex_1()
                 .flex()
                 .items_center()
-                .justify_center()
+                .justify_start()
+                .pl(px(22.0))
                 .text_color(p.text_secondary)
                 .child(self.state.lyrics.status.message())
                 .into_any_element()
         } else if let Some(error) = self.state.lyrics.error() {
             v_flex()
                 .flex_1()
-                .items_center()
+                .items_start()
                 .justify_center()
+                .pl(px(22.0))
                 .gap_2()
                 .text_color(p.text_secondary)
                 .child(self.state.lyrics.status.message())
-                .child(div().text_xs().child(error.to_string()))
+                .child(div().text_xs().text_color(p.text_muted).child(error.to_string()))
                 .into_any_element()
         } else if let Some(lyrics) = lyrics.filter(|lyrics| !lyrics.lines.is_empty()) {
             let synced = lyrics.is_synced();
@@ -80,6 +171,12 @@ impl NavidromeApp {
                     .lyrics
                     .is_manual_scroll_paused(std::time::Instant::now());
             let app_for_line_menu = cx.entity().downgrade();
+            let active_color = if dark { p.text } else { p.brand };
+            let word_base_color = if dark {
+                p.text.opacity(0.42)
+            } else {
+                p.text.opacity(0.45)
+            };
             div()
                 .relative()
                 .flex_1()
@@ -89,7 +186,7 @@ impl NavidromeApp {
                     v_flex()
                         .id("lyrics-scroll")
                         .size_full()
-                        .px_6()
+                        .pr_4()
                         .overflow_y_scroll()
                         .track_scroll(&self.lyrics_scroll_handle)
                         .on_scroll_wheel(cx.listener(move |this, _, _, cx| {
@@ -100,7 +197,7 @@ impl NavidromeApp {
                                 cx.notify();
                             }
                         }))
-                        .child(div().h(px(240.0)).flex_none())
+                        .child(div().h(px(stage.scroll_spacer)).flex_none())
                         .children(lyrics.lines.iter().enumerate().map(|(index, lyric_line)| {
                             let current = synced && display_line == Some(index);
                             let distance = display_line
@@ -121,8 +218,8 @@ impl NavidromeApp {
                                             words.clone(),
                                             u64::try_from(playback.position.as_millis())
                                                 .unwrap_or(u64::MAX),
-                                            p.text.opacity(0.55),
-                                            p.brand,
+                                            word_base_color,
+                                            active_color,
                                         )
                                         .into_any_element()
                                     })
@@ -137,28 +234,99 @@ impl NavidromeApp {
                                 .filter(|text| show_translation && !text.is_empty());
                             let copy_translation = translation.clone();
                             let line_menu_app = app_for_line_menu.clone();
-                            let line = div()
+                            let hover_bg = if dark {
+                                hsla(0.0, 0.0, 1.0, 0.045)
+                            } else {
+                                p.text.opacity(0.04)
+                            };
+                            let text_block = v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .font_family(serif.clone())
+                                .line_height(relative(if current { 1.38 } else { 1.48 }))
+                                .text_size(px(if current {
+                                    stage.active_lyric_size
+                                } else {
+                                    stage.lyric_size
+                                }))
+                                .font_weight(if current {
+                                    FontWeight::BOLD
+                                } else {
+                                    FontWeight::MEDIUM
+                                })
+                                .text_color(if current {
+                                    active_color
+                                } else if synced {
+                                    p.text.opacity(lyric_opacity(distance))
+                                } else {
+                                    p.text.opacity(0.76)
+                                })
+                                .child(primary)
+                                .when_some(translation, |this, translation| {
+                                    this.child(
+                                        div()
+                                            .font_family(cx.theme().font_family.clone())
+                                            .text_size(px(if current { 14.0 } else { 13.0 }))
+                                            .line_height(relative(1.45))
+                                            .font_weight(FontWeight::NORMAL)
+                                            .text_color(if current {
+                                                p.text_secondary
+                                            } else if synced {
+                                                p.text_secondary
+                                                    .opacity((lyric_opacity(distance) + 0.12).min(0.9))
+                                            } else {
+                                                p.text_secondary.opacity(0.82)
+                                            })
+                                            .child(translation),
+                                    )
+                                });
+
+                            let anchor = div()
+                                .w(px(3.0))
+                                .h(px(if current {
+                                    stage.active_lyric_size * 0.92
+                                } else {
+                                    0.0
+                                }))
+                                .mt(px(if current {
+                                    stage.active_lyric_size * 0.22
+                                } else {
+                                    0.0
+                                }))
+                                .flex_none()
+                                .rounded_full()
+                                .when(current, |this| {
+                                    this.bg(accent_color).shadow(vec![box_shadow(
+                                        px(0.0),
+                                        px(0.0),
+                                        px(12.0),
+                                        px(0.0),
+                                        accent_color.opacity(if dark { 0.55 } else { 0.35 }),
+                                    )])
+                                });
+
+                            let row = h_flex()
                                 .id(SharedString::from(format!(
                                     "lyric-line-{}-{index}",
                                     song.id
                                 )))
                                 .w_full()
-                                .max_w(px(760.0))
-                                .min_h(px(64.0))
-                                .mx_auto()
-                                .px_4()
-                                .py_2()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_center()
-                                .line_height(relative(1.45))
+                                .max_w(px(740.0))
+                                .flex_none()
+                                .items_start()
+                                .gap_3p5()
+                                .px_3()
+                                .py(px(if current { 12.0 } else { 9.0 }))
+                                .rounded(px(tokens::radius::ROW))
                                 .when_some(start_ms, |this, start_ms| {
                                     this.cursor_pointer()
-                                        // Mark the line that a click is about to align.
-                                        .when(aligning, |this| {
-                                            this.rounded(px(tokens::radius::ROW))
-                                                .hover(|style| style.bg(p.brand_soft))
+                                        .hover(move |style| {
+                                            if aligning {
+                                                style.bg(p.brand_soft)
+                                            } else {
+                                                style.bg(hover_bg)
+                                            }
                                         })
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.click_lyric_line(index, start_ms, cx)
@@ -200,48 +368,25 @@ impl NavidromeApp {
                                         })
                                         .expect("app owns lyric line menu")
                                 })
-                                // 原文与翻译作为一个整体参与高亮/点击；翻译行小号弱化色。
-                                .child(v_flex().w_full().gap_1().child(primary).when_some(
-                                    translation,
-                                    |this, translation| {
-                                        this.child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(p.text_secondary)
-                                                .child(translation),
-                                        )
-                                    },
-                                ));
+                                .child(anchor)
+                                .child(text_block);
 
-                            let line = line.font_family(serif.clone());
                             if current {
-                                line.text_size(px(tokens::LYRIC_ACTIVE))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(p.brand)
-                                    .px_6()
-                                    .py_3()
-                                    .with_animation(
-                                        SharedString::from(format!(
-                                            "active-lyric-{}-{index}",
-                                            song.id
-                                        )),
-                                        Animation::new(Duration::from_millis(280))
-                                            .with_easing(ease_out_quint()),
-                                        |this, delta| this.opacity(0.70 + delta * 0.30),
-                                    )
-                                    .into_any_element()
-                            } else if synced {
-                                line.text_size(px(tokens::LYRIC))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(p.text.opacity(lyric_opacity(distance)))
-                                    .into_any_element()
+                                row.with_animation(
+                                    SharedString::from(format!(
+                                        "active-lyric-{}-{index}",
+                                        song.id
+                                    )),
+                                    Animation::new(Duration::from_millis(260))
+                                        .with_easing(ease_out_quint()),
+                                    |this, delta| this.opacity(0.72 + delta * 0.28),
+                                )
+                                .into_any_element()
                             } else {
-                                line.text_size(px(tokens::LYRIC))
-                                    .text_color(p.text.opacity(0.72))
-                                    .into_any_element()
+                                row.into_any_element()
                             }
                         }))
-                        .child(div().h(px(280.0)).flex_none()),
+                        .child(div().h(px(stage.scroll_spacer + 40.0)).flex_none()),
                 )
                 .when(manual_scroll_paused, |this| {
                     this.child(
@@ -257,15 +402,16 @@ impl NavidromeApp {
                 })
                 .into_any_element()
         } else {
-            div()
+            v_flex()
                 .flex_1()
-                .flex()
-                .items_center()
+                .items_start()
                 .justify_center()
+                .pl(px(22.0))
+                .gap_3()
                 .text_color(p.text_secondary)
                 .child(self.state.lyrics.status.message())
                 .child(
-                    ghost_button("empty-lyrics-search")
+                    surface_button("empty-lyrics-search")
                         .label(t!("Search lyrics"))
                         .compact_action()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -279,135 +425,247 @@ impl NavidromeApp {
                 .into_any_element()
         };
 
-        let layout = self.shell_layout(window);
-        let player_clearance = layout.player_clearance();
         let halo_color = self
             .now_playing_cover_palette()
             .map(|(_, accent)| {
                 hsla(
                     accent.h,
-                    accent.s.min(0.50),
-                    if cx.theme().is_dark() { 0.48 } else { 0.60 },
-                    if cx.theme().is_dark() { 0.16 } else { 0.14 },
+                    accent.s.min(0.55),
+                    if dark { 0.46 } else { 0.62 },
+                    if dark { 0.20 } else { 0.16 },
                 )
             })
-            .unwrap_or_else(|| p.brand.opacity(0.10));
+            .unwrap_or_else(|| p.brand.opacity(if dark { 0.14 } else { 0.10 }));
+        let ambient_tint = self
+            .now_playing_cover_palette()
+            .map(|(base, _)| {
+                hsla(
+                    base.h,
+                    base.s.min(0.45),
+                    if dark { 0.34 } else { 0.72 },
+                    if dark { 0.16 } else { 0.14 },
+                )
+            })
+            .unwrap_or_else(|| p.brand.opacity(0.06));
+        let vinyl_metal_tint = self
+            .now_playing_cover_palette()
+            .map(|(_, accent)| accent)
+            .or(Some(p.brand));
+        let has_album_meta = !song.album.is_empty() || song.bilibili_subtitle().is_some();
+        let full_title = song.title.clone();
 
-        h_flex()
+        div()
+            .relative()
             .size_full()
             .min_h_0()
-            .px_8()
-            .pt_6()
-            .pb(px(24.0 + player_clearance))
-            .gap_8()
-            .items_center()
+            .overflow_hidden()
+            // Soft cover-reactive atmospheric wash anchored on the vinyl side.
+            .child(div().absolute().inset_0().bg(linear_gradient(
+                118.0,
+                linear_color_stop(ambient_tint, 0.0),
+                linear_color_stop(p.page.opacity(0.0), 0.52),
+            )))
             .child(
-                v_flex()
-                    .w(px((cover_size + 40.0).max(320.0)))
-                    .flex_none()
+                h_flex()
+                    .relative()
+                    .size_full()
+                    .max_w(px(stage.stage_max_width))
+                    .mx_auto()
+                    .min_h_0()
+                    .px(px(if stage.compact { 28.0 } else { 48.0 }))
+                    .pt(px(if stage.compact { 16.0 } else { 24.0 }))
+                    .pb(px(20.0 + player_clearance))
+                    .gap(px(stage.column_gap))
                     .items_center()
-                    .gap_4()
-                    .child(
-                        div()
-                            .relative()
-                            .size(px(cover_size))
-                            .flex_none()
-                            .rounded_full()
-                            .shadow(vec![
-                                box_shadow(
-                                    px(0.0),
-                                    px(0.0),
-                                    px(cover_size * 0.22),
-                                    px(cover_size * 0.015),
-                                    halo_color,
-                                ),
-                                box_shadow(
-                                    px(0.0),
-                                    px(18.0),
-                                    px(44.0),
-                                    px(-8.0),
-                                    hsla(
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        if cx.theme().is_dark() { 0.48 } else { 0.18 },
-                                    ),
-                                ),
-                            ])
-                            .child(self.render_vinyl_record(cover_size, cx)),
-                    )
                     .child(
                         v_flex()
+                            .w(px(stage.left_width))
+                            .flex_none()
                             .items_center()
-                            .gap_1()
-                            .child(serif_heading(
-                                song.title.clone(),
-                                tokens::NOW_PLAYING_TITLE,
-                                cx,
-                            ))
                             .child(
-                                div()
-                                    .text_size(px(tokens::BODY))
-                                    .text_color(p.brand)
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(self.song_artist_link(
-                                        SharedString::from(format!(
-                                            "now-playing-artist-{}",
-                                            song.id
-                                        )),
-                                        song,
-                                        cx,
-                                    )),
-                            )
-                            .when(
-                                !song.album.is_empty() || song.bilibili_subtitle().is_some(),
-                                |this| {
-                                    this.child(
+                                v_flex()
+                                    .w(px(stage.metadata_width))
+                                    .min_w_0()
+                                    .items_center()
+                                    .child(
                                         div()
-                                            .text_size(px(tokens::META))
-                                            .text_color(p.text_secondary)
-                                            .child(self.song_album_link(
-                                                SharedString::from(format!(
-                                                    "now-playing-album-{}",
-                                                    song.id
-                                                )),
-                                                song.album.clone(),
-                                                song,
+                                            .relative()
+                                            .size(px(cover_size))
+                                            .flex_none()
+                                            .rounded_full()
+                                            .shadow(vec![
+                                                box_shadow(
+                                                    px(0.0),
+                                                    px(0.0),
+                                                    px(cover_size * 0.26),
+                                                    px(cover_size * 0.02),
+                                                    halo_color,
+                                                ),
+                                                box_shadow(
+                                                    px(0.0),
+                                                    px(20.0),
+                                                    px(48.0),
+                                                    px(-8.0),
+                                                    hsla(
+                                                        0.0,
+                                                        0.0,
+                                                        0.0,
+                                                        if dark { 0.54 } else { 0.20 },
+                                                    ),
+                                                ),
+                                            ])
+                                            .child(self.render_vinyl_record_styled(
+                                                cover_size,
+                                                0.46,
+                                                vinyl_metal_tint,
                                                 cx,
                                             )),
                                     )
-                                },
-                            )
-                            .when(song.bilibili_part.is_none(), |this| {
-                                let disabled = self
-                                    .source_for_song(song)
-                                    .is_none_or(|api| !api.capabilities().recommendations)
-                                    || radio_loading;
-                                this.child(
-                                    capsule_button("now-playing-song-radio")
-                                        .icon(PlayerIcon::Play)
-                                        .label(if radio_loading {
-                                            t!("Building song radio…")
-                                        } else {
-                                            t!("Start song radio")
-                                        })
-                                        .disabled_tonal(disabled)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.start_song_radio(radio_seed.clone());
-                                            cx.notify();
-                                        })),
-                                )
-                            }),
+                                    .child(
+                                        v_flex()
+                                            .w_full()
+                                            .min_w_0()
+                                            .mt(px(if stage.compact { 18.0 } else { 24.0 }))
+                                            .gap_1p5()
+                                            .child(
+                                                h_flex()
+                                                    .w_full()
+                                                    .h(px(18.0))
+                                                    .flex_none()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .when(has_album_meta, |this| {
+                                                        this.child(
+                                                            div()
+                                                                .w(px(16.0))
+                                                                .h(px(1.5))
+                                                                .flex_none()
+                                                                .rounded_full()
+                                                                .bg(accent_color.opacity(0.72)),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .flex_1()
+                                                                .min_w_0()
+                                                                .text_size(px(tokens::CAPTION))
+                                                                .text_color(p.text_muted)
+                                                                .child(self.song_album_link(
+                                                                    SharedString::from(format!(
+                                                                        "now-playing-album-{}",
+                                                                        song.id
+                                                                    )),
+                                                                    song.album.clone(),
+                                                                    song,
+                                                                    cx,
+                                                                )),
+                                                        )
+                                                    }),
+                                            )
+                                            .child(
+                                                // Fixed 2-line title container: clamps long titles
+                                                // cleanly with ellipsis and tooltip without shifting
+                                                // the vinyl record above.
+                                                div()
+                                                    .id("now-playing-song-title")
+                                                    .w_full()
+                                                    .h(px(stage.title_slot_height))
+                                                    .flex_none()
+                                                    .overflow_hidden()
+                                                    .font_family(serif.clone())
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_size(px(stage.title_size))
+                                                    .line_height(relative(1.28))
+                                                    .text_color(p.text)
+                                                    .text_ellipsis()
+                                                    .line_clamp(2)
+                                                    .tooltip(move |window, cx| {
+                                                        Tooltip::new(full_title.clone())
+                                                            .build(window, cx)
+                                                    })
+                                                    .child(song.title.clone()),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .w_full()
+                                                    .min_w_0()
+                                                    .h(px(22.0))
+                                                    .flex_none()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        div()
+                                                            .flex_1()
+                                                            .min_w_0()
+                                                            .text_size(px(tokens::BODY))
+                                                            .text_color(accent_color)
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .child(self.song_artist_link(
+                                                                SharedString::from(format!(
+                                                                    "now-playing-artist-{}",
+                                                                    song.id
+                                                                )),
+                                                                song,
+                                                                cx,
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .w_full()
+                                                    .h(px(36.0))
+                                                    .mt_2()
+                                                    .flex_none()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .when(can_favorite, |this| {
+                                                        this.child(self.favorite_button_sized(
+                                                            FavoriteKind::Song,
+                                                            &song.id,
+                                                            tokens::ICON_BUTTON_MD,
+                                                            cx,
+                                                        ))
+                                                    })
+                                                    .when(song.bilibili_part.is_none(), |this| {
+                                                        let disabled = self
+                                                            .source_for_song(song)
+                                                            .is_none_or(|api| {
+                                                                !api.capabilities().recommendations
+                                                            })
+                                                            || radio_loading;
+                                                        this.child(
+                                                            capsule_button_sm(
+                                                                "now-playing-song-radio",
+                                                            )
+                                                            .icon(PlayerIcon::Play)
+                                                            .label(if radio_loading {
+                                                                t!("Building song radio…")
+                                                            } else {
+                                                                t!("Start song radio")
+                                                            })
+                                                            .disabled_tonal(disabled)
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    this.start_song_radio(
+                                                                        radio_seed.clone(),
+                                                                    );
+                                                                    cx.notify();
+                                                                },
+                                                            )),
+                                                        )
+                                                    }),
+                                            ),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .min_h_0()
+                            .child(self.render_lyrics_header(cx))
+                            .child(lyrics_body),
                     ),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .pl_6()
-                    .child(self.render_lyrics_header(cx))
-                    .child(lyrics_body),
             )
             .into_any_element()
     }
@@ -415,10 +673,10 @@ impl NavidromeApp {
 
 fn lyric_opacity(distance: usize) -> f32 {
     match distance {
-        1 => 0.78,
-        2 => 0.68,
-        3 => 0.6,
-        _ => 0.55,
+        1 => 0.62,
+        2 => 0.42,
+        3 => 0.30,
+        _ => 0.22,
     }
 }
 

@@ -5,8 +5,24 @@ use crate::models::{LyricLine, Lyrics};
 fn opacity_falls_with_distance_and_never_below_the_floor() {
     let values = [1, 2, 3, 4, 10, usize::MAX].map(lyric_opacity);
     assert!(values.windows(2).all(|pair| pair[0] >= pair[1]));
-    assert_eq!(lyric_opacity(usize::MAX), 0.55);
-    assert!(values.iter().all(|value| *value >= 0.55));
+    assert_eq!(lyric_opacity(usize::MAX), 0.22);
+    assert!(values.iter().all(|value| *value >= 0.22));
+}
+
+#[test]
+fn now_playing_stage_reserves_two_line_title_without_pushing_vinyl_out_of_bounds() {
+    for (width, height, clearance) in [
+        (960.0, 640.0, 88.0),
+        (1280.0, 820.0, 96.0),
+        (1440.0, 900.0, 96.0),
+        (1920.0, 1080.0, 96.0),
+    ] {
+        let stage = NowPlayingStage::new(width, height, clearance);
+        assert!(stage.cover_size >= 168.0);
+        assert!(stage.cover_size <= stage.left_width);
+        assert!(stage.title_slot_height >= stage.title_size * 2.4);
+        assert!(stage.left_width + stage.column_gap < stage.stage_max_width);
+    }
 }
 
 #[test]

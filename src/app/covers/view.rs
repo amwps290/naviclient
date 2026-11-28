@@ -94,14 +94,6 @@ impl NavidromeApp {
         .into_any_element()
     }
 
-    pub(in crate::app) fn render_vinyl_record(
-        &self,
-        size: f32,
-        cx: &Context<Self>,
-    ) -> gpui_kit::AnyElement {
-        self.render_vinyl_record_styled(size, 0.5, None, cx)
-    }
-
     pub(in crate::app) fn render_vinyl_record_styled(
         &self,
         size: f32,
