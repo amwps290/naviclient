@@ -240,6 +240,27 @@ pub struct Favorites {
     pub songs: Vec<Song>,
 }
 
+/// Subdirectory entry inside a folder browse view.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderItem {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub cover_art: Option<String>,
+    #[serde(default)]
+    pub song_count: Option<usize>,
+}
+
+/// Direct children (subfolders + tracks) of one directory in a music source.
+#[derive(Clone, Debug, Default)]
+pub struct FolderListing {
+    pub id: String,
+    pub name: String,
+    pub folders: Vec<FolderItem>,
+    pub songs: Vec<Song>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Lyrics {
     pub display_artist: Option<String>,

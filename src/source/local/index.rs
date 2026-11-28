@@ -9,7 +9,9 @@ use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
 use super::favorites::LocalFavoritesStore;
-use crate::models::{Album, AlbumSort, Artist, Favorites, Genre, SearchResults, Song};
+use crate::models::{
+    Album, AlbumSort, Artist, Favorites, FolderItem, FolderListing, Genre, SearchResults, Song,
+};
 
 const INDEX_SCHEMA_VERSION: u32 = 1;
 
@@ -489,6 +491,112 @@ impl LocalLibraryIndex {
             artists,
             albums,
             songs,
+        }
+    }
+
+    pub(super) fn folder_listing(&self, roots: &[PathBuf], folder_id: &str) -> FolderListing {
+        if folder_id.is_empty() && roots.len() > 1 {
+            let mut folders = Vec::new();
+            for root in roots {
+                let mut count = 0usize;
+                let mut cover = None;
+                for track in &self.tracks {
+                    if track.file_path.starts_with(root) {
+                        count += 1;
+                        if cover.is_none() {
+                            cover.clone_from(&track.song.cover_art);
+                        }
+                    }
+                }
+                let name = root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| root.display().to_string());
+                folders.push(FolderItem {
+                    id: root.to_string_lossy().to_string(),
+                    name,
+                    cover_art: cover,
+                    song_count: Some(count),
+                });
+            }
+            return FolderListing {
+                id: String::new(),
+                name: String::new(),
+                folders,
+                songs: Vec::new(),
+            };
+        }
+
+        let target_dir = if folder_id.is_empty() {
+            match roots.first() {
+                Some(root) => root.clone(),
+                None => return FolderListing::default(),
+            }
+        } else {
+            PathBuf::from(folder_id)
+        };
+
+        let mut child_dirs: BTreeMap<PathBuf, (String, usize, Option<String>)> = BTreeMap::new();
+        let mut direct_songs: Vec<Song> = Vec::new();
+
+        for track in &self.tracks {
+            let Ok(rel) = track.file_path.strip_prefix(&target_dir) else {
+                continue;
+            };
+            let mut components = rel.components();
+            let Some(first) = components.next() else {
+                continue;
+            };
+            if components.next().is_none() {
+                direct_songs.push(track.song.clone());
+            } else {
+                let child_path = target_dir.join(first.as_os_str());
+                let child_name = first.as_os_str().to_string_lossy().to_string();
+                let entry = child_dirs
+                    .entry(child_path)
+                    .or_insert_with(|| (child_name, 0, None));
+                entry.1 += 1;
+                if entry.2.is_none() {
+                    entry.2.clone_from(&track.song.cover_art);
+                }
+            }
+        }
+
+        let mut folders: Vec<FolderItem> = child_dirs
+            .into_iter()
+            .map(|(path, (name, count, cover_art))| FolderItem {
+                id: path.to_string_lossy().to_string(),
+                name,
+                cover_art,
+                song_count: Some(count),
+            })
+            .collect();
+        folders.sort_by_key(|f| f.name.to_lowercase());
+        direct_songs.sort_by(|a, b| {
+            (
+                a.disc.unwrap_or(1),
+                a.track.unwrap_or(i32::MAX),
+                a.title.to_lowercase(),
+            )
+                .cmp(&(
+                    b.disc.unwrap_or(1),
+                    b.track.unwrap_or(i32::MAX),
+                    b.title.to_lowercase(),
+                ))
+        });
+
+        let name = target_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| target_dir.display().to_string());
+
+        FolderListing {
+            id: target_dir.to_string_lossy().to_string(),
+            name,
+            folders,
+            songs: direct_songs,
         }
     }
 }

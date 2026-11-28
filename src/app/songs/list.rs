@@ -127,6 +127,7 @@ impl AppState {
                 None => SongList::Songs(self.playlists.songs()),
             }),
             SongScope::Favorites => Some(SongList::Songs(&self.favorites.items().songs)),
+            SongScope::Folder => Some(SongList::Songs(self.folders.songs())),
             SongScope::Search => Some(SongList::Songs(&self.search.results()?.songs)),
             SongScope::Queue => Some(SongList::Queue(self.queue.entries())),
             SongScope::History => Some(SongList::Songs(self.listening.recent_songs())),

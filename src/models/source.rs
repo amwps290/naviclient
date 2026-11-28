@@ -145,6 +145,7 @@ impl SourceProfile {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SourceCapabilities {
     pub library: bool,
+    pub folders: bool,
     pub search: bool,
     pub favorite_read: bool,
     pub favorite_write: bool,
@@ -184,6 +185,7 @@ impl ProviderKind {
         match self {
             Self::OpenSubsonic => SourceCapabilities {
                 library: true,
+                folders: true,
                 search: true,
                 favorite_read: true,
                 favorite_write: true,
@@ -204,6 +206,7 @@ impl ProviderKind {
             },
             Self::LocalFolder | Self::WebDav => SourceCapabilities {
                 library: true,
+                folders: true,
                 search: true,
                 favorite_read: true,
                 favorite_write: true,

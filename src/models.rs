@@ -16,8 +16,8 @@ pub use config::{Config, ServerProfile};
 pub use equalizer::{CustomEqPreset, EqSettings};
 pub use listening::{ListeningEvent, ListeningHistory};
 pub use media::{
-    Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, Genre, LyricLine,
-    LyricSegment, Lyrics, Playlist, SearchResults, Song, WordTimedLine,
+    Album, Artist, BilibiliPart, FavoriteKey, FavoriteKind, Favorites, FolderItem, FolderListing,
+    Genre, LyricLine, LyricSegment, Lyrics, Playlist, SearchResults, Song, WordTimedLine,
 };
 pub use playback::{
     PlayModes, PlaybackId, PlaybackMode, RepeatMode, TranscodingQuality, VolumeNormalization,

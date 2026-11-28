@@ -6,8 +6,8 @@ use anyhow::Result;
 use super::MusicSource;
 use crate::api::OpenSubsonicProvider;
 use crate::models::{
-    Album, AlbumSort, Artist, CapabilitySupport, FavoriteKey, Favorites, Genre, Lyrics, Playlist,
-    SearchResults, ServerInfo, Song,
+    Album, AlbumSort, Artist, CapabilitySupport, FavoriteKey, Favorites, FolderListing, Genre,
+    Lyrics, Playlist, SearchResults, ServerInfo, Song,
 };
 use crate::playlist::{PlaylistDetails, PlaylistEdit, PlaylistEdited};
 
@@ -140,6 +140,19 @@ impl MusicSource {
             Self::WebDav(provider) => Ok(provider.albums_by_genre(genre, size, offset)),
             _ => self.subsonic()?.albums_by_genre(genre, size, offset).await,
         }
+    }
+
+    pub async fn folder_listing(&self, folder_id: &str) -> Result<FolderListing> {
+        let mut listing = match self {
+            Self::OpenSubsonic(_) => self.subsonic()?.folder_listing(folder_id).await?,
+            Self::LocalFolder(provider) => provider.folder_listing(folder_id),
+            Self::WebDav(provider) => provider.folder_listing(folder_id),
+            Self::Bilibili(_) => {
+                anyhow::bail!("This source does not support folder browsing")
+            }
+        };
+        listing.songs = self.bind_songs(listing.songs);
+        Ok(listing)
     }
 
     pub async fn album_songs(&self, id: &str) -> Result<Vec<Song>> {

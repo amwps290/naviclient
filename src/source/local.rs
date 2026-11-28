@@ -23,8 +23,8 @@ use anyhow::{anyhow, Result};
 use rand::seq::SliceRandom;
 
 use crate::models::{
-    Album, AlbumSort, Artist, FavoriteKey, Favorites, Genre, Lyrics, SearchResults, ServerInfo,
-    Song,
+    Album, AlbumSort, Artist, FavoriteKey, Favorites, FolderListing, Genre, Lyrics, SearchResults,
+    ServerInfo, Song,
 };
 use crate::source::{
     AudioQuality, HttpResource, MediaKey, PlaybackResource, SourceId,
@@ -256,6 +256,13 @@ impl LocalFolderProvider {
         self.index
             .read()
             .map(|guard| guard.search(query, songs as usize, albums as usize, artists as usize))
+            .unwrap_or_default()
+    }
+
+    pub fn folder_listing(&self, folder_id: &str) -> FolderListing {
+        self.index
+            .read()
+            .map(|guard| guard.folder_listing(&self.roots, folder_id))
             .unwrap_or_default()
     }
 

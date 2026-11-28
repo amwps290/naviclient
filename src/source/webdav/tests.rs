@@ -182,5 +182,16 @@ async fn scans_mock_webdav_server_resolves_auth_stream_cover_and_lrc() {
         .unwrap();
     assert_eq!(provider.favorites().songs.len(), 1);
 
+    // Folder browse walks virtual hierarchy derived from WebDAV paths.
+    let root = provider.folder_listing("");
+    assert_eq!(root.folders.len(), 1);
+    assert_eq!(root.folders[0].name, "ArtistA");
+    let artist_dir = provider.folder_listing(&root.folders[0].id);
+    assert_eq!(artist_dir.folders.len(), 1);
+    assert_eq!(artist_dir.folders[0].name, "AlbumX");
+    let album_dir = provider.folder_listing(&artist_dir.folders[0].id);
+    assert_eq!(album_dir.songs.len(), 1);
+    assert_eq!(album_dir.songs[0].title, "Starlight");
+
     drop(server);
 }

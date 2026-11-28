@@ -130,4 +130,12 @@ fn scans_incremental_persists_favorites_lyrics_and_resolves_local_file() {
     let playback = reloaded_again.resolve_playback(morning).unwrap();
     assert_eq!(playback.http.local_path(), Some(track_a.as_path()));
     assert_eq!(playback.http.mime_hint(), Some("audio/wav"));
+
+    // Folder browse lists child directory and tracks inside it.
+    let root_listing = reloaded_again.folder_listing("");
+    assert_eq!(root_listing.folders.len(), 1);
+    assert_eq!(root_listing.folders[0].name, "Sunrise Album");
+    assert_eq!(root_listing.folders[0].song_count, Some(2));
+    let sub_listing = reloaded_again.folder_listing(&root_listing.folders[0].id);
+    assert_eq!(sub_listing.songs.len(), 2);
 }

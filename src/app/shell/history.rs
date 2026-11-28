@@ -11,6 +11,7 @@ pub(in crate::app) enum NavLocation {
     Artists,
     Albums,
     Genres,
+    Folders,
     Playlists,
     Search,
     ArtistDetail { id: String, artist: Artist },
@@ -48,6 +49,7 @@ impl NavLocation {
             | (Self::Artists, Self::Artists)
             | (Self::Albums, Self::Albums)
             | (Self::Genres, Self::Genres)
+            | (Self::Folders, Self::Folders)
             | (Self::Playlists, Self::Playlists)
             | (Self::Search, Self::Search) => true,
             (Self::ArtistDetail { id: a, .. }, Self::ArtistDetail { id: b, .. })

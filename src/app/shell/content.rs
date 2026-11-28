@@ -16,6 +16,7 @@ impl NavidromeApp {
             | View::Albums
             | View::Genres
             | View::GenreDetail) => self.render_library_browse(view, window, cx),
+            View::Folders => self.render_folders_view(window, cx),
             View::Playlists if self.browsing_bilibili() => self.render_bilibili_folders(window, cx),
             View::Playlists => self.render_playlists(window, cx),
             View::Search if self.browsing_bilibili() => self.render_bilibili_discovery(window, cx),

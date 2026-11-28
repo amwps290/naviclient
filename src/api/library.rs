@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use super::{parse_array, OpenSubsonicProvider};
 use crate::models::{
-    Album, AlbumSort, Artist, CapabilitySupport, FavoriteKey, FavoriteKind, Favorites, Genre,
-    SearchResults, Song,
+    Album, AlbumSort, Artist, CapabilitySupport, FavoriteKey, FavoriteKind, Favorites, FolderItem,
+    FolderListing, Genre, SearchResults, Song,
 };
 
 impl OpenSubsonicProvider {
@@ -143,6 +143,156 @@ impl OpenSubsonicProvider {
             )
             .await?;
         parse_array(&body["songsByGenre"], "song")
+    }
+
+    /// Browse directory hierarchy via Subsonic `getMusicFolders`, `getIndexes`, and `getMusicDirectory`.
+    pub async fn folder_listing(&self, folder_id: &str) -> Result<FolderListing> {
+        if folder_id.is_empty() {
+            let body = self.get_json("getMusicFolders", &[]).await?;
+            let roots: Vec<(String, String)> = body["musicFolders"]["musicFolder"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| {
+                    let id = item
+                        .get("id")
+                        .and_then(|v| {
+                            v.as_str()
+                                .map(str::to_string)
+                                .or_else(|| v.as_i64().map(|n| n.to_string()))
+                        })?;
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Music")
+                        .to_string();
+                    Some((id, name))
+                })
+                .collect();
+            if roots.len() == 1 {
+                return self.music_folder_indexes(&roots[0].0, &roots[0].1).await;
+            }
+            if roots.is_empty() {
+                return self.music_folder_indexes("", "").await;
+            }
+            let folders = roots
+                .into_iter()
+                .map(|(id, name)| FolderItem {
+                    id: format!("root:{id}"),
+                    name,
+                    cover_art: None,
+                    song_count: None,
+                })
+                .collect();
+            return Ok(FolderListing {
+                id: String::new(),
+                name: String::new(),
+                folders,
+                songs: Vec::new(),
+            });
+        }
+        if let Some(music_folder_id) = folder_id.strip_prefix("root:") {
+            return self.music_folder_indexes(music_folder_id, "").await;
+        }
+        let body = self
+            .get_json("getMusicDirectory", &[("id", folder_id)])
+            .await?;
+        let dir = &body["directory"];
+        let name = dir
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let mut folders = Vec::new();
+        let mut songs = Vec::new();
+        for child in dir["child"].as_array().into_iter().flatten() {
+            if child.get("isDir").and_then(Value::as_bool).unwrap_or(false) {
+                let Some(id) = child.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let title = child
+                    .get("title")
+                    .or_else(|| child.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(id)
+                    .to_string();
+                let cover_art = child
+                    .get("coverArt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                folders.push(FolderItem {
+                    id: id.to_string(),
+                    name: title,
+                    cover_art,
+                    song_count: None,
+                });
+            } else if let Ok(song) = serde_json::from_value::<Song>(child.clone()) {
+                songs.push(song);
+            }
+        }
+        folders.sort_by_key(|f| f.name.to_lowercase());
+        Ok(FolderListing {
+            id: folder_id.to_string(),
+            name,
+            folders,
+            songs,
+        })
+    }
+
+    async fn music_folder_indexes(
+        &self,
+        music_folder_id: &str,
+        folder_name: &str,
+    ) -> Result<FolderListing> {
+        let params: Vec<(&str, &str)> = if music_folder_id.is_empty() {
+            Vec::new()
+        } else {
+            vec![("musicFolderId", music_folder_id)]
+        };
+        let body = self.get_json("getIndexes", &params).await?;
+        let indexes = &body["indexes"];
+        let mut folders = Vec::new();
+        for group in indexes["index"].as_array().into_iter().flatten() {
+            for artist in group["artist"].as_array().into_iter().flatten() {
+                let Some(id) = artist.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let name = artist
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(id)
+                    .to_string();
+                let cover_art = artist
+                    .get("coverArt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                folders.push(FolderItem {
+                    id: id.to_string(),
+                    name,
+                    cover_art,
+                    song_count: None,
+                });
+            }
+        }
+        let mut songs = Vec::new();
+        for child in indexes["child"].as_array().into_iter().flatten() {
+            if !child.get("isDir").and_then(Value::as_bool).unwrap_or(false) {
+                if let Ok(song) = serde_json::from_value::<Song>(child.clone()) {
+                    songs.push(song);
+                }
+            }
+        }
+        folders.sort_by_key(|f| f.name.to_lowercase());
+        Ok(FolderListing {
+            id: if music_folder_id.is_empty() {
+                String::new()
+            } else {
+                format!("root:{music_folder_id}")
+            },
+            name: folder_name.to_string(),
+            folders,
+            songs,
+        })
     }
 
     pub async fn favorites(&self) -> Result<Favorites> {

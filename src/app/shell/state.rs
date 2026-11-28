@@ -6,6 +6,7 @@ use crate::app::library::album_details::AlbumDetails;
 use crate::app::library::artist_details::ArtistDetails;
 use crate::app::library::artist_library::ArtistLibrary;
 use crate::app::library::favorites::FavoritesState;
+use crate::app::library::folders::FolderBrowser;
 use crate::app::library::genre_library::GenreLibrary;
 use crate::app::library::paged_collection::PagedCollection;
 use crate::app::library::playback::LibraryPlayback;
@@ -41,6 +42,7 @@ pub(in crate::app) struct AppState {
     pub(in crate::app) auto_continue: AutoContinueState,
     pub(in crate::app) radio: RadioState,
     pub(in crate::app) genres: GenreLibrary,
+    pub(in crate::app) folders: FolderBrowser,
     pub(in crate::app) search: SearchState,
     pub(in crate::app) collapsed_sections: HashSet<String>,
     pub(in crate::app) artist_details: ArtistDetails,
@@ -91,6 +93,7 @@ impl AppState {
         self.home_albums = HomeAlbums::default();
         self.daily_mix = DailyMixState::default();
         self.genres = GenreLibrary::default();
+        self.folders = FolderBrowser::default();
         self.search = SearchState::default();
         self.collapsed_sections = HashSet::from(["random".to_string()]);
         self.artist_details = ArtistDetails::default();
@@ -121,6 +124,7 @@ impl Default for AppState {
             auto_continue: AutoContinueState::default(),
             radio: RadioState::default(),
             genres: GenreLibrary::default(),
+            folders: FolderBrowser::default(),
             search: SearchState::default(),
             collapsed_sections: HashSet::from(["random".to_string()]),
             artist_details: ArtistDetails::default(),

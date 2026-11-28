@@ -128,6 +128,9 @@ impl NavidromeApp {
                     self.finish_home_albums(section, request, result);
                 }
                 Msg::Genres { request, result } => self.finish_genres(request, result),
+                Msg::FolderListing { request, result } => {
+                    self.finish_folder_listing(request, result)
+                }
                 Msg::OutputDevices { request, result } => {
                     self.finish_output_devices(request, result)
                 }

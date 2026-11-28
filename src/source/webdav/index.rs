@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use super::client::{DavEntry, PeekedAudioTags};
 use crate::models::{
-    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, Genre, SearchResults, Song,
+    Album, AlbumSort, Artist, FavoriteKey, FavoriteKind, Favorites, FolderItem, FolderListing,
+    Genre, SearchResults, Song,
 };
 use crate::source::SourceId;
 
@@ -511,6 +512,87 @@ impl WebDavLibraryIndex {
                 .take(song_limit)
                 .map(|track| track.song.clone())
                 .collect(),
+        }
+    }
+
+    pub(super) fn folder_listing(&self, root_path: &str, folder_id: &str) -> FolderListing {
+        let prefix = folder_id.trim().trim_matches('/');
+        let root_trim = root_path.trim_end_matches('/');
+        let mut child_dirs: BTreeMap<String, (String, usize, Option<String>)> = BTreeMap::new();
+        let mut direct_songs: Vec<Song> = Vec::new();
+
+        for track in &self.tracks {
+            let full = track.song.path.as_deref().unwrap_or_default();
+            let rel = full
+                .strip_prefix(root_trim)
+                .unwrap_or(full)
+                .trim_matches('/');
+            let under_prefix = if prefix.is_empty() {
+                rel
+            } else {
+                let Some(rest) = rel
+                    .strip_prefix(prefix)
+                    .and_then(|r| r.strip_prefix('/'))
+                else {
+                    continue;
+                };
+                rest
+            };
+            if under_prefix.is_empty() {
+                continue;
+            }
+            if let Some((dir_name, _)) = under_prefix.split_once('/') {
+                let child_id = if prefix.is_empty() {
+                    dir_name.to_string()
+                } else {
+                    format!("{prefix}/{dir_name}")
+                };
+                let entry = child_dirs
+                    .entry(child_id)
+                    .or_insert_with(|| (dir_name.to_string(), 0, None));
+                entry.1 += 1;
+                if entry.2.is_none() {
+                    entry.2.clone_from(&track.song.cover_art);
+                }
+            } else {
+                direct_songs.push(track.song.clone());
+            }
+        }
+
+        let mut folders: Vec<FolderItem> = child_dirs
+            .into_iter()
+            .map(|(id, (name, count, cover_art))| FolderItem {
+                id,
+                name,
+                cover_art,
+                song_count: Some(count),
+            })
+            .collect();
+        folders.sort_by_key(|f| f.name.to_lowercase());
+        direct_songs.sort_by(|a, b| {
+            (
+                a.disc.unwrap_or(1),
+                a.track.unwrap_or(i32::MAX),
+                a.title.to_lowercase(),
+            )
+                .cmp(&(
+                    b.disc.unwrap_or(1),
+                    b.track.unwrap_or(i32::MAX),
+                    b.title.to_lowercase(),
+                ))
+        });
+
+        let name = prefix
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+
+        FolderListing {
+            id: prefix.to_string(),
+            name,
+            folders,
+            songs: direct_songs,
         }
     }
 }

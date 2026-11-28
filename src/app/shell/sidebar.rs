@@ -12,6 +12,7 @@ impl View {
             Self::Artists | Self::ArtistDetail => (t!("Artists"), Icon::new(AppIcon::Artists)),
             Self::Albums | Self::AlbumDetail => (t!("Albums"), Icon::new(AppIcon::Albums)),
             Self::Genres | Self::GenreDetail => (t!("Genres"), Icon::new(AppIcon::Genres)),
+            Self::Folders => (t!("Folders"), Icon::new(AppIcon::Folder)),
             Self::Playlists | Self::PlaylistDetail => {
                 (t!("Playlists"), Icon::new(AppIcon::Playlists))
             }
@@ -100,6 +101,12 @@ impl NavidromeApp {
                 ),
             )
             .child(self.nav_button(View::Genres, Some(self.state.genres.len()), collapsed, cx))
+            .when(
+                self.api
+                    .as_ref()
+                    .is_none_or(|api| api.capabilities().folders),
+                |this| this.child(self.nav_button(View::Folders, None, collapsed, cx)),
+            )
             .when(
                 self.api
                     .as_ref()

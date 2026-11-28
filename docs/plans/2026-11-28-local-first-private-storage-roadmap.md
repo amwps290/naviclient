@@ -27,7 +27,7 @@
 | **Phase 1：本地优先底座** | LP-01 | 本地音乐文件夹音源（`ProviderKind::LocalFolder`） | ✅ 已完成 | P0 | 无（直接复用 `MusicSource`） |
 | | LP-02 | 主动离线下载（Pin）与离线可浏览/播放模式 | ✅ 已完成 | P0 | 无 |
 | **Phase 2：私有存储扩展** | LP-03 | WebDAV / Alist 私有存储音源（`ProviderKind::WebDav`） | ✅ 已完成 | P1 | 复用 LP-01 索引器与标签解析 |
-| | LP-04 | 文件夹目录视图（Folder Browse） | ⬜ 待开发 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
+| | LP-04 | 文件夹目录视图（Folder Browse） | ✅ 已完成 | P1 | OpenSubsonic 原生接口 + LP-01 / LP-03 |
 | **Phase 3：个人音乐资产** | LP-05 | 跨源本地歌单与 `.m3u8` 导入/导出 | ⬜ 待开发 | P1 | 建议在 LP-01 后，也可独立先行 |
 | | LP-06 | 本地隐私听歌统计与回顾（Listening Insights） | ⬜ 待开发 | P2 | 复用现有 `ListeningHistory` |
 | | LP-07 | 个人配置、歌词偏好与歌单一键备份/迁移 | ⬜ 待开发 | P2 | 无 |
@@ -149,7 +149,9 @@
 
 ---
 
-### LP-04：文件夹目录视图（Folder Browse）
+### LP-04：文件夹目录视图（Folder Browse） ✅ 已完成
+
+> **完成说明（2026-11-28）**：已在 `SourceCapabilities` 新增 `folders` 能力标记，实现 OpenSubsonic（`getMusicFolders` + `getIndexes` + `getMusicDirectory`）、`LocalFolder`、`WebDAV` 以及离线清单 `OfflineStore` 的统一目录列表查询；新增侧边栏「文件夹」导航视图（`View::Folders`、`SongScope::Folder`）、可点击面包屑导航、子文件夹卡片网格、虚拟化歌曲列表与「全部播放 / 全部加入队列」操作及三语 i18n。
 
 #### 目标
 为习惯按 NAS 目录树整理曲库（如 `华语/周杰伦/2003-叶惠美/` 或 `Hi-Res/古典/`）的用户提供原生目录浏览体验。

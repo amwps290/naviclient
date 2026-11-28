@@ -80,6 +80,7 @@ impl NavidromeApp {
             View::Artists if self.state.artists.is_empty() => self.load_artists(),
             View::Albums if self.state.albums.is_empty() => self.load_albums(),
             View::Genres if self.state.genres.is_empty() => self.load_genres(),
+            View::Folders if !self.state.folders.loaded_once() => self.load_current_folder(),
             View::Playlists if self.state.playlists.items().is_empty() => self.load_playlists(),
             View::Favorites => self.load_favorites(),
             _ => {}
@@ -111,6 +112,7 @@ impl NavidromeApp {
             NavLocation::Artists => self.enter_top_level_view(View::Artists),
             NavLocation::Albums => self.enter_top_level_view(View::Albums),
             NavLocation::Genres => self.enter_top_level_view(View::Genres),
+            NavLocation::Folders => self.enter_top_level_view(View::Folders),
             NavLocation::Playlists => self.enter_top_level_view(View::Playlists),
             NavLocation::Search => self.enter_top_level_view(View::Search),
             NavLocation::ArtistDetail { artist, .. } => {
@@ -182,6 +184,7 @@ fn top_level_nav_location(view: View) -> Option<NavLocation> {
         View::Artists => NavLocation::Artists,
         View::Albums => NavLocation::Albums,
         View::Genres => NavLocation::Genres,
+        View::Folders => NavLocation::Folders,
         View::Playlists => NavLocation::Playlists,
         View::Search => NavLocation::Search,
         _ => return None,

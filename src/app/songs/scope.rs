@@ -11,6 +11,7 @@ pub(in crate::app) enum SongScope {
     ArtistTop,
     PlaylistDetail,
     Favorites,
+    Folder,
     Search,
     Queue,
     History,
@@ -23,6 +24,7 @@ impl SongScope {
             Self::ArtistTop => "artist-top",
             Self::PlaylistDetail => "playlist-detail",
             Self::Favorites => "favorites",
+            Self::Folder => "folder",
             Self::Search => "search",
             Self::Queue => "queue",
             Self::History => "history",
@@ -45,6 +47,7 @@ impl SongScope {
             View::ArtistDetail => Some(Self::ArtistTop),
             View::PlaylistDetail => Some(Self::PlaylistDetail),
             View::Favorites => Some(Self::Favorites),
+            View::Folders => Some(Self::Folder),
             View::Search => Some(Self::Search),
             _ => None,
         }
@@ -74,11 +77,12 @@ impl SongScope {
     }
 
     #[cfg(test)]
-    pub(in crate::app) const ALL: [Self; 7] = [
+    pub(in crate::app) const ALL: [Self; 8] = [
         Self::AlbumDetail,
         Self::ArtistTop,
         Self::PlaylistDetail,
         Self::Favorites,
+        Self::Folder,
         Self::Search,
         Self::Queue,
         Self::History,

@@ -8,7 +8,9 @@ use crate::app::{
 };
 use crate::audio::OutputDevice;
 use crate::import::{ImportedPlaylist, MatchedSongs};
-use crate::models::{Album, Artist, Favorites, Genre, Playlist, SearchResults, ServerInfo, Song};
+use crate::models::{
+    Album, Artist, Favorites, FolderListing, Genre, Playlist, SearchResults, ServerInfo, Song,
+};
 use crate::playlist::PlaylistEdited;
 use crate::recommendation::{DailyMixSnapshot, RecommendedTrack};
 
@@ -122,6 +124,10 @@ pub enum Msg {
     Genres {
         request: LibraryRequest,
         result: Result<Vec<Genre>, String>,
+    },
+    FolderListing {
+        request: LibraryRequest,
+        result: Result<FolderListing, String>,
     },
     OutputDevices {
         request: LibraryRequest,

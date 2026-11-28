@@ -24,8 +24,8 @@ use url::Url;
 
 use crate::models::network::NetworkRoute;
 use crate::models::{
-    Album, AlbumSort, Artist, FavoriteKey, Favorites, Genre, Lyrics, SearchResults, ServerInfo,
-    Song,
+    Album, AlbumSort, Artist, FavoriteKey, Favorites, FolderListing, Genre, Lyrics, SearchResults,
+    ServerInfo, Song,
 };
 use crate::source::{AudioQuality, HttpResource, MediaKey, PlaybackResource, SourceId};
 
@@ -408,6 +408,17 @@ impl WebDavProvider {
         self.index
             .read()
             .map(|guard| guard.search(query, songs as usize, albums as usize, artists as usize))
+            .unwrap_or_default()
+    }
+
+    pub fn folder_listing(&self, folder_id: &str) -> FolderListing {
+        let root_prefix = self
+            .root_url()
+            .map(|url| client::percent_decode(url.path()))
+            .unwrap_or_else(|_| self.root_path.clone());
+        self.index
+            .read()
+            .map(|guard| guard.folder_listing(&root_prefix, folder_id))
             .unwrap_or_default()
     }
 

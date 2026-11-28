@@ -10,19 +10,20 @@ fn typed_scopes_keep_all_existing_element_id_spellings_distinct() {
         (SongScope::ArtistTop, "artist-top"),
         (SongScope::PlaylistDetail, "playlist-detail"),
         (SongScope::Favorites, "favorites"),
+        (SongScope::Folder, "folder"),
         (SongScope::Search, "search"),
         (SongScope::Queue, "queue"),
         (SongScope::History, "history"),
     ];
     assert_eq!(SongScope::ALL, expected.map(|(scope, _)| scope));
-    assert_eq!(SongScope::ALL.into_iter().collect::<HashSet<_>>().len(), 7);
+    assert_eq!(SongScope::ALL.into_iter().collect::<HashSet<_>>().len(), 8);
     assert_eq!(
         expected
             .map(|(_, id)| id)
             .into_iter()
             .collect::<HashSet<_>>()
             .len(),
-        7
+        8
     );
     for (scope, id) in expected {
         assert_eq!(scope.id(), id);
@@ -50,6 +51,7 @@ fn active_scopes_match_each_page_and_an_open_drawer_always_takes_priority() {
         (View::Albums, None),
         (View::Genres, None),
         (View::GenreDetail, None),
+        (View::Folders, Some(SongScope::Folder)),
         (View::Playlists, None),
         (View::Search, Some(SongScope::Search)),
         (View::ArtistDetail, Some(SongScope::ArtistTop)),

@@ -9,6 +9,7 @@ pub(in crate::app) mod artist_library;
 pub(in crate::app) mod browse_view;
 pub(in crate::app) mod detail_view;
 pub(in crate::app) mod favorites;
+pub(in crate::app) mod folders;
 pub(in crate::app) mod genre_library;
 pub(in crate::app) mod helpers;
 pub(in crate::app) mod navigation;

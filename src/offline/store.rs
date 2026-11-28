@@ -9,7 +9,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    Album, AlbumSort, Artist, Genre, Playlist, SearchResults, Song, TranscodingQuality,
+    Album, AlbumSort, Artist, FolderItem, FolderListing, Genre, Playlist, SearchResults, Song,
+    TranscodingQuality,
 };
 use crate::source::{MediaKey, SourceId};
 
@@ -552,6 +553,95 @@ impl OfflineStore {
             artists,
             albums,
             songs,
+        }
+    }
+
+    pub(crate) fn folder_listing(&self, source: &SourceId, folder_id: &str) -> FolderListing {
+        let prefix = folder_id.trim().trim_matches('/');
+        let mut child_dirs: BTreeMap<String, (String, usize, Option<String>)> = BTreeMap::new();
+        let mut direct_songs: Vec<Song> = Vec::new();
+
+        for entry in self.entries.values().filter(|e| &e.media.source == source) {
+            let synthetic_path = entry
+                .song
+                .path
+                .as_deref()
+                .map(|p| p.replace('\\', "/"))
+                .filter(|p| !p.trim().is_empty())
+                .unwrap_or_else(|| {
+                    let artist = if entry.song.artist.trim().is_empty() {
+                        "Unknown Artist"
+                    } else {
+                        entry.song.artist.trim()
+                    };
+                    let album = if entry.song.album.trim().is_empty() {
+                        "Unknown Album"
+                    } else {
+                        entry.song.album.trim()
+                    };
+                    format!("{artist}/{album}/{}", entry.song.title)
+                });
+            let rel = synthetic_path.trim_matches('/');
+            let under_prefix = if prefix.is_empty() {
+                rel
+            } else {
+                let Some(rest) = rel
+                    .strip_prefix(prefix)
+                    .and_then(|r| r.strip_prefix('/'))
+                else {
+                    continue;
+                };
+                rest
+            };
+            if under_prefix.is_empty() {
+                continue;
+            }
+            if let Some((dir_name, _)) = under_prefix.split_once('/') {
+                let child_id = if prefix.is_empty() {
+                    dir_name.to_string()
+                } else {
+                    format!("{prefix}/{dir_name}")
+                };
+                let slot = child_dirs
+                    .entry(child_id)
+                    .or_insert_with(|| (dir_name.to_string(), 0, None));
+                slot.1 += 1;
+                if slot.2.is_none() {
+                    slot.2.clone_from(&entry.song.cover_art);
+                }
+            } else {
+                direct_songs.push(entry.song.clone());
+            }
+        }
+
+        let mut folders: Vec<FolderItem> = child_dirs
+            .into_iter()
+            .map(|(id, (name, count, cover_art))| FolderItem {
+                id,
+                name,
+                cover_art,
+                song_count: Some(count),
+            })
+            .collect();
+        folders.sort_by_key(|f| f.name.to_lowercase());
+        direct_songs.sort_by(|a, b| {
+            (
+                a.disc.unwrap_or(1),
+                a.track.unwrap_or(i32::MAX),
+                a.title.to_lowercase(),
+            )
+                .cmp(&(
+                    b.disc.unwrap_or(1),
+                    b.track.unwrap_or(i32::MAX),
+                    b.title.to_lowercase(),
+                ))
+        });
+
+        FolderListing {
+            id: prefix.to_string(),
+            name: prefix.rsplit('/').next().unwrap_or_default().to_string(),
+            folders,
+            songs: direct_songs,
         }
     }
 
